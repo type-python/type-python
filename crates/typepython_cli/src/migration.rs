@@ -28,6 +28,7 @@ pub(crate) struct MigrationReport {
     pub(crate) files: Vec<MigrationCoverageEntry>,
     pub(crate) directories: Vec<MigrationCoverageEntry>,
     pub(crate) high_impact_untyped_files: Vec<MigrationImpactEntry>,
+    pub(crate) framework_pattern_files: Vec<MigrationFrameworkPatternEntry>,
     pub(crate) diagnostic_baseline: Option<MigrationDiagnosticBaselineComparison>,
 }
 
@@ -74,6 +75,13 @@ pub(crate) struct MigrationImpactEntry {
     pub(crate) untyped_declarations: usize,
     pub(crate) dynamic_boundaries: usize,
     pub(crate) unknown_boundaries: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct MigrationFrameworkPatternEntry {
+    pub(crate) path: String,
+    pub(crate) frameworks: Vec<String>,
+    pub(crate) signals: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -295,8 +303,65 @@ pub(crate) fn build_migration_report(
         files: files.into_iter().map(|stats| stats.entry).collect(),
         directories: directory_entries,
         high_impact_untyped_files,
+        framework_pattern_files: framework_pattern_entries(config, syntax_trees),
         diagnostic_baseline: None,
     }
+}
+
+fn framework_pattern_entries(
+    config: &ConfigHandle,
+    syntax_trees: &[typepython_syntax::SyntaxTree],
+) -> Vec<MigrationFrameworkPatternEntry> {
+    let mut entries = syntax_trees
+        .iter()
+        .filter_map(|syntax| {
+            let signals = framework_pattern_signals(&syntax.source.text);
+            if signals.is_empty() {
+                return None;
+            }
+            let frameworks = signals
+                .iter()
+                .filter_map(|signal| {
+                    signal.split_once(':').map(|(framework, _)| framework.to_owned())
+                })
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            Some(MigrationFrameworkPatternEntry {
+                path: syntax
+                    .source
+                    .path
+                    .strip_prefix(&config.config_dir)
+                    .map(normalize_glob_path)
+                    .unwrap_or_else(|_| syntax.source.path.display().to_string()),
+                frameworks,
+                signals,
+            })
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    entries
+}
+
+fn framework_pattern_signals(source: &str) -> Vec<String> {
+    let patterns: &[(&str, &[&str])] = &[
+        ("pydantic", &["pydantic", "BaseModel", "Field("]),
+        ("fastapi", &["fastapi", "FastAPI", "APIRouter", "@app.", "@router."]),
+        ("django", &["django", "models.Model"]),
+        ("sqlalchemy", &["sqlalchemy", "Column(", "mapped_column", "DeclarativeBase"]),
+        ("celery", &["celery", "@task", ".task("]),
+        ("click", &["click", "@click."]),
+        ("typer", &["typer", "Typer", "@app.command"]),
+    ];
+    let mut signals = BTreeSet::new();
+    for (framework, needles) in patterns {
+        for needle in *needles {
+            if source.contains(needle) {
+                signals.insert(format!("{framework}:{needle}"));
+            }
+        }
+    }
+    signals.into_iter().collect()
 }
 
 pub(crate) fn build_migration_diagnostic_baseline(
@@ -757,6 +822,15 @@ fn print_migration_report(
                     entry.untyped_declarations,
                     entry.dynamic_boundaries,
                     entry.unknown_boundaries
+                );
+            }
+            println!("  framework pattern candidates:");
+            for entry in &report.framework_pattern_files {
+                println!(
+                    "    {}: frameworks={}, signals={}",
+                    entry.path,
+                    entry.frameworks.join(","),
+                    entry.signals.join(",")
                 );
             }
             if let Some(comparison) = &report.diagnostic_baseline {

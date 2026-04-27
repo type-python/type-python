@@ -108,6 +108,40 @@ fn build_migration_report_ranks_high_impact_untyped_files() {
 }
 
 #[test]
+fn build_migration_report_flags_framework_transform_candidates() {
+    let project_dir =
+        temp_project_dir("build_migration_report_flags_framework_transform_candidates");
+    let report = {
+        fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app/api.tpy"),
+            "from fastapi import FastAPI\nfrom pydantic import BaseModel, Field\n\napp = FastAPI()\n\nclass User(BaseModel):\n    id: int = Field(alias=\"user_id\")\n\n@app.get(\"/users/{user_id}\")\ndef read_user(user_id: int) -> User:\n    return User(id=user_id)\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let discovery = collect_source_paths(&config).expect("test setup should succeed");
+        let syntax_trees = load_syntax_trees(
+            &discovery.sources,
+            false,
+            &config.config.project.target_python.to_string(),
+        )
+        .expect("test setup should succeed");
+        build_migration_report(&config, &syntax_trees)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.framework_pattern_files.len(), 1);
+    let entry = &report.framework_pattern_files[0];
+    assert!(entry.path.ends_with("src/app/api.tpy"));
+    assert!(entry.frameworks.contains(&String::from("fastapi")));
+    assert!(entry.frameworks.contains(&String::from("pydantic")));
+    assert!(entry.signals.iter().any(|signal| signal == "pydantic:BaseModel"));
+    assert!(entry.signals.iter().any(|signal| signal == "fastapi:@app."));
+}
+
+#[test]
 fn migrate_command_parses_emit_stubs_flags() {
     let cli = Cli::parse_from([
         "typepython",
