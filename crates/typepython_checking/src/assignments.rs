@@ -625,6 +625,91 @@ impl Shape {
     pub(crate) fn field(&self, name: &str) -> Option<&ShapeField> {
         self.fields.iter().find(|field| field.name == name || field.public_alias == name)
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn partial(&self) -> Self {
+        self.with_projected_fields(self.fields.iter().cloned().map(|mut field| {
+            field.required = false;
+            field.has_default = true;
+            field.source_kind = ShapeFieldSourceKind::ProjectionGenerated;
+            field
+        }))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn required_fields(&self) -> Self {
+        self.with_projected_fields(self.fields.iter().cloned().map(|mut field| {
+            field.required = true;
+            field.has_default = false;
+            field.source_kind = ShapeFieldSourceKind::ProjectionGenerated;
+            field
+        }))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn readonly_fields(&self) -> Self {
+        self.with_projected_fields(self.fields.iter().cloned().map(|mut field| {
+            field.readonly = true;
+            field.source_kind = ShapeFieldSourceKind::ProjectionGenerated;
+            field
+        }))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn mutable_fields(&self) -> Self {
+        self.with_projected_fields(self.fields.iter().cloned().map(|mut field| {
+            field.readonly = false;
+            field.source_kind = ShapeFieldSourceKind::ProjectionGenerated;
+            field
+        }))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn pick(&self, names: &[&str]) -> Self {
+        let names = names.iter().copied().collect::<BTreeSet<_>>();
+        self.with_projected_fields(
+            self.fields
+                .iter()
+                .filter(move |field| {
+                    names.contains(field.name.as_str())
+                        || names.contains(field.public_alias.as_str())
+                })
+                .cloned()
+                .map(|mut field| {
+                    field.source_kind = ShapeFieldSourceKind::ProjectionGenerated;
+                    field
+                }),
+        )
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn omit(&self, names: &[&str]) -> Self {
+        let names = names.iter().copied().collect::<BTreeSet<_>>();
+        self.with_projected_fields(
+            self.fields
+                .iter()
+                .filter(move |field| {
+                    !names.contains(field.name.as_str())
+                        && !names.contains(field.public_alias.as_str())
+                })
+                .cloned()
+                .map(|mut field| {
+                    field.source_kind = ShapeFieldSourceKind::ProjectionGenerated;
+                    field
+                }),
+        )
+    }
+
+    fn with_projected_fields(&self, fields: impl IntoIterator<Item = ShapeField>) -> Self {
+        Self {
+            name: self.name.clone(),
+            source_kind: self.source_kind.clone(),
+            nominal_owner: self.nominal_owner.clone(),
+            fields: fields.into_iter().collect(),
+            closed: self.closed,
+            extra_items: self.extra_items.clone(),
+        }
+    }
 }
 
 pub(super) fn is_typed_dict_base_name(base: &str) -> bool {
