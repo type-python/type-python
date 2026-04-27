@@ -358,7 +358,7 @@ typepython compat --project . --profile library-portable
 
 ### `typepython api-diff`
 
-Compare two public typing surfaces and report conservative API drift. The first prototype accepts `.pyi` files or directories containing `.pyi` files; wheel, sdist, and source-directory normalization are reserved for the next implementation step.
+Compare two public typing surfaces and report conservative API drift. The prototype accepts `.pyi` files, directories containing `.pyi` files, wheels, and gzip-compressed sdists/tarballs.
 
 ```bash
 typepython api-diff <old> <new> [OPTIONS]
