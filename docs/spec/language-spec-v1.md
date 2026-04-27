@@ -893,6 +893,12 @@ When `T` is a `TypedDict` that inherits from other `TypedDict` declarations:
 - `Partial`, `Required_`, `Readonly`, and `Mutable` apply to all flattened items.
 - The result is a flat `TypedDict`-compatible type and does NOT preserve the original inheritance chain.
 
+#### 8.14.5 Internal Shape Model Direction
+
+Although Core v1 exposes these transforms only for `TypedDict`, implementations SHOULD model the source item set as a compiler-internal `Shape` with ordered fields, requiredness, readonly status, source spans, and emitted-name metadata. This internal representation is the extension point for future `data class`, standard `@dataclass`, `dataclass_transform`, and framework-transform projections.
+
+The existence of an internal `Shape` object does not make arbitrary class, protocol, or interface transforms public syntax. Applying `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, or `Required_` to non-`TypedDict` declarations remains deferred unless an implementation explicitly gates an experimental extension and emits checker-neutral `.pyi`.
+
 ### 8.15 Widened Types
 
 Literal expressions have immediate literal types per Section 9.2, but inference does not preserve literal precision in every binding site.

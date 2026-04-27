@@ -101,6 +101,8 @@ This is the prerequisite for extending utility transforms beyond `TypedDict`. Be
 
    Framework transform declarations should consume this shared shape model instead of introducing framework-specific field representations. Phase 1 should cover `TypedDict`, TypePython `data class`, standard `@dataclass`, `dataclass_transform`, and transformed framework classes while continuing to defer arbitrary class, protocol, and interface transforms until assignability rules are proven.
 
+   The accepted planning direction is `docs/rfcs/shape-model-phase-1.md`: introduce `Shape` and `ShapeField` as compiler-internal semantic objects, route current `TypedDict` transform expansion through those primitives first, preserve existing diagnostics, and only expose non-`TypedDict` projections behind an experimental gate once generated stubs remain checker-neutral.
+
 5. **Native modern emit for newer targets.**
    Once the target range extends beyond 3.12, the emitter can consider `type` statements and newer native syntax more aggressively. That work should remain target-aware and deterministic: modern emit must be a controlled alternate projection of the same declaration surface, not a semantic fork.
 
