@@ -8,7 +8,7 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use typepython_config::ConfigHandle;
-use typepython_diagnostics::{Diagnostic, DiagnosticReport};
+use typepython_diagnostics::{Diagnostic, DiagnosticReport, Severity};
 use typepython_emit::{InferredStubMode, generate_inferred_stub_source};
 use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
 
@@ -39,6 +39,8 @@ pub(crate) struct MigrationReport {
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub(crate) struct MigrationDiagnosticBaseline {
     pub(crate) version: u8,
+    #[serde(default)]
+    pub(crate) severity_overrides: BTreeMap<String, String>,
     pub(crate) diagnostics: Vec<MigrationDiagnosticBaselineEntry>,
 }
 
@@ -57,6 +59,7 @@ pub(crate) struct MigrationDiagnosticBaselineComparison {
     pub(crate) baseline_path: String,
     pub(crate) baseline_diagnostics: usize,
     pub(crate) current_diagnostics: usize,
+    pub(crate) blocking_new_diagnostics: usize,
     pub(crate) new_diagnostics: Vec<MigrationDiagnosticBaselineEntry>,
     pub(crate) resolved_diagnostics: Vec<MigrationDiagnosticBaselineEntry>,
 }
@@ -148,12 +151,25 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
     if args.no_new_diagnostics {
         match &baseline_comparison {
             Some(comparison) if comparison.new_diagnostics.is_empty() => {}
+            Some(comparison) if comparison.blocking_new_diagnostics == 0 => diagnostics.push(
+                Diagnostic::warning(
+                    "TPY6001",
+                    format!(
+                        "migration baseline gate found {} new diagnostic(s), all downgraded by severity overrides",
+                        comparison.new_diagnostics.len()
+                    ),
+                )
+                .with_note(format!(
+                    "baseline {} demoted these diagnostics below error severity",
+                    comparison.baseline_path
+                )),
+            ),
             Some(comparison) => diagnostics.push(
                 Diagnostic::error(
                     "TPY6001",
                     format!(
-                        "migration baseline gate found {} new diagnostic(s)",
-                        comparison.new_diagnostics.len()
+                        "migration baseline gate found {} blocking new diagnostic(s)",
+                        comparison.blocking_new_diagnostics
                     ),
                 )
                 .with_note(format!(
@@ -622,7 +638,11 @@ pub(crate) fn build_migration_diagnostic_baseline(
     entries.sort();
     entries.dedup();
 
-    MigrationDiagnosticBaseline { version: 1, diagnostics: entries }
+    MigrationDiagnosticBaseline {
+        version: 2,
+        severity_overrides: BTreeMap::new(),
+        diagnostics: entries,
+    }
 }
 
 pub(crate) fn compare_migration_diagnostic_baseline(
@@ -630,17 +650,56 @@ pub(crate) fn compare_migration_diagnostic_baseline(
     baseline: &MigrationDiagnosticBaseline,
     current: &MigrationDiagnosticBaseline,
 ) -> MigrationDiagnosticBaselineComparison {
-    let baseline_entries = baseline.diagnostics.iter().cloned().collect::<BTreeSet<_>>();
-    let current_entries = current.diagnostics.iter().cloned().collect::<BTreeSet<_>>();
-    let new_diagnostics = current_entries.difference(&baseline_entries).cloned().collect();
-    let resolved_diagnostics = baseline_entries.difference(&current_entries).cloned().collect();
+    let baseline_entries = baseline
+        .diagnostics
+        .iter()
+        .filter_map(|entry| {
+            apply_baseline_severity_override(entry.clone(), &baseline.severity_overrides)
+        })
+        .collect::<BTreeSet<_>>();
+    let current_entries = current
+        .diagnostics
+        .iter()
+        .filter_map(|entry| {
+            apply_baseline_severity_override(entry.clone(), &baseline.severity_overrides)
+        })
+        .collect::<BTreeSet<_>>();
+    let new_diagnostics: Vec<_> = current_entries.difference(&baseline_entries).cloned().collect();
+    let resolved_diagnostics: Vec<_> =
+        baseline_entries.difference(&current_entries).cloned().collect();
+    let blocking_new_diagnostics = new_diagnostics
+        .iter()
+        .filter(|entry| entry.severity == Severity::Error.to_string())
+        .count();
 
     MigrationDiagnosticBaselineComparison {
         baseline_path,
-        baseline_diagnostics: baseline.diagnostics.len(),
-        current_diagnostics: current.diagnostics.len(),
+        baseline_diagnostics: baseline_entries.len(),
+        current_diagnostics: current_entries.len(),
+        blocking_new_diagnostics,
         new_diagnostics,
         resolved_diagnostics,
+    }
+}
+
+fn apply_baseline_severity_override(
+    mut entry: MigrationDiagnosticBaselineEntry,
+    severity_overrides: &BTreeMap<String, String>,
+) -> Option<MigrationDiagnosticBaselineEntry> {
+    let Some(override_value) = severity_overrides.get(&entry.code) else {
+        return Some(entry);
+    };
+    match override_value.as_str() {
+        "ignore" => None,
+        "warning" => {
+            entry.severity = Severity::Warning.to_string();
+            Some(entry)
+        }
+        "error" => {
+            entry.severity = Severity::Error.to_string();
+            Some(entry)
+        }
+        _ => Some(entry),
     }
 }
 
