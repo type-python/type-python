@@ -101,6 +101,20 @@ class NativeTargetSmokeTests(unittest.TestCase):
         self.assertEqual(len(asserted_runtime), 1)
         self.assertEqual(asserted_outputs[0], asserted_runtime[0])
 
+    def test_framework_annotation_audit_summary_detects_expected_consumers(self) -> None:
+        payload = native_target_smoke.framework_annotation_audit_summary()
+
+        self.assertEqual(
+            set(payload["framework_annotation_consumers"]),
+            {
+                "fastapi.Depends",
+                "fastapi.route_decorator",
+                "pydantic.BaseModel",
+                "pydantic.Field",
+            },
+        )
+        self.assertTrue(payload["framework_annotation_safe"])
+
 
 if __name__ == "__main__":
     unittest.main()

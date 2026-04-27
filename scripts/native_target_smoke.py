@@ -10,7 +10,12 @@ import subprocess
 import sys
 import tempfile
 
-from typepython.annotation_compat import AnnotationFormat, get_annotations, supported_formats
+from typepython.annotation_compat import (
+    AnnotationFormat,
+    audit_source,
+    get_annotations,
+    supported_formats,
+)
 
 
 def run(command: list[str], cwd: pathlib.Path | None = None) -> None:
@@ -120,6 +125,23 @@ def assert_native_outputs(project_dir: pathlib.Path) -> None:
             raise SystemExit(f"native stub output is missing expected syntax: {rendered}")
 
 
+def framework_annotation_audit_summary() -> dict[str, object]:
+    audit = audit_source(
+        "from fastapi import Depends, FastAPI\n"
+        "from pydantic import BaseModel, Field\n\n"
+        "app = FastAPI()\n\n"
+        "class User(BaseModel):\n"
+        "    name: str = Field(alias='user_name')\n\n"
+        "@app.get('/users/{name}')\n"
+        "def read_user(name: str, current: str = Depends()) -> User:\n"
+        "    return User(name=name)\n"
+    )
+    return {
+        "framework_annotation_consumers": [consumer.value for consumer in audit.consumers],
+        "framework_annotation_safe": audit.safe_for_runtime_introspection,
+    }
+
+
 def assert_runtime_semantics(project_dir: pathlib.Path) -> None:
     build_root = project_dir / ".typepython" / "build"
     probe = """
@@ -139,8 +161,8 @@ try:
 except BaseException as error:
     explosive_error = type(error).__name__
 
-payload = {
-    "module_has_T": "T" in vars(module),
+    payload = {
+        "module_has_T": "T" in vars(module),
     "pair_type_name": type(module.Pair).__name__,
     "pair_type_module": type(module.Pair).__module__,
     "pair_type_params": [param.__name__ for param in module.Pair.__type_params__],
@@ -149,10 +171,11 @@ payload = {
     "pair_default_present": getattr(module.Pair.__type_params__[0], "__default__", None) is not None,
     "box_default_present": getattr(module.Box.__type_params__[0], "__default__", None) is not None,
     "function_default_present": getattr(module.first_pair.__type_params__[0], "__default__", None) is not None,
-    "scope_alias_type_name": type(module.Scope.Alias).__name__,
-    "scope_alias_resolves_nested": module.Scope.Alias.__value__ is module.Scope.Nested,
-    "explosive_error": explosive_error,
-}
+        "scope_alias_type_name": type(module.Scope.Alias).__name__,
+        "scope_alias_resolves_nested": module.Scope.Alias.__value__ is module.Scope.Nested,
+        "explosive_error": explosive_error,
+        **framework_annotation_audit_summary(),
+    }
 
 if sys.version_info >= (3, 14):
     payload["annotationlib_box_has_value"] = "default_value" in get_annotations(
@@ -210,6 +233,19 @@ print(json.dumps(payload))
             "native alias value was not lazily evaluated as expected "
             f"(got {payload['explosive_error']!r})"
         )
+    expected_framework_consumers = {
+        "fastapi.Depends",
+        "fastapi.route_decorator",
+        "pydantic.BaseModel",
+        "pydantic.Field",
+    }
+    if set(payload.get("framework_annotation_consumers", [])) != expected_framework_consumers:
+        raise SystemExit(
+            "framework annotation audit did not detect the expected consumer set "
+            f"(got {payload.get('framework_annotation_consumers')!r})"
+        )
+    if not payload.get("framework_annotation_safe"):
+        raise SystemExit("framework annotation audit unexpectedly flagged the smoke fixture as unsafe")
     if sys.version_info >= (3, 14):
         if not payload.get("annotationlib_box_has_value"):
             raise SystemExit("annotation compatibility layer did not expose Box annotations")
