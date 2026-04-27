@@ -84,6 +84,68 @@ fn check_reports_missing_required_typed_dict_key() {
 }
 
 #[test]
+fn resolve_known_shape_from_type_returns_shared_typed_dict_shape() {
+    let source_text = concat!(
+        "from typing import TypedDict\n",
+        "from typing_extensions import ReadOnly\n\n",
+        "class User(TypedDict, total=False):\n",
+        "    id: int\n",
+        "    name: ReadOnly[str]\n",
+    );
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+    let context = crate::CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
+
+    let shape =
+        crate::resolve_known_shape_from_type_with_context(&context, node, &graph.nodes, "User")
+            .expect("typed dict shape should resolve");
+
+    assert_eq!(shape.source_kind, crate::ShapeSourceKind::TypedDict);
+    assert_eq!(shape.fields.len(), 2);
+    assert!(shape.field("id").is_some());
+    assert!(shape.field("name").is_some_and(|field| field.readonly));
+    assert!(shape.has_unbounded_extra_keys());
+}
+
+#[test]
+fn shared_shape_can_wrap_dataclass_transform_fields() {
+    let shape = crate::Shape::from_dataclass_transform_class_shape(
+        "User",
+        &crate::DataclassTransformClassShape {
+            fields: vec![crate::DataclassTransformFieldShape {
+                name: String::from("name"),
+                keyword_name: String::from("display_name"),
+                annotation: String::from("str"),
+                annotation_expr: typepython_syntax::TypeExpr::parse("str"),
+                required: true,
+                kw_only: false,
+            }],
+            frozen: true,
+            has_explicit_init: false,
+        },
+        crate::ShapeSourceKind::DataclassTransform,
+    );
+
+    assert_eq!(shape.source_kind, crate::ShapeSourceKind::DataclassTransform);
+    assert_eq!(shape.fields.len(), 1);
+    assert!(shape.field("name").is_some_and(|field| field.public_alias == "display_name"));
+    assert!(shape.field("display_name").is_some_and(|field| field.readonly));
+}
+
+#[test]
 fn check_conformance_baseline_common_library_stub_surface() {
     let result = check_temp_project_sources(&[
         (
