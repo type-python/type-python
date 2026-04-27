@@ -1,12 +1,16 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
+    io::Read,
     path::{Path, PathBuf},
     process::ExitCode,
 };
 
 use anyhow::{Context, Result};
+use flate2::read::GzDecoder;
 use serde::Serialize;
+use tar::Archive as TarArchive;
+use zip::ZipArchive;
 
 use crate::{
     CommandSummary,
@@ -173,6 +177,13 @@ impl ApiSurfaceDiffReport {
 }
 
 fn collect_surface(root: &Path) -> Result<BTreeMap<String, BTreeMap<String, PublicSymbol>>> {
+    if is_zip_artifact(root) {
+        return collect_zip_surface(root);
+    }
+    if is_tar_gz_artifact(root) {
+        return collect_tar_gz_surface(root);
+    }
+
     let mut files = Vec::new();
     collect_pyi_files(root, &mut files)?;
     let mut modules = BTreeMap::new();
@@ -183,6 +194,82 @@ fn collect_surface(root: &Path) -> Result<BTreeMap<String, BTreeMap<String, Publ
         modules.insert(module, public_symbols(&source));
     }
     Ok(modules)
+}
+
+fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, PublicSymbol>>> {
+    let file =
+        fs::File::open(path).with_context(|| format!("unable to open {}", path.display()))?;
+    let mut archive = ZipArchive::new(file)
+        .with_context(|| format!("unable to read zip artifact {}", path.display()))?;
+    let mut modules = BTreeMap::new();
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).with_context(|| {
+            format!("unable to read entry {index} from zip artifact {}", path.display())
+        })?;
+        let entry_name = file.name().to_owned();
+        if !entry_name.ends_with(".pyi") || entry_name.contains(".dist-info/") {
+            continue;
+        }
+        let mut source = String::new();
+        file.read_to_string(&mut source).with_context(|| {
+            format!("unable to read stub entry {entry_name} from {}", path.display())
+        })?;
+        modules.insert(module_name_from_archive_entry(&entry_name), public_symbols(&source));
+    }
+    Ok(modules)
+}
+
+fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, PublicSymbol>>> {
+    let file =
+        fs::File::open(path).with_context(|| format!("unable to open {}", path.display()))?;
+    let decoder = GzDecoder::new(file);
+    let mut archive = TarArchive::new(decoder);
+    let mut modules = BTreeMap::new();
+    for entry in archive
+        .entries()
+        .with_context(|| format!("unable to read tar artifact {}", path.display()))?
+    {
+        let mut entry =
+            entry.with_context(|| format!("unable to read tar entry in {}", path.display()))?;
+        let entry_path = entry
+            .path()
+            .with_context(|| format!("unable to read tar entry path in {}", path.display()))?
+            .to_string_lossy()
+            .into_owned();
+        if !entry_path.ends_with(".pyi") {
+            continue;
+        }
+        let mut source = String::new();
+        entry.read_to_string(&mut source).with_context(|| {
+            format!("unable to read stub entry {entry_path} from {}", path.display())
+        })?;
+        modules.insert(module_name_from_archive_entry(&entry_path), public_symbols(&source));
+    }
+    Ok(modules)
+}
+
+fn is_zip_artifact(path: &Path) -> bool {
+    matches!(path.extension().and_then(|ext| ext.to_str()), Some("whl" | "zip"))
+}
+
+fn is_tar_gz_artifact(path: &Path) -> bool {
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+    name.ends_with(".tar.gz") || name.ends_with(".tgz") || name.ends_with(".sdist")
+}
+
+fn module_name_from_archive_entry(entry_name: &str) -> String {
+    let mut parts = Path::new(entry_name)
+        .with_extension("")
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    if parts.first().is_some_and(|part| part.contains('-')) && parts.len() > 1 {
+        parts.remove(0);
+    }
+    if parts.last().map(String::as_str) == Some("__init__") {
+        parts.pop();
+    }
+    if parts.is_empty() { String::from("__init__") } else { parts.join(".") }
 }
 
 fn collect_pyi_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<()> {

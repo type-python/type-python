@@ -51,6 +51,40 @@ fn diff_api_surfaces_reports_added_removed_and_changed_symbols() {
 }
 
 #[test]
+fn diff_api_surfaces_accepts_wheel_and_sdist_stub_inputs() {
+    let project_dir = temp_project_dir("diff_api_surfaces_accepts_wheel_and_sdist_stub_inputs");
+    let report = {
+        let old_wheel = project_dir.join("demo-0.1.0-py3-none-any.whl");
+        let new_sdist = project_dir.join("demo-0.2.0.tar.gz");
+        write_zip_archive(
+            &old_wheel,
+            &[("app/__init__.pyi", "def parse(value: str) -> int: ...\nclass Removed: ...\n")],
+        );
+        write_tar_gz_archive(
+            &new_sdist,
+            "demo-0.2.0",
+            &[("app/__init__.pyi", "def parse(value: bytes) -> int: ...\nclass Added: ...\n")],
+        );
+
+        diff_api_surfaces(&old_wheel, &new_sdist).expect("api diff should read archives")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.changed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["parse"]
+    );
+    assert_eq!(
+        report.added.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["Added"]
+    );
+    assert_eq!(
+        report.removed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["Removed"]
+    );
+}
+
+#[test]
 fn run_api_diff_fails_for_likely_breaking_changes() {
     let project_dir = temp_project_dir("run_api_diff_fails_for_likely_breaking_changes");
     let result = {
