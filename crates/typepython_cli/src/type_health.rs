@@ -44,6 +44,7 @@ pub(crate) struct TypePackageHealth {
     pub(crate) public_any_returns: usize,
     pub(crate) public_any_attributes: usize,
     pub(crate) overload_any_fallbacks: usize,
+    pub(crate) public_untyped_attributes: usize,
     pub(crate) runtime_version: Option<String>,
     pub(crate) stub_version: Option<String>,
     pub(crate) stub_version_matches_runtime: Option<bool>,
@@ -214,6 +215,7 @@ fn package_health(path: &Path) -> Result<TypePackageHealth> {
         public_any_returns: public_any.returns,
         public_any_attributes: public_any.attributes,
         overload_any_fallbacks: public_any.overload_fallbacks,
+        public_untyped_attributes: public_any.untyped_attributes,
         runtime_version,
         stub_version,
         stub_version_matches_runtime,
@@ -225,6 +227,7 @@ struct PublicAnyCounts {
     returns: usize,
     attributes: usize,
     overload_fallbacks: usize,
+    untyped_attributes: usize,
 }
 
 fn public_any_counts(path: &Path) -> Result<PublicAnyCounts> {
@@ -261,6 +264,8 @@ fn collect_public_any_counts(path: &Path, counts: &mut PublicAnyCounts) -> Resul
             }
         } else if public_attribute_uses_any(line) {
             counts.attributes += 1;
+        } else if public_attribute_is_untyped(line) {
+            counts.untyped_attributes += 1;
         }
         if !stripped.starts_with('@') && !stripped.is_empty() {
             next_signature_is_overload = false;
@@ -317,6 +322,25 @@ fn public_attribute_uses_any(line: &str) -> bool {
         return false;
     }
     starts_with_any_annotation(annotation.trim_start())
+}
+
+fn public_attribute_is_untyped(line: &str) -> bool {
+    let stripped = line.trim_start();
+    if stripped.starts_with('@')
+        || stripped.starts_with("class ")
+        || stripped.starts_with("def ")
+        || stripped.starts_with("async def ")
+        || stripped.starts_with("from ")
+        || stripped.starts_with("import ")
+        || stripped.contains(':')
+    {
+        return false;
+    }
+    let Some((name, _)) = stripped.split_once('=') else {
+        return false;
+    };
+    let name = name.trim();
+    !name.is_empty() && !name.starts_with('_') && !name.contains(' ') && !name.contains('(')
 }
 
 fn distribution_version(site_root: &Path, distribution_name: &str) -> Result<Option<String>> {
@@ -383,6 +407,10 @@ fn write_type_lock(path: &Path, report: &TypeHealthReport, inputs: &TypeLockInpu
         rendered.push_str(&format!("public_any_attributes = {}\n", package.public_any_attributes));
         rendered
             .push_str(&format!("overload_any_fallbacks = {}\n", package.overload_any_fallbacks));
+        rendered.push_str(&format!(
+            "public_untyped_attributes = {}\n",
+            package.public_untyped_attributes
+        ));
         if let Some(version) = &package.runtime_version {
             rendered.push_str(&format!("runtime_version = \"{}\"\n", toml_string(version)));
         }
@@ -406,7 +434,7 @@ fn print_type_health_text(report: &TypeHealthReport) {
     println!("  score: {}", report.score);
     for package in &report.packages {
         println!(
-            "  package: {} py.typed={} stub_only={} partial={} public_any_returns={} public_any_attributes={} overload_any_fallbacks={} runtime_version={} stub_version={} version_match={}",
+            "  package: {} py.typed={} stub_only={} partial={} public_any_returns={} public_any_attributes={} overload_any_fallbacks={} public_untyped_attributes={} runtime_version={} stub_version={} version_match={}",
             package.name,
             package.has_py_typed,
             package.is_stub_only,
@@ -414,6 +442,7 @@ fn print_type_health_text(report: &TypeHealthReport) {
             package.public_any_returns,
             package.public_any_attributes,
             package.overload_any_fallbacks,
+            package.public_untyped_attributes,
             package.runtime_version.as_deref().unwrap_or("?"),
             package.stub_version.as_deref().unwrap_or("?"),
             package
