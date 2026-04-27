@@ -279,6 +279,7 @@ typepython verify [OPTIONS]
 - Wheel/sdist structure validation
 - `py.typed` marker presence
 - Packaging metadata consistency: `Requires-Python` and `typing_extensions` declarations keep pace with emitted native/backport requirements
+- Runtime-annotation compatibility audit: warns when emitted `.py` contains Python 3.14+ annotation consumers or nested local-scope annotations that make runtime introspection fragile
 
 By default, `verify` stays on structural checks and does not import emitted runtime modules. In that safe mode, TypePython may ignore a project-controlled `resolution.python_executable` and fall back to the host default interpreter for structural helper probes and interpreter-backed package discovery. Pass `--unsafe-runtime-imports` if you also want runtime-visible public-name parity checks for cases like dynamically computed `__all__` and verification against the configured interpreter environment.
 
