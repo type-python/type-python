@@ -1798,18 +1798,71 @@ fn verify_emitted_declaration_surface(runtime_path: &Path, stub_path: &Path) -> 
         .filter(|entry| surface_entry_is_exported(entry, &authoritative_names))
         .collect::<BTreeSet<_>>();
 
+    declaration_surface_drift_diagnostic(runtime_path, stub_path, &runtime_surface, &stub_surface)
+}
+
+fn declaration_surface_drift_diagnostic(
+    runtime_path: &Path,
+    stub_path: &Path,
+    runtime_surface: &BTreeSet<SurfaceEntry>,
+    stub_surface: &BTreeSet<SurfaceEntry>,
+) -> Option<Diagnostic> {
     if runtime_surface == stub_surface {
-        None
-    } else {
-        Some(Diagnostic::error(
-            "TPY5003",
-            format!(
-                "emitted runtime/stub declaration surface differs between `{}` and `{}`",
-                runtime_path.display(),
-                stub_path.display()
-            ),
-        ))
+        return None;
     }
+
+    let runtime_by_name = runtime_surface
+        .iter()
+        .map(|entry| ((entry.owner.clone(), entry.name.clone(), entry.kind), entry))
+        .collect::<BTreeMap<_, _>>();
+    let stub_by_name = stub_surface
+        .iter()
+        .map(|entry| ((entry.owner.clone(), entry.name.clone(), entry.kind), entry))
+        .collect::<BTreeMap<_, _>>();
+
+    let added = stub_by_name
+        .iter()
+        .filter(|(key, _)| !runtime_by_name.contains_key(*key))
+        .map(|(_, entry)| display_surface_entry(entry))
+        .collect::<Vec<_>>();
+    let removed = runtime_by_name
+        .iter()
+        .filter(|(key, _)| !stub_by_name.contains_key(*key))
+        .map(|(_, entry)| display_surface_entry(entry))
+        .collect::<Vec<_>>();
+    let changed = runtime_by_name
+        .iter()
+        .filter_map(|(key, runtime_entry)| {
+            let stub_entry = stub_by_name.get(key)?;
+            (runtime_entry.legacy_detail != stub_entry.legacy_detail).then(|| {
+                format!(
+                    "{}: runtime=`{}` stub=`{}`",
+                    display_surface_entry(runtime_entry),
+                    runtime_entry.legacy_detail,
+                    stub_entry.legacy_detail
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let mut diagnostic = Diagnostic::error(
+        "TPY5003",
+        format!(
+            "emitted runtime/stub declaration surface differs between `{}` and `{}`",
+            runtime_path.display(),
+            stub_path.display()
+        ),
+    );
+    if !added.is_empty() {
+        diagnostic = diagnostic.with_note(format!("type surface only: {}", added.join(", ")));
+    }
+    if !removed.is_empty() {
+        diagnostic = diagnostic.with_note(format!("runtime only: {}", removed.join(", ")));
+    }
+    if !changed.is_empty() {
+        diagnostic = diagnostic.with_note(format!("changed members: {}", changed.join("; ")));
+    }
+    Some(diagnostic)
 }
 
 fn verify_stub_syntax_rules(
