@@ -6,7 +6,7 @@ FUZZ_TARGETS ?= parser type_expr lowering_stub
 FUZZ_SMOKE_SECONDS ?= 30
 FUZZ_LONG_SECONDS ?= 300
 
-.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check repo-contracts bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
+.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -59,6 +59,9 @@ stdlib-baseline-check:
 conformance-check:
 	$(PYTHON) scripts/conformance_report.py --check
 
+diagnostic-coverage-check:
+	$(PYTHON) scripts/diagnostic_test_coverage.py --check
+
 repo-contracts:
 	$(PYTHON) -m unittest scripts/test_repo_contracts.py scripts/test_downstream_checker_matrix.py
 
@@ -89,4 +92,4 @@ snapshot-review:
 docs:
 	RUSTDOCFLAGS="$(RUSTDOCFLAGS)" $(CARGO) doc --workspace --no-deps
 
-ci: fmt-check lint test-fast test-cli-verification test-downstream-checkers stdlib-baseline-check conformance-check repo-contracts bench-check package-check
+ci: fmt-check lint test-fast test-cli-verification test-downstream-checkers stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench-check package-check

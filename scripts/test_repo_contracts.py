@@ -119,6 +119,20 @@ class RepoContractsTests(unittest.TestCase):
             check=True,
         )
 
+    def test_diagnostic_coverage_report_is_generated_and_checked(self) -> None:
+        makefile = read_text("Makefile")
+        report = read_text("docs/diagnostic-test-coverage.md")
+
+        self.assertIn("diagnostic-coverage-check:", makefile)
+        self.assertIn("scripts/diagnostic_test_coverage.py --check", makefile)
+        self.assertIn("Diagnostic Test Coverage", report)
+        self.assertIn("TPY4001", report)
+        subprocess.run(
+            [sys.executable, "scripts/diagnostic_test_coverage.py", "--check"],
+            cwd=REPO_ROOT,
+            check=True,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
