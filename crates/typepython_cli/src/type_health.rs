@@ -3,6 +3,7 @@ use std::{fs, path::Path, process::Command as ProcessCommand, process::ExitCode}
 use anyhow::{Context, Result};
 use serde::Serialize;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
+use typepython_target::PythonTarget;
 
 use crate::{
     CommandSummary,
@@ -52,8 +53,11 @@ pub(crate) struct TypePackageHealth {
 
 pub(crate) fn run_type_health(args: TypeHealthArgs) -> Result<ExitCode> {
     let config = load_project(args.run.project.as_ref())?;
-    let mut report =
-        build_type_health_report(&config.config_dir, &config.config.resolution.type_roots)?;
+    let mut report = build_type_health_report_for_target(
+        &config.config_dir,
+        &config.config.resolution.type_roots,
+        config.config.project.target_python,
+    )?;
     let lock_inputs = collect_type_lock_inputs(&config.config_dir, &config.config)?;
     if args.write_lock {
         let lock_path = config.config_dir.join(".typepython/type-lock.toml");
@@ -102,9 +106,10 @@ pub(crate) fn run_type_health(args: TypeHealthArgs) -> Result<ExitCode> {
     Ok(exit_code(&diagnostics))
 }
 
-pub(crate) fn build_type_health_report(
+pub(crate) fn build_type_health_report_for_target(
     config_dir: &Path,
     type_roots: &[String],
+    target_python: PythonTarget,
 ) -> Result<TypeHealthReport> {
     let mut packages = Vec::new();
     for root in type_roots {
@@ -118,7 +123,7 @@ pub(crate) fn build_type_health_report(
             let path = entry?.path();
             let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
             if path.is_dir() && !file_name.ends_with(".dist-info") {
-                packages.push(package_health(&path)?);
+                packages.push(package_health(&path, target_python)?);
             }
         }
     }
@@ -195,7 +200,7 @@ fn checker_version(checker: &str) -> Option<String> {
     if stdout.is_empty() { (!stderr.is_empty()).then_some(stderr) } else { Some(stdout) }
 }
 
-fn package_health(path: &Path) -> Result<TypePackageHealth> {
+fn package_health(path: &Path, target_python: PythonTarget) -> Result<TypePackageHealth> {
     let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
     let py_typed = path.join("py.typed");
     let marker = fs::read_to_string(&py_typed).unwrap_or_default();
@@ -205,7 +210,7 @@ fn package_health(path: &Path) -> Result<TypePackageHealth> {
     let stub_version = distribution_version(parent, &format!("{package_name}-stubs"))?;
     let stub_version_matches_runtime =
         runtime_version.as_ref().zip(stub_version.as_ref()).map(|(runtime, stub)| runtime == stub);
-    let public_any = public_any_counts(path)?;
+    let public_any = public_any_counts(path, target_python)?;
     Ok(TypePackageHealth {
         name: package_name,
         root: path.display().to_string(),
@@ -230,18 +235,22 @@ struct PublicAnyCounts {
     untyped_attributes: usize,
 }
 
-fn public_any_counts(path: &Path) -> Result<PublicAnyCounts> {
+fn public_any_counts(path: &Path, target_python: PythonTarget) -> Result<PublicAnyCounts> {
     let mut counts = PublicAnyCounts::default();
-    collect_public_any_counts(path, &mut counts)?;
+    collect_public_any_counts(path, target_python, &mut counts)?;
     Ok(counts)
 }
 
-fn collect_public_any_counts(path: &Path, counts: &mut PublicAnyCounts) -> Result<()> {
+fn collect_public_any_counts(
+    path: &Path,
+    target_python: PythonTarget,
+    counts: &mut PublicAnyCounts,
+) -> Result<()> {
     if path.is_dir() {
         for entry in
             fs::read_dir(path).with_context(|| format!("unable to read {}", path.display()))?
         {
-            collect_public_any_counts(&entry?.path(), counts)?;
+            collect_public_any_counts(&entry?.path(), target_python, counts)?;
         }
         return Ok(());
     }

@@ -55,8 +55,12 @@ fn build_type_health_report_detects_pep561_and_stub_packages() {
         .expect("stub metadata should be written");
         fs::create_dir_all(project_dir.join("site/untyped")).expect("untyped package should exist");
 
-        build_type_health_report(&project_dir, &[String::from("site")])
-            .expect("report should build")
+        build_type_health_report_for_target(
+            &project_dir,
+            &[String::from("site")],
+            typepython_target::PythonTarget::default(),
+        )
+        .expect("report should build")
     };
     remove_temp_project_dir(&project_dir);
 

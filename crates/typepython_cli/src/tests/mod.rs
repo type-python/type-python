@@ -15,7 +15,7 @@ pub(super) use super::pipeline::{
     persist_pipeline_analysis_state, run_build_like_command, run_pipeline, run_with_pipeline,
     should_emit_build_outputs, watch_targets, write_incremental_snapshot,
 };
-pub(super) use super::type_health::{build_type_health_report, run_type_health};
+pub(super) use super::type_health::{build_type_health_report_for_target, run_type_health};
 pub(super) use super::verification::{
     CheckerAllowlistEntry, SuppliedArtifactKind, SuppliedVerifyArtifact, TypePortabilityReport,
     allowlisted_checker_diagnostic, expand_checker_list, external_checker_invocation,
