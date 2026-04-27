@@ -31,6 +31,7 @@ pub(crate) struct MigrationReport {
     pub(crate) directories: Vec<MigrationCoverageEntry>,
     pub(crate) public_api_files: Vec<MigrationPublicApiEntry>,
     pub(crate) untyped_import_files: Vec<MigrationUntypedImportEntry>,
+    pub(crate) inline_suppression_files: Vec<MigrationInlineSuppressionEntry>,
     pub(crate) high_impact_untyped_files: Vec<MigrationImpactEntry>,
     pub(crate) framework_pattern_files: Vec<MigrationFrameworkPatternEntry>,
     pub(crate) diagnostic_baseline: Option<MigrationDiagnosticBaselineComparison>,
@@ -107,6 +108,19 @@ pub(crate) struct MigrationUntypedImportEntry {
     pub(crate) path: String,
     pub(crate) untyped_import_count: usize,
     pub(crate) imports: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct MigrationInlineSuppressionEntry {
+    pub(crate) path: String,
+    pub(crate) suppression_count: usize,
+    pub(crate) directives: Vec<MigrationInlineSuppressionDirective>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct MigrationInlineSuppressionDirective {
+    pub(crate) line: usize,
+    pub(crate) codes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -387,6 +401,12 @@ pub(crate) fn build_migration_report(
         .filter(|entry| entry.untyped_import_count > 0)
         .collect::<Vec<_>>();
     untyped_import_files.sort_by(|left, right| left.path.cmp(&right.path));
+    let mut inline_suppression_files = syntax_trees
+        .iter()
+        .map(|syntax| migration_inline_suppression_entry(config, syntax))
+        .filter(|entry| entry.suppression_count > 0)
+        .collect::<Vec<_>>();
+    inline_suppression_files.sort_by(|left, right| left.path.cmp(&right.path));
 
     MigrationReport {
         total_declarations: total.declarations,
@@ -399,6 +419,7 @@ pub(crate) fn build_migration_report(
         directories: directory_entries,
         public_api_files,
         untyped_import_files,
+        inline_suppression_files,
         high_impact_untyped_files,
         framework_pattern_files: framework_pattern_entries(config, syntax_trees),
         diagnostic_baseline: None,
@@ -557,6 +578,30 @@ fn migration_untyped_import_entry(
     imports.sort();
 
     MigrationUntypedImportEntry { path, untyped_import_count: imports.len(), imports }
+}
+
+fn migration_inline_suppression_entry(
+    config: &ConfigHandle,
+    syntax: &typepython_syntax::SyntaxTree,
+) -> MigrationInlineSuppressionEntry {
+    let directives = syntax
+        .type_ignore_directives
+        .iter()
+        .map(|directive| MigrationInlineSuppressionDirective {
+            line: directive.line,
+            codes: directive.codes.clone(),
+        })
+        .collect::<Vec<_>>();
+    MigrationInlineSuppressionEntry {
+        path: syntax
+            .source
+            .path
+            .strip_prefix(&config.config_dir)
+            .map(normalize_glob_path)
+            .unwrap_or_else(|_| syntax.source.path.display().to_string()),
+        suppression_count: directives.len(),
+        directives,
+    }
 }
 
 fn import_resolves_to_known_module(
@@ -1163,6 +1208,22 @@ fn print_migration_report(
                     entry.path,
                     entry.untyped_import_count,
                     entry.imports.join(",")
+                );
+            }
+            println!("  inline suppression directives:");
+            for entry in &report.inline_suppression_files {
+                let directives = entry
+                    .directives
+                    .iter()
+                    .map(|directive| match &directive.codes {
+                        Some(codes) => format!("line {} [{}]", directive.line, codes.join(",")),
+                        None => format!("line {} [all]", directive.line),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                println!(
+                    "    {}: {} suppression(s) -> {}",
+                    entry.path, entry.suppression_count, directives
                 );
             }
             println!("  framework pattern candidates:");
