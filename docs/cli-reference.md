@@ -10,7 +10,7 @@ typepython [COMMAND] [OPTIONS]
 
 Project-oriented commands use these shared options:
 
-- `check`, `build`, `watch`, `verify`, and `migrate` accept `--project PATH` and `--format text|json`
+- `check`, `build`, `watch`, `verify`, `compat`, and `migrate` accept `--project PATH` and `--format text|json`
 - `clean` accepts `--project PATH`
 - `lsp` accepts `--project PATH` and speaks JSON-RPC over stdio instead of CLI JSON output
 - `init` has its own command-specific flags
@@ -290,6 +290,42 @@ typepython verify --project . --wheel dist/my_package-1.0.0-py3-none-any.whl
 
 # Also import emitted runtime modules for public-name parity checks
 typepython verify --project . --unsafe-runtime-imports
+```
+
+---
+
+### `typepython compat`
+
+Validate emitted artifacts across downstream Python type checkers. This command builds the project, runs the same structural artifact checks as `verify`, then invokes the configured checker matrix against the generated build tree.
+
+```bash
+typepython compat [OPTIONS]
+```
+
+| Flag                     | Description                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------- |
+| `--project PATH`         | Project directory                                                                           |
+| `--format FORMAT`        | Output format: `text` or `json`                                                             |
+| `--checkers LIST`        | Comma-separated checker list; default `all` expands to `mypy,pyright,ty`                    |
+| `--strict-portability`   | Keep portability failures build-blocking for every configured checker rejection              |
+
+Supported checker names use checker-specific CLI conventions:
+
+- `mypy` -> `mypy --python-version <target> <build-dir>`
+- `pyright` -> `pyright --pythonversion <target> <build-dir>`
+- `ty` -> `ty check --no-progress --python-version <target> <build-dir>`
+- optional local tools: `pyrefly`, `basedpyright`, and `zuban`
+
+Unknown checker values are treated as custom command paths and receive the generated build directory as their only argument.
+
+**Example:**
+
+```bash
+# Run the default stable portability matrix
+typepython compat --project .
+
+# Run one checker while iterating locally
+typepython compat --project . --checkers pyright
 ```
 
 ---
