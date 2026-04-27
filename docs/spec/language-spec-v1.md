@@ -1400,6 +1400,36 @@ All other left-hand-side expressions are invalid assignment targets and MUST be 
 - If transform semantics depend on runtime-computed metadata or framework-specific behavior beyond the standardized `dataclass_transform` contract, the checker MUST NOT guess. Strict mode SHOULD diagnose or mark only the affected synthesized behavior as a `dynamic` boundary; non-strict mode MAY degrade at that boundary.
 - `data class` remains the built-in TypePython sugar for the standard-library `@dataclass` case.
 
+**Framework transform declarations beyond Core v1:**
+
+Future framework transform support is specified by the framework-transform RFC (`docs/rfcs/framework-transform-declarations.md`) and extends the decorator/dataclass-transform model without changing Core v1 conformance.
+
+- A **transform provider** is a statically known declaration, sidecar entry, or adapter/config entry that describes how a framework changes a target declaration's static shape.
+- A **transform target** is the function, method, class, base, or metaclass application affected by a transform provider.
+- The **runtime declaration** is the Python declaration that remains executable in emitted `.py`; the **static shape** is the transformed public surface emitted in authoritative `.pyi`.
+- A **generated member** is a field, method, descriptor-backed attribute, manager, validator, metadata object, or other declaration synthesized into the static shape.
+- A **generated constructor** is an explicit synthetic `__init__` signature produced from field and transform metadata.
+- A **replacement callable/object** is the static object that replaces a raw function surface after a decorator, including non-callable objects such as task handles.
+- **Emitted stub authority** means downstream consumers rely on the generated `.pyi`; external checkers do not need TypePython-specific transform syntax or plugins.
+
+Transform declarations MAY be authored inline in `.tpy`, supplied by sidecar `.tpyi`, or loaded from a declarative adapter/config source. Regardless of source location, implementations SHOULD lower declarations into one metadata model that records provider identity, target kind, source span, generic parameter preservation, and strict/non-strict fallback behavior.
+
+At minimum, the framework-transform metadata model SHOULD represent:
+
+- field collection and flattened field ordering
+- constructor generation and constructor-participation rules
+- alias handling and keyword-only fields
+- required vs optional fields
+- readonly/frozen fields
+- descriptor-backed attributes
+- method and class-attribute synthesis
+- function-to-object replacement
+- generic preservation through `ParamSpec`, `TypeVar`, and `TypeVarTuple`
+
+If transform metadata depends on runtime-only values, implementations MUST NOT guess. Strict mode SHOULD produce deterministic diagnostics pointing at the provider or target declaration; non-strict mode MAY preserve the raw declaration surface or mark only the unknown portion as a `dynamic` boundary.
+
+Emitted `.py` MUST preserve ordinary framework runtime behavior unless a future feature explicitly opts into runtime code generation. Emitted `.pyi` SHOULD expose the transformed public surface using only standard Python typing constructs so mypy, pyright, ty, IDEs, and packaging tools can consume the artifacts without checker plugins.
+
 ### 10.6 Match Statements
 
 **Supported patterns for exhaustiveness:**

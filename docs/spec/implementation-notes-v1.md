@@ -92,10 +92,14 @@ The following are the highest-value follow-on directions after Core v1 stabilize
    Real-world packages rely on conditional imports and environment-sensitive declaration surfaces. A future version should define how `if TYPE_CHECKING:`, Python-version checks, and platform predicates influence binding, public summaries, and emitted stubs.
 
 3. **Non-callable decorator replacement semantics.**
-   Core v1 covers deterministic callable-to-callable decorator transforms. A future version should define how decorators that replace a declaration with a non-callable object, a rewritten class surface, or runtime-computed metadata participate in checking and `.pyi` emission without reintroducing plugin-specific behavior.
+Core v1 covers deterministic callable-to-callable decorator transforms. A future version should define how decorators that replace a declaration with a non-callable object, a rewritten class surface, or runtime-computed metadata participate in checking and `.pyi` emission without reintroducing plugin-specific behavior.
+
+   The accepted planning direction is `docs/rfcs/framework-transform-declarations.md`: preserve the runtime framework decorator in emitted `.py`, emit the transformed object or class shape in authoritative `.pyi`, and diagnose transform metadata that depends on runtime-only values instead of guessing. The first concrete vertical slice should model a toy task decorator whose static result is a non-callable `Task[P, R]` while preserving `ParamSpec` and return-type information for task methods.
 
 4. **A first-class record or shape model.**
-   This is the prerequisite for extending utility transforms beyond `TypedDict`. Before transforms such as `Partial` or `Pick` are allowed on classes, interfaces, or protocols, the language needs an explicit notion of field presence, field mutability, and constructor participation that is not overloaded onto nominal classes.
+This is the prerequisite for extending utility transforms beyond `TypedDict`. Before transforms such as `Partial` or `Pick` are allowed on classes, interfaces, or protocols, the language needs an explicit notion of field presence, field mutability, and constructor participation that is not overloaded onto nominal classes.
+
+   Framework transform declarations should consume this shared shape model instead of introducing framework-specific field representations. Phase 1 should cover `TypedDict`, TypePython `data class`, standard `@dataclass`, `dataclass_transform`, and transformed framework classes while continuing to defer arbitrary class, protocol, and interface transforms until assignability rules are proven.
 
 5. **Native modern emit for newer targets.**
    Once the target range extends beyond 3.12, the emitter can consider `type` statements and newer native syntax more aggressively. That work should remain target-aware and deterministic: modern emit must be a controlled alternate projection of the same declaration surface, not a semantic fork.
