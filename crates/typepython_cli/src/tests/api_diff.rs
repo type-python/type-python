@@ -63,6 +63,7 @@ fn diff_api_surfaces_reports_added_removed_and_changed_symbols() {
             String::from("Added public class `Added` to module `app`."),
         ]
     );
+    assert_eq!(report.semver_recommendation, "major");
 }
 
 #[test]
@@ -127,6 +128,57 @@ fn diff_api_surfaces_reports_py_typed_metadata_regression() {
             "Runtime typing metadata changed: `py.typed` was removed; downstream tools may no longer treat the package as typed."
         )]
     );
+    assert_eq!(report.semver_recommendation, "major");
+}
+
+#[test]
+fn diff_api_surfaces_recommends_minor_for_additive_changes() {
+    let project_dir = temp_project_dir("diff_api_surfaces_recommends_minor_for_additive_changes");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(old_dir.join("app.pyi"), "def parse(value: str) -> int: ...\n")
+            .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            "def parse(value: str) -> int: ...\ndef format(value: int) -> str: ...\n",
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should succeed")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.added.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["format"]
+    );
+    assert_eq!(report.semver_recommendation, "minor");
+}
+
+#[test]
+fn diff_api_surfaces_recommends_patch_for_unchanged_surfaces() {
+    let project_dir = temp_project_dir("diff_api_surfaces_recommends_patch_for_unchanged_surfaces");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(old_dir.join("app.pyi"), "def parse(value: str) -> int: ...\n")
+            .expect("old stub should be written");
+        fs::write(new_dir.join("app.pyi"), "def parse(value: str) -> int: ...\n")
+            .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should succeed")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+    assert_eq!(report.semver_recommendation, "patch");
 }
 
 #[test]

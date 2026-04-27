@@ -27,6 +27,7 @@ pub(crate) struct ApiSurfaceDiffReport {
     pub(crate) removed: Vec<ApiSurfaceChange>,
     pub(crate) changed: Vec<ApiSurfaceChange>,
     pub(crate) release_notes: Vec<String>,
+    pub(crate) semver_recommendation: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
@@ -156,6 +157,7 @@ pub(crate) fn diff_api_surfaces(old: &Path, new: &Path) -> Result<ApiSurfaceDiff
         }
     }
     let release_notes = release_note_snippets(&removed, &changed, &added);
+    let semver_recommendation = semver_recommendation(&removed, &changed, &added);
     Ok(ApiSurfaceDiffReport {
         old: old.display().to_string(),
         new: new.display().to_string(),
@@ -163,7 +165,22 @@ pub(crate) fn diff_api_surfaces(old: &Path, new: &Path) -> Result<ApiSurfaceDiff
         removed,
         changed,
         release_notes,
+        semver_recommendation,
     })
+}
+
+fn semver_recommendation(
+    removed: &[ApiSurfaceChange],
+    changed: &[ApiSurfaceChange],
+    added: &[ApiSurfaceChange],
+) -> String {
+    if !removed.is_empty() || !changed.is_empty() {
+        String::from("major")
+    } else if !added.is_empty() {
+        String::from("minor")
+    } else {
+        String::from("patch")
+    }
 }
 
 fn release_note_snippets(
@@ -452,6 +469,7 @@ fn print_api_diff_text(report: &ApiSurfaceDiffReport) {
     println!("api-diff:");
     println!("  old: {}", report.old);
     println!("  new: {}", report.new);
+    println!("  semver recommendation: {}", report.semver_recommendation);
     for change in &report.removed {
         println!("  removed: {}.{} ({})", change.module, change.symbol, change.kind);
     }
