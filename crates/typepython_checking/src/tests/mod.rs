@@ -1117,6 +1117,24 @@ fn check_with_binding_metadata_uses_bound_dataclass_transform_facts_without_read
     );
 }
 
+#[test]
+fn binding_metadata_carries_framework_transform_channel() {
+    let source = SourceFile {
+        path: PathBuf::from("virtual/framework.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("framework"),
+        text: String::from("def celery_task(fn):\n    return fn\n"),
+    };
+    let tree = parse_with_options(source, ParseOptions::default());
+
+    let binding = bind(&tree);
+
+    assert!(
+        binding.surface_facts.framework_transform_module_info.providers.is_empty(),
+        "framework transform metadata should have an explicit bound channel even before parser collection lands",
+    );
+}
+
 pub(super) fn type_relation_node_with_base_child() -> ModuleNode {
     ModuleNode {
         module_path: PathBuf::from("<type-relations>"),

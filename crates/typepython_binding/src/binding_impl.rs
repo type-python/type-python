@@ -391,6 +391,7 @@ fn bind_module_surface_facts(tree: &SyntaxTree) -> ModuleSurfaceFacts {
         direct_method_signatures,
         decorator_transform_module_info: collected.decorator_transform,
         dataclass_transform_module_info: collected.dataclass_transform,
+        framework_transform_module_info: collected.framework_transform,
     }
 }
 

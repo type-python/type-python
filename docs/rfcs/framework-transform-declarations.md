@@ -93,6 +93,10 @@ generated_members = ["objects: toyframework.Manager[Self]"]
 
 The exact parser syntax may evolve, but the metadata model below is the compatibility target.
 
+## Implementation status
+
+The compiler now has an empty-by-default framework transform metadata channel alongside the existing `dataclass_transform` and callable-decorator transform metadata. `FrameworkTransformModuleInfo` records provider declarations through `FrameworkTransformProviderSite`, `FrameworkTransformProviderKind`, `FrameworkTransformCapability`, and `FrameworkTransformFallback`; binding summaries preserve that channel so later phases can consume provider metadata without reopening source files. Parser collection and semantic application are intentionally still future work.
+
 ## Minimal metadata model
 
 Every transform provider records:

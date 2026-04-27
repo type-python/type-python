@@ -58,6 +58,7 @@ pub struct ModuleSurfaceFacts {
         BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>>,
     pub decorator_transform_module_info: typepython_syntax::DecoratorTransformModuleInfo,
     pub dataclass_transform_module_info: typepython_syntax::DataclassTransformModuleInfo,
+    pub framework_transform_module_info: typepython_syntax::FrameworkTransformModuleInfo,
 }
 
 /// Wrapper around a parsed type expression captured from bound source text.
