@@ -429,6 +429,7 @@ typepython migrate [OPTIONS]
 - Reports declaration coverage and dynamic/unknown boundary counts
 - Includes per-file and per-directory coverage entries
 - Identifies high-impact files with many untyped declarations
+- Flags framework-heavy files, such as Pydantic/FastAPI/Django/SQLAlchemy/Celery/Click/Typer patterns, that may benefit from transform declarations
 - Can compare current diagnostics against a JSON baseline so CI can enforce no new type debt
 
 **Diagnostic baselines** (`--baseline`, `--write-baseline`, `--no-new-diagnostics`):
