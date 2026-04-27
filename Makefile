@@ -3,7 +3,7 @@ MSRV ?= 1.94.0
 PYTHON ?= python3
 RUSTDOCFLAGS ?= -D warnings
 
-.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers stdlib-baseline-check conformance-check repo-contracts bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
+.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers coverage stdlib-baseline-check conformance-check repo-contracts bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -35,6 +35,14 @@ test-cli-verification:
 
 test-downstream-checkers:
 	$(PYTHON) scripts/downstream_checker_smoke.py
+
+coverage:
+	mkdir -p coverage
+	$(CARGO) llvm-cov clean --workspace
+	$(CARGO) llvm-cov --workspace --all-features --no-report
+	$(CARGO) llvm-cov report --workspace --all-features --lcov --output-path coverage/lcov.info
+	$(CARGO) llvm-cov report --workspace --all-features --text --output-path coverage/coverage.txt
+	$(CARGO) llvm-cov report --workspace --all-features --html
 
 stdlib-baseline-check:
 	$(PYTHON) scripts/refresh_stdlib_stubs.py --check
