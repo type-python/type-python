@@ -85,6 +85,30 @@ fn diff_api_surfaces_accepts_wheel_and_sdist_stub_inputs() {
 }
 
 #[test]
+fn diff_api_surfaces_reports_py_typed_metadata_regression() {
+    let project_dir = temp_project_dir("diff_api_surfaces_reports_py_typed_metadata_regression");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(old_dir.join("app")).expect("old package should be created");
+        fs::create_dir_all(new_dir.join("app")).expect("new package should be created");
+        fs::write(old_dir.join("app/__init__.pyi"), "def parse(value: str) -> int: ...\n")
+            .expect("old stub should be written");
+        fs::write(new_dir.join("app/__init__.pyi"), "def parse(value: str) -> int: ...\n")
+            .expect("new stub should be written");
+        fs::write(old_dir.join("app/py.typed"), "").expect("old marker should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should detect metadata drift")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.removed.len(), 1);
+    assert_eq!(report.removed[0].module, "__typing_metadata__");
+    assert_eq!(report.removed[0].symbol, "py.typed");
+    assert_eq!(report.removed[0].classification, "runtime-breaking signal");
+}
+
+#[test]
 fn run_api_diff_fails_for_likely_breaking_changes() {
     let project_dir = temp_project_dir("run_api_diff_fails_for_likely_breaking_changes");
     let result = {

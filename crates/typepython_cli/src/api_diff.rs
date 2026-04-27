@@ -44,6 +44,9 @@ struct PublicSymbol {
     signature: String,
 }
 
+const TYPING_METADATA_MODULE: &str = "__typing_metadata__";
+const PY_TYPED_SYMBOL: &str = "py.typed";
+
 pub(crate) fn run_api_diff(args: ApiDiffArgs) -> Result<ExitCode> {
     let report = diff_api_surfaces(&args.old, &args.new)?;
     let mut diagnostics = DiagnosticReport::default();
@@ -131,7 +134,11 @@ pub(crate) fn diff_api_surfaces(old: &Path, new: &Path) -> Result<ApiSurfaceDiff
                     kind: old_symbol.kind.clone(),
                     old_signature: Some(old_symbol.signature.clone()),
                     new_signature: None,
-                    classification: String::from("likely type-breaking"),
+                    classification: if old_symbol.kind == "metadata" {
+                        String::from("runtime-breaking signal")
+                    } else {
+                        String::from("likely type-breaking")
+                    },
                 }),
                 (Some(old_symbol), Some(new_symbol)) if old_symbol != new_symbol => {
                     changed.push(ApiSurfaceChange {
@@ -193,6 +200,9 @@ fn collect_surface(root: &Path) -> Result<BTreeMap<String, BTreeMap<String, Publ
             .with_context(|| format!("unable to read {}", path.display()))?;
         modules.insert(module, public_symbols(&source));
     }
+    if contains_py_typed_marker(root)? {
+        insert_py_typed_marker(&mut modules);
+    }
     Ok(modules)
 }
 
@@ -207,6 +217,10 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
             format!("unable to read entry {index} from zip artifact {}", path.display())
         })?;
         let entry_name = file.name().to_owned();
+        if entry_name.ends_with("py.typed") {
+            insert_py_typed_marker(&mut modules);
+            continue;
+        }
         if !entry_name.ends_with(".pyi") || entry_name.contains(".dist-info/") {
             continue;
         }
@@ -236,6 +250,10 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
             .with_context(|| format!("unable to read tar entry path in {}", path.display()))?
             .to_string_lossy()
             .into_owned();
+        if entry_path.ends_with("py.typed") {
+            insert_py_typed_marker(&mut modules);
+            continue;
+        }
         if !entry_path.ends_with(".pyi") {
             continue;
         }
@@ -246,6 +264,33 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
         modules.insert(module_name_from_archive_entry(&entry_path), public_symbols(&source));
     }
     Ok(modules)
+}
+
+fn contains_py_typed_marker(root: &Path) -> Result<bool> {
+    if root.is_file() {
+        return Ok(root.file_name().and_then(|name| name.to_str()) == Some("py.typed"));
+    }
+    for entry in fs::read_dir(root).with_context(|| format!("unable to read {}", root.display()))? {
+        let path = entry?.path();
+        if path.is_dir() {
+            if contains_py_typed_marker(&path)? {
+                return Ok(true);
+            }
+        } else if path.file_name().and_then(|name| name.to_str()) == Some("py.typed") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn insert_py_typed_marker(modules: &mut BTreeMap<String, BTreeMap<String, PublicSymbol>>) {
+    modules.entry(String::from(TYPING_METADATA_MODULE)).or_default().insert(
+        String::from(PY_TYPED_SYMBOL),
+        PublicSymbol {
+            kind: String::from("metadata"),
+            signature: String::from("py.typed: present"),
+        },
+    );
 }
 
 fn is_zip_artifact(path: &Path) -> bool {
