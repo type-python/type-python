@@ -83,6 +83,29 @@ class AnnotationCompatTests(unittest.TestCase):
         self.assertEqual({finding.code for finding in audit.findings}, {"TPY-A001"})
         self.assertIn("local scope", audit.findings[0].message)
 
+    def test_audit_source_detects_fastapi_and_pydantic_consumers(self) -> None:
+        audit = annotation_compat.audit_source(
+            "from fastapi import Depends, FastAPI\n"
+            "from pydantic import BaseModel, Field\n\n"
+            "app = FastAPI()\n\n"
+            "class User(BaseModel):\n"
+            "    name: str = Field(alias='user_name')\n\n"
+            "@app.get('/users/{name}')\n"
+            "def read_user(name: str, current: str = Depends()) -> User:\n"
+            "    return User(name=name)\n"
+        )
+
+        self.assertEqual(
+            audit.consumers,
+            (
+                annotation_compat.AnnotationConsumer.FASTAPI_DEPENDS,
+                annotation_compat.AnnotationConsumer.FASTAPI_ROUTE_DECORATOR,
+                annotation_compat.AnnotationConsumer.PYDANTIC_BASEMODEL,
+                annotation_compat.AnnotationConsumer.PYDANTIC_FIELD,
+            ),
+        )
+        self.assertTrue(audit.safe_for_runtime_introspection)
+
 
 if __name__ == "__main__":
     unittest.main()

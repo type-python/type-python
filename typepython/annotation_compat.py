@@ -34,6 +34,10 @@ class AnnotationConsumer(str, Enum):
     INSPECT_GET_ANNOTATIONS = "inspect.get_annotations"
     ANNOTATIONLIB_GET_ANNOTATIONS = "annotationlib.get_annotations"
     DATACLASS_DECORATOR = "dataclasses.dataclass"
+    FASTAPI_ROUTE_DECORATOR = "fastapi.route_decorator"
+    FASTAPI_DEPENDS = "fastapi.Depends"
+    PYDANTIC_BASEMODEL = "pydantic.BaseModel"
+    PYDANTIC_FIELD = "pydantic.Field"
 
 
 @dataclass(frozen=True)
@@ -185,12 +189,22 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         self._scope_depth = 0
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        for decorator in node.decorator_list:
+            consumer = _decorator_consumer(decorator)
+            if consumer is not None:
+                self.consumers.add(consumer)
         self._visit_callable_or_class(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        for decorator in node.decorator_list:
+            consumer = _decorator_consumer(decorator)
+            if consumer is not None:
+                self.consumers.add(consumer)
         self._visit_callable_or_class(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        if any(_is_pydantic_base(base) for base in node.bases):
+            self.consumers.add(AnnotationConsumer.PYDANTIC_BASEMODEL)
         for decorator in node.decorator_list:
             consumer = _decorator_consumer(decorator)
             if consumer is not None:
@@ -269,6 +283,10 @@ def _call_consumer(func: ast.expr) -> AnnotationConsumer | None:
         return AnnotationConsumer.INSPECT_GET_ANNOTATIONS
     if dotted == "annotationlib.get_annotations":
         return AnnotationConsumer.ANNOTATIONLIB_GET_ANNOTATIONS
+    if dotted in {"Depends", "fastapi.Depends"}:
+        return AnnotationConsumer.FASTAPI_DEPENDS
+    if dotted in {"Field", "pydantic.Field"}:
+        return AnnotationConsumer.PYDANTIC_FIELD
     return None
 
 
@@ -276,7 +294,32 @@ def _decorator_consumer(decorator: ast.expr) -> AnnotationConsumer | None:
     dotted = _dotted_name(decorator.func if isinstance(decorator, ast.Call) else decorator)
     if dotted in {"dataclass", "dataclasses.dataclass"}:
         return AnnotationConsumer.DATACLASS_DECORATOR
+    if _is_fastapi_route_decorator_name(dotted):
+        return AnnotationConsumer.FASTAPI_ROUTE_DECORATOR
     return None
+
+
+def _is_pydantic_base(expr: ast.expr) -> bool:
+    dotted = _dotted_name(expr)
+    return dotted in {"BaseModel", "pydantic.BaseModel"}
+
+
+def _is_fastapi_route_decorator_name(dotted: str | None) -> bool:
+    if dotted is None:
+        return False
+    route_suffixes = {
+        "get",
+        "post",
+        "put",
+        "delete",
+        "patch",
+        "options",
+        "head",
+        "websocket",
+        "api_route",
+    }
+    suffix = dotted.rsplit(".", 1)[-1]
+    return suffix in route_suffixes
 
 
 def _dotted_name(expr: ast.expr) -> str | None:
