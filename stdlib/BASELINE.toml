@@ -11,6 +11,8 @@ baseline = "Accepts native type aliases and inline type parameters used by Pytho
 
 [bundled_stdlib]
 source = "typeshed-derived bundled snapshot"
+upstream_repository = "https://github.com/python/typeshed"
+typeshed_commit = "68517355a3269be407bde20fea8fd66af2dc4241"
 version_index = "stdlib/VERSIONS"
 target_range = "3.10-3.14"
 evidence_modules = [

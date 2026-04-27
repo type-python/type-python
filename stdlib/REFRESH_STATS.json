@@ -1,0 +1,10 @@
+{
+  "missing_version_entries": [],
+  "schema_version": 1,
+  "stale_version_entries": [],
+  "stdlib_bytes": 2865392,
+  "stdlib_files": 752,
+  "stdlib_sha256": "927023866400ef3cc991521fa89f827fc16132cfef3d3f48530e5780cdb4587c",
+  "typeshed_commit": "68517355a3269be407bde20fea8fd66af2dc4241",
+  "version_entries": 329
+}
