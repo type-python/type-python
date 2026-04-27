@@ -59,6 +59,7 @@ fn run_verify_bootstraps_outputs_after_clean_project() {
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: Vec::new(),
+            checker_preset: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should succeed");
@@ -117,6 +118,7 @@ fn run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled() {
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: Vec::new(),
+            checker_preset: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should succeed");
@@ -158,6 +160,7 @@ fn run_verify_invokes_external_checker_on_emitted_output() {
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: vec![checker_path.display().to_string()],
+            checker_preset: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should succeed with a passing checker");
@@ -194,6 +197,7 @@ fn run_verify_reports_external_checker_failure() {
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: vec![checker_path.display().to_string()],
+            checker_preset: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should complete with checker diagnostics")
@@ -224,6 +228,7 @@ fn run_verify_reports_python_companion_stub_signature_mismatch() {
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: Vec::new(),
+            checker_preset: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should run")
@@ -263,6 +268,7 @@ fn run_verify_reports_python_companion_stub_signature_mismatch_in_wheel() {
             wheels: vec![wheel_path],
             sdists: Vec::new(),
             checkers: Vec::new(),
+            checker_preset: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should run")
@@ -298,6 +304,7 @@ fn run_verify_skips_runtime_import_probes_by_default() {
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: Vec::new(),
+            checker_preset: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should run")
@@ -335,6 +342,7 @@ fn run_verify_reports_runtime_import_failure_when_unsafe_runtime_imports_enabled
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: Vec::new(),
+            checker_preset: None,
             unsafe_runtime_imports: true,
         })
         .expect("verify should run")
@@ -383,6 +391,7 @@ fn run_verify_ignores_project_python_executable_by_default() {
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: Vec::new(),
+            checker_preset: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should run")
@@ -3165,6 +3174,8 @@ fn verify_command_parses_supplied_artifact_flags() {
         "dist/pkg.tar.gz",
         "--checker",
         "pyright",
+        "--checker-preset",
+        "all",
     ]);
 
     let super::Command::Verify(args) = cli.command else {
@@ -3172,6 +3183,7 @@ fn verify_command_parses_supplied_artifact_flags() {
     };
     let supplied = supplied_verify_artifacts(&args);
     assert_eq!(args.checkers, vec![String::from("pyright")]);
+    assert_eq!(args.checker_preset, Some(String::from("all")));
     assert!(args.unsafe_runtime_imports);
     assert_eq!(supplied.len(), 2);
     assert!(supplied.iter().any(|artifact| {
@@ -3182,4 +3194,21 @@ fn verify_command_parses_supplied_artifact_flags() {
         matches!(artifact.kind, SuppliedArtifactKind::Sdist)
             && artifact.path == Path::new("dist/pkg.tar.gz")
     }));
+}
+
+#[test]
+fn verify_checker_preset_expands_and_deduplicates_with_explicit_checkers() {
+    let args = VerifyArgs {
+        run: RunArgs { project: None, format: OutputFormat::Json },
+        wheels: Vec::new(),
+        sdists: Vec::new(),
+        checkers: vec![String::from("pyright")],
+        checker_preset: Some(String::from("all")),
+        unsafe_runtime_imports: false,
+    };
+
+    assert_eq!(
+        verify_checker_invocations(&args).expect("checker preset should expand"),
+        vec![String::from("mypy"), String::from("pyright"), String::from("ty")],
+    );
 }
