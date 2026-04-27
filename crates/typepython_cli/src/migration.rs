@@ -25,8 +25,11 @@ pub(crate) struct MigrationReport {
     pub(crate) known_declarations: usize,
     pub(crate) total_dynamic_boundaries: usize,
     pub(crate) total_unknown_boundaries: usize,
+    pub(crate) public_api_exports: usize,
+    pub(crate) known_public_api_exports: usize,
     pub(crate) files: Vec<MigrationCoverageEntry>,
     pub(crate) directories: Vec<MigrationCoverageEntry>,
+    pub(crate) public_api_files: Vec<MigrationPublicApiEntry>,
     pub(crate) high_impact_untyped_files: Vec<MigrationImpactEntry>,
     pub(crate) framework_pattern_files: Vec<MigrationFrameworkPatternEntry>,
     pub(crate) diagnostic_baseline: Option<MigrationDiagnosticBaselineComparison>,
@@ -82,6 +85,15 @@ pub(crate) struct MigrationFrameworkPatternEntry {
     pub(crate) path: String,
     pub(crate) frameworks: Vec<String>,
     pub(crate) signals: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct MigrationPublicApiEntry {
+    pub(crate) path: String,
+    pub(crate) public_exports: usize,
+    pub(crate) known_public_exports: usize,
+    pub(crate) completeness_percent: f64,
+    pub(crate) incomplete_exports: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -295,17 +307,137 @@ pub(crate) fn build_migration_report(
             .then_with(|| left.path.cmp(&right.path))
     });
 
+    let mut public_api_files = syntax_trees
+        .iter()
+        .map(|syntax| migration_public_api_entry(config, syntax))
+        .filter(|entry| entry.public_exports > 0)
+        .collect::<Vec<_>>();
+    public_api_files.sort_by(|left, right| left.path.cmp(&right.path));
+    let public_api_exports = public_api_files.iter().map(|entry| entry.public_exports).sum();
+    let known_public_api_exports =
+        public_api_files.iter().map(|entry| entry.known_public_exports).sum();
+
     MigrationReport {
         total_declarations: total.declarations,
         known_declarations: total.known_declarations,
         total_dynamic_boundaries: total.dynamic_boundaries,
         total_unknown_boundaries: total.unknown_boundaries,
+        public_api_exports,
+        known_public_api_exports,
         files: files.into_iter().map(|stats| stats.entry).collect(),
         directories: directory_entries,
+        public_api_files,
         high_impact_untyped_files,
         framework_pattern_files: framework_pattern_entries(config, syntax_trees),
         diagnostic_baseline: None,
     }
+}
+
+fn migration_public_api_entry(
+    config: &ConfigHandle,
+    syntax: &typepython_syntax::SyntaxTree,
+) -> MigrationPublicApiEntry {
+    let mut public_exports = 0usize;
+    let mut known_public_exports = 0usize;
+    let mut incomplete_exports = Vec::new();
+
+    for statement in &syntax.statements {
+        match statement {
+            typepython_syntax::SyntaxStatement::TypeAlias(statement)
+                if is_public_name(&statement.name) =>
+            {
+                public_exports += 1;
+                let (dynamic_count, unknown_count) = count_boundary_tokens(&statement.value);
+                if !statement.value.is_empty() && dynamic_count == 0 && unknown_count == 0 {
+                    known_public_exports += 1;
+                } else {
+                    incomplete_exports.push(statement.name.clone());
+                }
+            }
+            typepython_syntax::SyntaxStatement::Interface(statement)
+            | typepython_syntax::SyntaxStatement::DataClass(statement)
+            | typepython_syntax::SyntaxStatement::SealedClass(statement)
+            | typepython_syntax::SyntaxStatement::ClassDef(statement)
+                if is_public_name(&statement.name) =>
+            {
+                public_exports += 1;
+                let class_known = statement.bases.iter().all(|base| {
+                    let (dynamic_count, unknown_count) = count_boundary_tokens(base);
+                    dynamic_count == 0 && unknown_count == 0
+                });
+                if class_known {
+                    known_public_exports += 1;
+                } else {
+                    incomplete_exports.push(statement.name.clone());
+                }
+            }
+            typepython_syntax::SyntaxStatement::OverloadDef(statement)
+                if is_public_name(&statement.name) =>
+            {
+                public_exports += 1;
+                let (known, _, _) = function_signature_coverage(
+                    &statement.params,
+                    statement.returns.as_deref(),
+                    false,
+                );
+                if known {
+                    known_public_exports += 1;
+                } else {
+                    incomplete_exports.push(statement.name.clone());
+                }
+            }
+            typepython_syntax::SyntaxStatement::FunctionDef(statement)
+                if is_public_name(&statement.name) =>
+            {
+                public_exports += 1;
+                let (known, _, _) = function_signature_coverage(
+                    &statement.params,
+                    statement.returns.as_deref(),
+                    false,
+                );
+                if known {
+                    known_public_exports += 1;
+                } else {
+                    incomplete_exports.push(statement.name.clone());
+                }
+            }
+            typepython_syntax::SyntaxStatement::Value(statement) => {
+                let (annotation_known, _, _) = known_type_slot(
+                    statement.annotation.as_deref().or(statement.rendered_value_type().as_deref()),
+                );
+                for name in &statement.names {
+                    if !is_public_name(name) {
+                        continue;
+                    }
+                    public_exports += 1;
+                    if annotation_known {
+                        known_public_exports += 1;
+                    } else {
+                        incomplete_exports.push(name.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    incomplete_exports.sort();
+    MigrationPublicApiEntry {
+        path: syntax
+            .source
+            .path
+            .strip_prefix(&config.config_dir)
+            .map(normalize_glob_path)
+            .unwrap_or_else(|_| syntax.source.path.display().to_string()),
+        public_exports,
+        known_public_exports,
+        completeness_percent: coverage_percent(known_public_exports, public_exports),
+        incomplete_exports,
+    }
+}
+
+fn is_public_name(name: &str) -> bool {
+    !name.starts_with('_')
 }
 
 fn framework_pattern_entries(
@@ -788,6 +920,12 @@ fn print_migration_report(
             println!("  migration known declarations: {}", report.known_declarations);
             println!("  migration dynamic boundaries: {}", report.total_dynamic_boundaries);
             println!("  migration unknown boundaries: {}", report.total_unknown_boundaries);
+            println!(
+                "  migration public API completeness: {}/{} known ({:.1}%)",
+                report.known_public_api_exports,
+                report.public_api_exports,
+                coverage_percent(report.known_public_api_exports, report.public_api_exports)
+            );
             println!("  file coverage:");
             for entry in &report.files {
                 println!(
@@ -822,6 +960,21 @@ fn print_migration_report(
                     entry.untyped_declarations,
                     entry.dynamic_boundaries,
                     entry.unknown_boundaries
+                );
+            }
+            println!("  public API completeness by file:");
+            for entry in &report.public_api_files {
+                println!(
+                    "    {}: {}/{} known ({:.1}%), incomplete={}",
+                    entry.path,
+                    entry.known_public_exports,
+                    entry.public_exports,
+                    entry.completeness_percent,
+                    if entry.incomplete_exports.is_empty() {
+                        String::from("-")
+                    } else {
+                        entry.incomplete_exports.join(",")
+                    }
                 );
             }
             println!("  framework pattern candidates:");
