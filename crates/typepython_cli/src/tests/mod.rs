@@ -19,9 +19,10 @@ pub(super) use super::type_health::{build_type_health_report, run_type_health};
 pub(super) use super::verification::{
     CheckerAllowlistEntry, SuppliedArtifactKind, SuppliedVerifyArtifact, TypePortabilityReport,
     allowlisted_checker_diagnostic, expand_checker_list, external_checker_invocation, run_verify,
-    stub_portability_diagnostics, supplied_verify_artifacts, type_portability_report,
-    type_portability_score, verify_build_artifacts, verify_checker_invocations,
-    verify_packaged_artifacts, verify_publication_metadata, verify_runtime_public_name_parity,
+    runtime_annotation_compatibility_diagnostics, stub_portability_diagnostics,
+    supplied_verify_artifacts, type_portability_report, type_portability_score,
+    verify_build_artifacts, verify_checker_invocations, verify_packaged_artifacts,
+    verify_publication_metadata, verify_runtime_public_name_parity,
     verify_runtime_public_name_parity_for_artifact,
 };
 pub(super) use super::{

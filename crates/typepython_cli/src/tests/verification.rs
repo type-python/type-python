@@ -3072,6 +3072,68 @@ fn verify_runtime_public_name_parity_reports_runtime_import_failure() {
 }
 
 #[test]
+fn runtime_annotation_compatibility_diagnostics_warns_for_py314_consumers() {
+    let project_dir =
+        temp_project_dir("runtime_annotation_compatibility_diagnostics_warns_for_py314_consumers");
+    let diagnostics = {
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\ntarget_python = \"3.14\"\n",
+        )
+        .expect("test setup should succeed");
+        let runtime_path = project_dir.join("app.py");
+        fs::write(
+            &runtime_path,
+            "import typing\n\nclass User:\n    name: str\n\ndef inspect_user() -> None:\n    typing.get_type_hints(User)\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        runtime_annotation_compatibility_diagnostics(
+            &config,
+            &runtime_path,
+            PythonTarget::PYTHON_3_14,
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let rendered = DiagnosticReport { diagnostics: diagnostics.clone() }.as_text();
+    assert!(rendered.contains("TPY5004"), "{rendered}");
+    assert!(rendered.contains("deferred annotations"), "{rendered}");
+    assert!(rendered.contains("typing.get_type_hints"), "{rendered}");
+}
+
+#[test]
+fn runtime_annotation_compatibility_diagnostics_warns_for_local_scope_annotations() {
+    let project_dir = temp_project_dir(
+        "runtime_annotation_compatibility_diagnostics_warns_for_local_scope_annotations",
+    );
+    let diagnostics = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        let runtime_path = project_dir.join("app.py");
+        fs::write(
+            &runtime_path,
+            "def outer():\n    class Local:\n        pass\n    def build(value: Local) -> 'Local':\n        return value\n    return build\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        runtime_annotation_compatibility_diagnostics(
+            &config,
+            &runtime_path,
+            PythonTarget::PYTHON_3_10,
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let rendered = DiagnosticReport { diagnostics: diagnostics.clone() }.as_text();
+    assert!(rendered.contains("TPY5004"), "{rendered}");
+    assert!(rendered.contains("local scope"), "{rendered}");
+    assert!(rendered.contains("TPY-A001"), "{rendered}");
+}
+
+#[test]
 fn verify_runtime_module_importability_accepts_relative_output_root() {
     let project_dir =
         temp_project_dir("verify_runtime_module_importability_accepts_relative_output_root");
