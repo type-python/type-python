@@ -133,6 +133,21 @@ class RepoContractsTests(unittest.TestCase):
             check=True,
         )
 
+    def test_insta_snapshots_are_limited_to_emission_golden_outputs(self) -> None:
+        allowed_prefixes = (
+            "crates/typepython_emit/src/snapshots/",
+            "crates/typepython_lowering/src/snapshots/",
+        )
+        snapshot_paths = sorted(
+            path.relative_to(REPO_ROOT).as_posix() for path in REPO_ROOT.glob("**/*.snap")
+        )
+
+        self.assertTrue(snapshot_paths, "expected committed insta snapshots")
+        disallowed = [
+            path for path in snapshot_paths if not path.startswith(allowed_prefixes)
+        ]
+        self.assertEqual(disallowed, [])
+
 
 if __name__ == "__main__":
     unittest.main()
