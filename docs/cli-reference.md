@@ -373,6 +373,7 @@ The report classifies:
 - removed public symbols as `likely type-breaking`
 - changed public signatures as `unknown risk`
 - added public symbols as `source-compatible`
+- removed `py.typed` metadata as a `runtime-breaking signal`
 
 **Example:**
 
