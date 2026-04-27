@@ -199,6 +199,9 @@ make test-cli-verification
 # Checker-backed end-to-end smoke suite (.tpy -> build -> mypy/pyright/ty)
 make test-downstream-checkers
 
+# Workspace coverage report (requires `cargo install cargo-llvm-cov` or CI's install action)
+make coverage
+
 # Tests for a specific crate
 cargo test -p typepython-checking
 
@@ -289,6 +292,16 @@ interface Closeable:
 
 The CLI crate (`typepython_cli`) contains end-to-end tests that exercise the full pipeline. These tests create temporary project directories with `typepython.toml` and `.tpy` source files, then run the full init/check/build/verify flow.
 
+### Coverage
+
+Coverage uses [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov). The local `make coverage` target cleans old coverage state, runs the full workspace test suite once, and writes:
+
+- `coverage/lcov.info` for CI dashboards
+- `coverage/coverage.txt` for quick terminal/artifact review
+- `target/llvm-cov/html/` for a browsable report
+
+The GitHub Actions `coverage` job uploads those three outputs as the `rust-coverage` artifact. Coverage thresholds are intentionally not enforced yet; establish minimums only after the baseline stabilizes.
+
 ## Makefile Targets
 
 | Target                            | Command                                                                                        | Description                           |
@@ -300,6 +313,7 @@ The CLI crate (`typepython_cli`) contains end-to-end tests that exercise the ful
 | `make msrv-check`                 | `rustup toolchain install 1.94.0 --profile minimal` + `cargo +1.94.0 check --workspace`      | Verify the declared workspace MSRV    |
 | `make lint`                       | `cargo clippy --workspace --all-targets -- -D warnings`                                        | Lint with clippy                      |
 | `make test`                       | `cargo test --workspace`                                                                       | Run all tests                         |
+| `make coverage`                   | `cargo llvm-cov ...`                                                                           | Generate Rust coverage artifacts      |
 | `make docs`                       | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`                                   | Generate rustdoc                      |
 | `make package-check`              | `python3 -m build --sdist --wheel` + `python3 -m twine check dist/*`                           | Validate Python package artifacts     |
 | `make bump-version VERSION=0.0.8` | `python3 scripts/bump_version.py 0.0.8`                                                        | Sync Rust and Python package versions |
