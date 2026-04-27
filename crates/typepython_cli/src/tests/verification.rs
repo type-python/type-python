@@ -3248,6 +3248,22 @@ fn type_portability_score_counts_only_blocking_checker_failures() {
 }
 
 #[test]
+fn type_portability_report_serializes_machine_readable_counts() {
+    let mut diagnostics = DiagnosticReport::default();
+    diagnostics.push(Diagnostic::error(
+        "TPY5003",
+        "external checker `mypy` rejected emitted build output under `.typepython/build`",
+    ));
+
+    let report: TypePortabilityReport = type_portability_report(&diagnostics, 4);
+    let payload = serde_json::to_value(&report).expect("report should serialize as JSON");
+
+    assert_eq!(payload["score"], 75);
+    assert_eq!(payload["passing_checkers"], 3);
+    assert_eq!(payload["total_checkers"], 4);
+}
+
+#[test]
 fn stub_portability_diagnostics_warns_for_native_forms_before_target_support() {
     let project_dir = temp_project_dir(
         "stub_portability_diagnostics_warns_for_native_forms_before_target_support",

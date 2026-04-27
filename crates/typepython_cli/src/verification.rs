@@ -22,7 +22,7 @@ use typepython_syntax::{SourceFile, SourceKind};
 use typepython_target::{PythonTarget, RuntimeFeature};
 use zip::ZipArchive;
 
-use crate::cli::VerifyArgs;
+use crate::cli::{OutputFormat, VerifyArgs};
 use crate::discovery::normalize_glob_path;
 use crate::pipeline::{
     build_diagnostics, ensure_output_dirs, materialize_build_outputs,
@@ -71,6 +71,13 @@ pub(crate) struct CheckerAllowlistEntry {
     pub(crate) reason: String,
     pub(crate) issue: Option<String>,
     pub(crate) expires: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize)]
+pub(crate) struct TypePortabilityReport {
+    pub(crate) score: usize,
+    pub(crate) passing_checkers: usize,
+    pub(crate) total_checkers: usize,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -214,7 +221,12 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
             supplied_artifact_count
         ));
     }
-    if !checkers.is_empty() {
+    let portability_report = if checkers.is_empty() {
+        None
+    } else {
+        Some(type_portability_report(&diagnostics, checkers.len()))
+    };
+    if portability_report.is_some() {
         notes.push(format!(
             "ran {} external checker invocation(s) against the emitted build output",
             checkers.len()
@@ -236,8 +248,32 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
         notes,
     };
 
-    print_summary(args.run.format, &summary, &diagnostics)?;
+    print_verify_summary(args.run.format, &summary, &diagnostics, portability_report.as_ref())?;
     Ok(exit_code(&diagnostics))
+}
+
+fn print_verify_summary(
+    format: OutputFormat,
+    summary: &CommandSummary,
+    diagnostics: &DiagnosticReport,
+    portability: Option<&TypePortabilityReport>,
+) -> Result<()> {
+    match format {
+        OutputFormat::Text => print_summary(OutputFormat::Text, summary, diagnostics),
+        OutputFormat::Json => {
+            let payload = serde_json::json!({
+                "summary": summary,
+                "diagnostics": diagnostics,
+                "portability": portability,
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&payload)
+                    .context("unable to serialize verify summary as JSON")?
+            );
+            Ok(())
+        }
+    }
 }
 
 fn load_checker_allowlist(
@@ -295,6 +331,16 @@ pub(crate) fn type_portability_score(
     if checker_count == 0 {
         return String::from("n/a");
     }
+    type_portability_report(diagnostics, checker_count).render()
+}
+
+pub(crate) fn type_portability_report(
+    diagnostics: &DiagnosticReport,
+    checker_count: usize,
+) -> TypePortabilityReport {
+    if checker_count == 0 {
+        return TypePortabilityReport { score: 0, passing_checkers: 0, total_checkers: 0 };
+    }
     let blocking_checker_failures = diagnostics
         .diagnostics
         .iter()
@@ -304,9 +350,18 @@ pub(crate) fn type_portability_score(
         })
         .count()
         .min(checker_count);
-    let passed = checker_count - blocking_checker_failures;
-    let percent = (passed * 100) / checker_count;
-    format!("{percent}/100 ({passed}/{checker_count} checker(s) passing)")
+    let passing_checkers = checker_count - blocking_checker_failures;
+    let score = (passing_checkers * 100) / checker_count;
+    TypePortabilityReport { score, passing_checkers, total_checkers: checker_count }
+}
+
+impl TypePortabilityReport {
+    fn render(&self) -> String {
+        format!(
+            "{}/100 ({}/{} checker(s) passing)",
+            self.score, self.passing_checkers, self.total_checkers
+        )
+    }
 }
 
 pub(crate) fn verify_build_artifacts(
