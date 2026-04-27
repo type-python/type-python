@@ -9,6 +9,22 @@
       "targets": ["3.10", "3.12"]
     },
     {
+      "name": "standard-typing-package",
+      "targets": ["3.10", "3.12"],
+      "expected_stub_fragments": {
+        "3.10": [
+          "class JsonRecord(TypedDict)",
+          "def consume(renderable: Renderable) -> str: ...",
+          "def merge_records(left: JsonRecord, right: JsonRecord) -> JsonRecord: ..."
+        ],
+        "3.12": [
+          "class JsonRecord(TypedDict)",
+          "def consume(renderable: Renderable) -> str: ...",
+          "def merge_records(left: JsonRecord, right: JsonRecord) -> JsonRecord: ..."
+        ]
+      }
+    },
+    {
       "name": "compat-package",
       "targets": ["3.10", "3.11", "3.12"],
       "expected_stub_fragments": {

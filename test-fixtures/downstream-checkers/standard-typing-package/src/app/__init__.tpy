@@ -1,0 +1,18 @@
+from typing import Protocol, TypedDict
+
+
+class JsonRecord(TypedDict):
+    id: int
+    label: str
+
+
+class Renderable(Protocol):
+    def render(self) -> str: ...
+
+
+def consume(renderable: Renderable) -> str:
+    return renderable.render()
+
+
+def merge_records(left: JsonRecord, right: JsonRecord) -> JsonRecord:
+    return {"id": left["id"], "label": right["label"]}
