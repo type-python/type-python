@@ -105,6 +105,8 @@ fn build_migration_report_ranks_high_impact_untyped_files() {
     assert!(!report.high_impact_untyped_files.is_empty());
     assert!(report.high_impact_untyped_files[0].path.ends_with("src/app/a.tpy"));
     assert_eq!(report.high_impact_untyped_files[0].downstream_references, 1);
+    assert_eq!(report.high_impact_untyped_files[0].downstream_public_importers, 1);
+    assert!(report.high_impact_untyped_files[0].impact_score > 0);
 }
 
 #[test]
