@@ -103,6 +103,10 @@ pub(crate) fn supplied_verify_artifacts(args: &VerifyArgs) -> Vec<SuppliedVerify
 }
 
 pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
+    run_verify_with_command("verify", args)
+}
+
+pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> Result<ExitCode> {
     let mut config = if args.unsafe_runtime_imports {
         load_project(args.run.project.as_ref())?
     } else {
@@ -201,7 +205,7 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
     }
 
     let summary = CommandSummary {
-        command: String::from("verify"),
+        command: String::from(command_name),
         config_path: config.config_path.display().to_string(),
         config_source: config.source,
         discovered_sources: snapshot.discovered_sources,
@@ -779,11 +783,72 @@ fn verify_external_checker(
     out_root: &Path,
     checker: &str,
 ) -> Option<Diagnostic> {
-    checker_diagnostic_from_output(
+    let invocation = external_checker_invocation(
         checker,
+        &config.config.project.target_python.to_string(),
         out_root,
-        ProcessCommand::new(checker).arg(out_root).current_dir(&config.config_dir).output(),
-    )
+    );
+    let mut command = ProcessCommand::new(&invocation.program);
+    command.args(&invocation.args).current_dir(&config.config_dir);
+    checker_diagnostic_from_output(&invocation.label, out_root, command.output())
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct ExternalCheckerInvocation {
+    pub(crate) label: String,
+    pub(crate) program: String,
+    pub(crate) args: Vec<String>,
+}
+
+pub(crate) fn external_checker_invocation(
+    checker: &str,
+    target_python: &str,
+    out_root: &Path,
+) -> ExternalCheckerInvocation {
+    let out_root = out_root.display().to_string();
+    match checker {
+        "mypy" => ExternalCheckerInvocation {
+            label: String::from("mypy"),
+            program: String::from("mypy"),
+            args: vec![String::from("--python-version"), target_python.to_owned(), out_root],
+        },
+        "pyright" => ExternalCheckerInvocation {
+            label: String::from("pyright"),
+            program: String::from("pyright"),
+            args: vec![String::from("--pythonversion"), target_python.to_owned(), out_root],
+        },
+        "ty" => ExternalCheckerInvocation {
+            label: String::from("ty"),
+            program: String::from("ty"),
+            args: vec![
+                String::from("check"),
+                String::from("--no-progress"),
+                String::from("--python-version"),
+                target_python.to_owned(),
+                out_root,
+            ],
+        },
+        "pyrefly" => ExternalCheckerInvocation {
+            label: String::from("pyrefly"),
+            program: String::from("pyrefly"),
+            args: vec![String::from("check"), out_root],
+        },
+        "basedpyright" => ExternalCheckerInvocation {
+            label: String::from("basedpyright"),
+            program: String::from("basedpyright"),
+            args: vec![String::from("--pythonversion"), target_python.to_owned(), out_root],
+        },
+        "zuban" => ExternalCheckerInvocation {
+            label: String::from("zuban"),
+            program: String::from("zuban"),
+            args: vec![String::from("check"), out_root],
+        },
+        custom => ExternalCheckerInvocation {
+            label: custom.to_owned(),
+            program: custom.to_owned(),
+            args: vec![out_root],
+        },
+    }
 }
 
 pub(crate) fn verify_runtime_public_name_parity_for_artifact(

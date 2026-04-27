@@ -1,3 +1,4 @@
+pub(super) use super::compat::{expand_checker_list, run_compat};
 pub(super) use super::discovery::{
     ExternalSupportRoot, bundled_stdlib_snapshot_identity_for_root,
     bundled_stdlib_sources_for_root, collect_source_paths, external_resolution_sources,
@@ -11,15 +12,16 @@ pub(super) use super::pipeline::{
     should_emit_build_outputs, watch_targets, write_incremental_snapshot,
 };
 pub(super) use super::verification::{
-    SuppliedArtifactKind, SuppliedVerifyArtifact, run_verify, supplied_verify_artifacts,
-    verify_build_artifacts, verify_packaged_artifacts, verify_publication_metadata,
-    verify_runtime_public_name_parity, verify_runtime_public_name_parity_for_artifact,
+    SuppliedArtifactKind, SuppliedVerifyArtifact, external_checker_invocation, run_verify,
+    supplied_verify_artifacts, verify_build_artifacts, verify_packaged_artifacts,
+    verify_publication_metadata, verify_runtime_public_name_parity,
+    verify_runtime_public_name_parity_for_artifact,
 };
 pub(super) use super::{
     Cli, Command, InitArgs, OutputFormat, RunArgs, bytecode_path_for, embedded_config_template,
     exit_code_for_error, init_project,
 };
-pub(super) use crate::cli::{CleanArgs, VerifyArgs};
+pub(super) use crate::cli::{CleanArgs, CompatArgs, VerifyArgs};
 pub(super) use clap::Parser;
 pub(super) use flate2::{Compression, write::GzEncoder};
 pub(super) use notify::RecursiveMode;
@@ -657,6 +659,7 @@ fn collect_source_paths_reports_cross_root_collisions() {
     assert!(discovery.diagnostics.as_text().contains("TPY3002"));
 }
 
+mod compat;
 mod consistency;
 mod migration;
 mod pipeline;
