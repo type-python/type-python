@@ -387,7 +387,7 @@ typepython api-diff dist/old-stubs dist/new-stubs --format json
 
 ### `typepython type-health`
 
-Inspect configured dependency/type roots for PEP 561 typing metadata and produce a typing-supply-chain score. The prototype scans `resolution.type_roots`, detects `py.typed`, `*-stubs` packages, partial stub markers, runtime/stub distribution version mismatches, and can write `.typepython/type-lock.toml` for review.
+Inspect configured dependency/type roots for PEP 561 typing metadata and produce a typing-supply-chain score. The prototype scans `resolution.type_roots`, detects `py.typed`, `*-stubs` packages, partial stub markers, runtime/stub distribution version mismatches, and can write `.typepython/type-lock.toml` for review. The lock records the configured target and analysis Python versions, bundled typeshed commit, observed `typing_extensions` version, default checker versions when installed, and per-package typing metadata.
 
 ```bash
 typepython type-health [OPTIONS]

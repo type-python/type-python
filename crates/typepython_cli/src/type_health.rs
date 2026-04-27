@@ -1,4 +1,4 @@
-use std::{fs, path::Path, process::ExitCode};
+use std::{fs, path::Path, process::Command as ProcessCommand, process::ExitCode};
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -14,7 +14,24 @@ use crate::{
 pub(crate) struct TypeHealthReport {
     pub(crate) score: u8,
     pub(crate) packages: Vec<TypePackageHealth>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) lock_inputs: Option<TypeLockInputs>,
     pub(crate) lock_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+pub(crate) struct TypeLockInputs {
+    pub(crate) target_python: String,
+    pub(crate) analysis_python: String,
+    pub(crate) typing_extensions_version: Option<String>,
+    pub(crate) typeshed_commit: Option<String>,
+    pub(crate) checker_versions: Vec<CheckerVersion>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+pub(crate) struct CheckerVersion {
+    pub(crate) name: String,
+    pub(crate) version: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
@@ -33,11 +50,13 @@ pub(crate) fn run_type_health(args: TypeHealthArgs) -> Result<ExitCode> {
     let config = load_project(args.run.project.as_ref())?;
     let mut report =
         build_type_health_report(&config.config_dir, &config.config.resolution.type_roots)?;
+    let lock_inputs = collect_type_lock_inputs(&config.config_dir, &config.config)?;
     if args.write_lock {
         let lock_path = config.config_dir.join(".typepython/type-lock.toml");
-        write_type_lock(&lock_path, &report)?;
+        write_type_lock(&lock_path, &report, &lock_inputs)?;
         report.lock_path = Some(lock_path.display().to_string());
     }
+    report.lock_inputs = Some(lock_inputs);
 
     let mut diagnostics = DiagnosticReport::default();
     if let Some(threshold) = args.fail_under
@@ -103,7 +122,73 @@ pub(crate) fn build_type_health_report(
     let typed =
         packages.iter().filter(|package| package.has_py_typed || package.is_stub_only).count();
     let score = if packages.is_empty() { 100 } else { ((typed * 100) / packages.len()) as u8 };
-    Ok(TypeHealthReport { score, packages, lock_path: None })
+    Ok(TypeHealthReport { score, packages, lock_inputs: None, lock_path: None })
+}
+
+pub(crate) fn collect_type_lock_inputs(
+    config_dir: &Path,
+    config: &typepython_config::Config,
+) -> Result<TypeLockInputs> {
+    Ok(TypeLockInputs {
+        target_python: config.project.target_python_text.clone(),
+        analysis_python: config
+            .resolution
+            .analysis_python_text
+            .clone()
+            .unwrap_or_else(|| config.project.target_python_text.clone()),
+        typing_extensions_version: typing_extensions_version(
+            config_dir,
+            &config.resolution.type_roots,
+        )?,
+        typeshed_commit: bundled_typeshed_commit()?,
+        checker_versions: ["mypy", "pyright", "ty"]
+            .into_iter()
+            .map(|checker| CheckerVersion {
+                name: checker.to_owned(),
+                version: checker_version(checker),
+            })
+            .collect(),
+    })
+}
+
+fn typing_extensions_version(config_dir: &Path, type_roots: &[String]) -> Result<Option<String>> {
+    for root in type_roots {
+        let root_path = config_dir.join(root);
+        let version = match distribution_version(&root_path, "typing-extensions")? {
+            Some(version) => Some(version),
+            None => distribution_version(&root_path, "typing_extensions")?,
+        };
+        if version.is_some() {
+            return Ok(version);
+        }
+    }
+    Ok(None)
+}
+
+fn bundled_typeshed_commit() -> Result<Option<String>> {
+    let baseline_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/BASELINE.toml");
+    let baseline = fs::read_to_string(&baseline_path)
+        .with_context(|| format!("unable to read {}", baseline_path.display()))?;
+    Ok(baseline.lines().find_map(|line| {
+        let stripped = line.trim();
+        stripped
+            .strip_prefix("typeshed_commit = ")
+            .and_then(|value| value.trim_matches('"').split_once('"').map(|(commit, _)| commit))
+            .or_else(|| {
+                stripped.strip_prefix("typeshed_commit = ").map(|value| value.trim_matches('"'))
+            })
+            .map(str::to_owned)
+    }))
+}
+
+fn checker_version(checker: &str) -> Option<String> {
+    let output = ProcessCommand::new(checker).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if stdout.is_empty() { (!stderr.is_empty()).then_some(stderr) } else { Some(stdout) }
 }
 
 fn package_health(path: &Path) -> Result<TypePackageHealth> {
@@ -156,25 +241,43 @@ fn distribution_version(site_root: &Path, distribution_name: &str) -> Result<Opt
     Ok(None)
 }
 
-fn write_type_lock(path: &Path, report: &TypeHealthReport) -> Result<()> {
+fn write_type_lock(path: &Path, report: &TypeHealthReport, inputs: &TypeLockInputs) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("unable to create {}", parent.display()))?;
     }
     let mut rendered = String::from("# Generated by typepython type-health --write-lock\n");
     rendered.push_str(&format!("score = {}\n\n", report.score));
+    rendered.push_str("[inputs]\n");
+    rendered.push_str(&format!("target_python = \"{}\"\n", toml_string(&inputs.target_python)));
+    rendered.push_str(&format!("analysis_python = \"{}\"\n", toml_string(&inputs.analysis_python)));
+    if let Some(version) = &inputs.typing_extensions_version {
+        rendered.push_str(&format!("typing_extensions_version = \"{}\"\n", toml_string(version)));
+    }
+    if let Some(commit) = &inputs.typeshed_commit {
+        rendered.push_str(&format!("typeshed_commit = \"{}\"\n", toml_string(commit)));
+    }
+    rendered.push('\n');
+    for checker in &inputs.checker_versions {
+        rendered.push_str("[[checker]]\n");
+        rendered.push_str(&format!("name = \"{}\"\n", toml_string(&checker.name)));
+        if let Some(version) = &checker.version {
+            rendered.push_str(&format!("version = \"{}\"\n", toml_string(version)));
+        }
+        rendered.push('\n');
+    }
     for package in &report.packages {
         rendered.push_str("[[package]]\n");
-        rendered.push_str(&format!("name = \"{}\"\n", package.name));
-        rendered.push_str(&format!("root = \"{}\"\n", package.root.replace('\\', "\\\\")));
+        rendered.push_str(&format!("name = \"{}\"\n", toml_string(&package.name)));
+        rendered.push_str(&format!("root = \"{}\"\n", toml_string(&package.root)));
         rendered.push_str(&format!("has_py_typed = {}\n", package.has_py_typed));
         rendered.push_str(&format!("is_stub_only = {}\n", package.is_stub_only));
         rendered.push_str(&format!("is_partial_stub = {}\n", package.is_partial_stub));
         if let Some(version) = &package.runtime_version {
-            rendered.push_str(&format!("runtime_version = \"{version}\"\n"));
+            rendered.push_str(&format!("runtime_version = \"{}\"\n", toml_string(version)));
         }
         if let Some(version) = &package.stub_version {
-            rendered.push_str(&format!("stub_version = \"{version}\"\n"));
+            rendered.push_str(&format!("stub_version = \"{}\"\n", toml_string(version)));
         }
         if let Some(matches) = package.stub_version_matches_runtime {
             rendered.push_str(&format!("stub_version_matches_runtime = {matches}\n"));
@@ -182,6 +285,10 @@ fn write_type_lock(path: &Path, report: &TypeHealthReport) -> Result<()> {
         rendered.push('\n');
     }
     fs::write(path, rendered).with_context(|| format!("unable to write {}", path.display()))
+}
+
+fn toml_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn print_type_health_text(report: &TypeHealthReport) {

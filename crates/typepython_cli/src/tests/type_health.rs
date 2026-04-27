@@ -72,12 +72,19 @@ fn run_type_health_writes_lock_and_enforces_threshold() {
     let (success, failure, lock) = {
         fs::write(
             project_dir.join("typepython.toml"),
-            "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"site\"]\n",
+            "[project]\nsrc = [\"src\"]\ntarget_python = \"3.12\"\n\n[resolution]\nanalysis_python = \"3.11\"\ntype_roots = [\"site\"]\n",
         )
         .expect("config should be written");
         fs::create_dir_all(project_dir.join("src")).expect("src should exist");
         fs::create_dir_all(project_dir.join("site/demo")).expect("package should exist");
         fs::write(project_dir.join("site/demo/py.typed"), "").expect("marker should be written");
+        fs::create_dir_all(project_dir.join("site/typing_extensions-4.12.2.dist-info"))
+            .expect("typing_extensions metadata should exist");
+        fs::write(
+            project_dir.join("site/typing_extensions-4.12.2.dist-info/METADATA"),
+            "Name: typing_extensions\nVersion: 4.12.2\n",
+        )
+        .expect("typing_extensions metadata should be written");
 
         let success = run_type_health(TypeHealthArgs {
             run: RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
@@ -99,6 +106,15 @@ fn run_type_health_writes_lock_and_enforces_threshold() {
 
     assert_eq!(success, ExitCode::SUCCESS);
     assert_eq!(failure, ExitCode::FAILURE);
+    assert!(lock.contains("[inputs]"));
+    assert!(lock.contains("target_python = \"3.12\""));
+    assert!(lock.contains("analysis_python = \"3.11\""));
+    assert!(lock.contains("typing_extensions_version = \"4.12.2\""));
+    assert!(lock.contains("typeshed_commit = \"68517355a3269be407bde20fea8fd66af2dc4241\""));
+    assert!(lock.contains("[[checker]]"));
+    assert!(lock.contains("name = \"mypy\""));
+    assert!(lock.contains("name = \"pyright\""));
+    assert!(lock.contains("name = \"ty\""));
     assert!(lock.contains("[[package]]"));
     assert!(lock.contains("has_py_typed = true"));
 }
