@@ -267,6 +267,7 @@ pub fn collect_module_surface_metadata(source: &str) -> ModuleSurfaceMetadata {
                 classes: dataclass_transform_classes,
             },
             decorator_transform: DecoratorTransformModuleInfo { callables: decorated_callables },
+            framework_transform: FrameworkTransformModuleInfo::default(),
             direct_function_signatures,
             direct_method_signatures,
         }
@@ -326,6 +327,11 @@ pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransfo
 #[must_use]
 pub fn collect_decorator_transform_module_info(source: &str) -> DecoratorTransformModuleInfo {
     collect_module_surface_metadata(source).decorator_transform
+}
+
+#[must_use]
+pub fn collect_framework_transform_module_info(source: &str) -> FrameworkTransformModuleInfo {
+    collect_module_surface_metadata(source).framework_transform
 }
 
 #[must_use]

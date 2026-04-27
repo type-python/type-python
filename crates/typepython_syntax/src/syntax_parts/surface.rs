@@ -113,6 +113,36 @@ mod tests {
         assert!(error.to_string().contains("encoding cookies are not supported"));
         let _ = fs::remove_file(path);
     }
+
+    #[test]
+    fn framework_transform_metadata_models_provider_capabilities() {
+        let provider = FrameworkTransformProviderSite {
+            name: String::from("celery_task"),
+            provider_kind: Some(FrameworkTransformProviderKind::FunctionDecorator),
+            capabilities: vec![
+                FrameworkTransformCapability::FunctionToObjectReplacement,
+                FrameworkTransformCapability::GenericPreservation,
+            ],
+            fallback: FrameworkTransformFallback::NonStrictDegrade,
+            line: 12,
+        };
+
+        let info = FrameworkTransformModuleInfo { providers: vec![provider] };
+
+        assert_eq!(info.providers[0].name, "celery_task");
+        assert_eq!(
+            info.providers[0].provider_kind,
+            Some(FrameworkTransformProviderKind::FunctionDecorator)
+        );
+        assert_eq!(
+            info.providers[0].capabilities,
+            vec![
+                FrameworkTransformCapability::FunctionToObjectReplacement,
+                FrameworkTransformCapability::GenericPreservation,
+            ],
+        );
+        assert_eq!(info.providers[0].fallback, FrameworkTransformFallback::NonStrictDegrade);
+    }
 }
 
 /// Parser output for a source file.
@@ -911,6 +941,7 @@ pub struct ModuleSurfaceMetadata {
     pub typed_dict_classes: Vec<TypedDictClassMetadata>,
     pub dataclass_transform: DataclassTransformModuleInfo,
     pub decorator_transform: DecoratorTransformModuleInfo,
+    pub framework_transform: FrameworkTransformModuleInfo,
     pub direct_function_signatures: Vec<DirectFunctionSignatureSite>,
     pub direct_method_signatures: Vec<DirectMethodSignatureSite>,
 }
@@ -1012,6 +1043,58 @@ pub struct DecoratedCallableSite {
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct DecoratorTransformModuleInfo {
     pub callables: Vec<DecoratedCallableSite>,
+}
+
+/// Framework-level transform provider forms accepted by the shared metadata model.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum FrameworkTransformProviderKind {
+    ClassDecorator,
+    BaseClass,
+    Metaclass,
+    FunctionDecorator,
+}
+
+/// Declarative capabilities a framework transform provider may advertise.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum FrameworkTransformCapability {
+    FieldCollection,
+    ConstructorGeneration,
+    AliasHandling,
+    RequiredOptionalFields,
+    ReadonlyFields,
+    DescriptorBackedAttributes,
+    MethodSynthesis,
+    FunctionToObjectReplacement,
+    GenericPreservation,
+}
+
+/// Fallback behavior when a framework transform cannot be fully resolved statically.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum FrameworkTransformFallback {
+    StrictDiagnostic,
+    NonStrictDegrade,
+}
+
+impl Default for FrameworkTransformFallback {
+    fn default() -> Self {
+        Self::StrictDiagnostic
+    }
+}
+
+/// One framework transform provider declaration captured from source or sidecar metadata.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct FrameworkTransformProviderSite {
+    pub name: String,
+    pub provider_kind: Option<FrameworkTransformProviderKind>,
+    pub capabilities: Vec<FrameworkTransformCapability>,
+    pub fallback: FrameworkTransformFallback,
+    pub line: usize,
+}
+
+/// Framework transform summary for one module.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct FrameworkTransformModuleInfo {
+    pub providers: Vec<FrameworkTransformProviderSite>,
 }
 
 /// One parameter in a direct callable signature surface.
