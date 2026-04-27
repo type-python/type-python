@@ -1,0 +1,7 @@
+from typing import TypedDict
+
+class User(TypedDict):
+    id: int
+    name: str
+
+typealias UserPatch = Partial[User]
