@@ -125,6 +125,12 @@ pub(crate) struct CompatArgs {
     )]
     pub(crate) checkers: String,
     #[arg(
+        long = "profile",
+        value_name = "NAME",
+        help = "Checker profile: library-portable, app-strict, pyright-first, mypy-compatible, experimental-checkers"
+    )]
+    pub(crate) profile: Option<String>,
+    #[arg(
         long = "strict-portability",
         help = "Fail on any configured downstream checker rejection"
     )]
