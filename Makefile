@@ -60,7 +60,7 @@ conformance-check:
 	$(PYTHON) scripts/conformance_report.py --check
 
 repo-contracts:
-	$(PYTHON) -m unittest scripts/test_repo_contracts.py
+	$(PYTHON) -m unittest scripts/test_repo_contracts.py scripts/test_downstream_checker_matrix.py
 
 bench:
 	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker

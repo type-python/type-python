@@ -42,7 +42,7 @@ jobs:
         run: python -m pip install --upgrade build twine
 
       - name: Test smoke helper scripts and repository contracts
-        run: python -m unittest scripts/test_quickstart_smoke.py scripts/test_native_target_smoke.py scripts/test_annotation_compat.py scripts/test_repo_contracts.py
+        run: python -m unittest scripts/test_quickstart_smoke.py scripts/test_native_target_smoke.py scripts/test_annotation_compat.py scripts/test_repo_contracts.py scripts/test_downstream_checker_matrix.py
 
       - name: Check bundled stdlib baseline
         run: python scripts/refresh_stdlib_stubs.py --check
