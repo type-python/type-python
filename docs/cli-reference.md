@@ -336,6 +336,8 @@ Supported checker names use checker-specific CLI conventions:
 
 Unknown checker values are treated as custom command paths and receive the generated build directory as their only argument.
 
+When external checkers run, the summary includes a `type portability score` note. The score is the percentage of configured checker invocations that did not produce build-blocking checker diagnostics; allowlisted disagreements remain visible as warnings but do not reduce the score.
+
 **Example:**
 
 ```bash

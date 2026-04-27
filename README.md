@@ -157,6 +157,7 @@ typepython verify  --project . --unsafe-runtime-imports # Also import emitted mo
 typepython verify  --project . --checker-preset all # Also run mypy, pyright, and ty against emitted artifacts
 typepython verify  --project . --checker-preset all --checker-allowlist checker-allowlist.toml # Keep known checker disagreements visible but non-blocking
 typepython compat  --project .          # Validate emitted artifacts across mypy, pyright, and ty
+typepython compat  --project . --format json # Include checker diagnostics and a type portability score
 typepython api-diff old-stubs new-stubs # Compare public .pyi type surfaces
 typepython type-health --project .      # Inspect dependency/stub typing metadata
 typepython migrate --project . --report # Migration coverage report
