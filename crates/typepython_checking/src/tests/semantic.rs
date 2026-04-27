@@ -31,7 +31,7 @@ fn check_reports_tpy4014_for_unresolved_paramspec_call() {
 #[test]
 fn check_accepts_source_authored_paramspec_forwarding_call() {
     let result = check_temp_typepython_source(concat!(
-        "from typing import Callable\n\n",
+        "from typing import Callable, cast\n\n",
         "def invoke[**P, R](cb: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:\n",
         "    return cb(*args, **kwargs)\n\n",
         "def greet(name: str, *, times: int) -> str:\n",
@@ -45,7 +45,7 @@ fn check_accepts_source_authored_paramspec_forwarding_call() {
 #[test]
 fn check_reports_source_authored_paramspec_keyword_mismatch() {
     let result = check_temp_typepython_source(concat!(
-        "from typing import Callable\n\n",
+        "from typing import Callable, cast\n\n",
         "def invoke[**P, R](cb: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:\n",
         "    return cb(*args, **kwargs)\n\n",
         "def greet(name: str, *, times: int) -> str:\n",
@@ -241,12 +241,12 @@ fn decorated_function_transform_rewrites_effective_callable_annotation() {
 #[test]
 fn decorated_function_transform_can_resolve_non_callable_object_surface() {
     let source_text = concat!(
-        "from typing import Callable\n\n",
+        "from typing import Callable, cast\n\n",
         "class Task[**P, R]:\n",
         "    def delay(self, *args: P.args, **kwargs: P.kwargs) -> R:\n",
         "        ...\n\n",
         "def task[**P, R](fn: Callable[P, R]) -> Task[P, R]:\n",
-        "    return Task()\n\n",
+        "    return cast(Task[P, R], Task())\n\n",
         "@task\n",
         "def count(value: int) -> int:\n",
         "    return value\n",
@@ -285,6 +285,50 @@ fn decorated_function_transform_can_resolve_non_callable_object_surface() {
         .map(crate::diagnostic_type_text),
         Some(String::from("Task[P, int]"))
     );
+    let overrides = crate::collect_effective_value_stub_overrides(&graph);
+    assert_eq!(overrides.len(), 1);
+    assert_eq!(overrides[0].annotation, "Task[P, int]");
+}
+
+#[test]
+fn framework_marked_function_to_object_decorator_uses_existing_stub_transform() {
+    let source_text = concat!(
+        "from typing import Callable\n\n",
+        "class Task[**P, R]:\n",
+        "    def delay(self, *args: P.args, **kwargs: P.kwargs) -> R:\n",
+        "        ...\n\n",
+        "@framework_transform(kind=\"function_to_object_decorator\", capabilities=(\"function_to_object_replacement\", \"generic_preservation\"))\n",
+        "def task[**P, R](fn: Callable[P, R]) -> Task[P, R]:\n",
+        "    return cast(Task[P, R], Task())\n\n",
+        "@task\n",
+        "def count(value: int) -> int:\n",
+        "    return value\n",
+    );
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let result = check_with_options(
+        &graph,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+        ImportFallback::Unknown,
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
     let overrides = crate::collect_effective_value_stub_overrides(&graph);
     assert_eq!(overrides.len(), 1);
     assert_eq!(overrides[0].annotation, "Task[P, int]");

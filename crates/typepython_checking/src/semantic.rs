@@ -67,6 +67,7 @@ pub(super) fn unsupported_framework_transform_diagnostics(
         .unwrap_or_default()
         .providers
         .into_iter()
+        .filter(|provider| !framework_transform_provider_has_supported_semantics(provider))
         .map(|provider| {
             Diagnostic::error(
                 "TPY4020",
@@ -85,6 +86,16 @@ pub(super) fn unsupported_framework_transform_diagnostics(
             ))
         })
         .collect()
+}
+
+fn framework_transform_provider_has_supported_semantics(
+    provider: &typepython_syntax::FrameworkTransformProviderSite,
+) -> bool {
+    provider.provider_kind
+        == Some(typepython_syntax::FrameworkTransformProviderKind::FunctionDecorator)
+        && provider
+            .capabilities
+            .contains(&typepython_syntax::FrameworkTransformCapability::FunctionToObjectReplacement)
 }
 
 pub(super) fn ambiguous_overload_call_diagnostics(
