@@ -19,6 +19,16 @@ fn check_accepts_empty_tail_concatenate_call() {
 }
 
 #[test]
+fn check_reports_tpy4014_for_unresolved_paramspec_call() {
+    let result = check_temp_typepython_source(
+        "from typing import Callable, ParamSpec\n\nP = ParamSpec(\"P\")\n\ndef invoke(cb: Callable[P, int]) -> int:\n    return cb(1)\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4014"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_source_authored_paramspec_forwarding_call() {
     let result = check_temp_typepython_source(concat!(
         "from typing import Callable\n\n",

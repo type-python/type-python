@@ -77,6 +77,36 @@ fn lower_rewrites_nested_unsafe_blocks_with_indentation() {
 }
 
 #[test]
+fn lower_reports_tpy2002_for_unlowerable_typepython_only_header() {
+    let lowered = lower(&SyntaxTree {
+        source: SourceFile {
+            path: PathBuf::from("unlowerable-interface.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("interface Service[T]:\n    pass\n"),
+        },
+        statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
+            name: String::from("Service"),
+            type_params: Vec::new(),
+            header_suffix: String::from("[T]"),
+            bases: Vec::new(),
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_abstract_class: false,
+            members: Vec::new(),
+            line: 1,
+        })],
+        type_ignore_directives: Vec::new(),
+        diagnostics: DiagnosticReport::default(),
+    });
+
+    let rendered = lowered.diagnostics.as_text();
+    assert!(rendered.contains("TPY2002"), "{rendered}");
+    assert!(rendered.contains("interface"), "{rendered}");
+}
+
+#[test]
 fn lower_normalizes_annotated_lambda_runtime_syntax() {
     let tree = parse(SourceFile {
         path: PathBuf::from("lambda-annotation.tpy"),

@@ -65,6 +65,29 @@ fn did_open_publishes_overlay_diagnostics() {
 }
 
 #[test]
+fn did_open_reports_tpy6002_when_version_is_missing() {
+    let config = temp_config(
+        "did_open_reports_tpy6002_when_version_is_missing",
+        "def ok() -> int:\n    return 1\n",
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+    let responses = server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "id": 1,
+            "method":"textDocument/didOpen",
+            "params": {"textDocument": {"uri": uri, "text": "pass\n", "languageId": "typepython"}}
+        }))
+        .expect("didOpen protocol errors should be reported as JSON-RPC errors");
+
+    let error = single_error_response(&responses);
+    assert!(
+        error["message"].as_str().expect("error message should be a string").contains("TPY6002")
+    );
+}
+
+#[test]
 fn hover_definition_references_and_rename_work() {
     let config = temp_workspace(
         "hover_definition_references_and_rename_work",
