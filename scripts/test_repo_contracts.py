@@ -110,6 +110,8 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("conformance-check:", makefile)
         self.assertIn("scripts/conformance_report.py --check", rust_workflow)
         self.assertIn("TypePython Conformance Report", report)
+        self.assertIn("Normative MUST Traceability", report)
+        self.assertIn("language-spec-v1:L", report)
         self.assertNotIn("| Core v1 | MUST | missing |", report)
         subprocess.run(
             [sys.executable, "scripts/conformance_report.py", "--check"],

@@ -11,13 +11,30 @@ from collections.abc import Iterable
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 PLAN_PATH = REPO_ROOT / "docs/spec/conformance-and-test-plan-v1.md"
 REPORT_PATH = REPO_ROOT / "docs/conformance-report.md"
+SPEC_PATHS = (
+    REPO_ROOT / "docs/spec/language-spec-v1.md",
+    REPO_ROOT / "docs/spec/artifact-and-tooling-spec-v1.md",
+    REPO_ROOT / "docs/spec/conformance-and-test-plan-v1.md",
+    REPO_ROOT / "docs/spec/implementation-notes-v1.md",
+)
 FEATURE_ROW_RE = re.compile(r"^\|\s*(?P<feature>[^|]+?)\s*\|\s*(?P<tier>[^|]+?)\s*\|\s*(?P<status>MUST|SHOULD|MAY)\s*\|")
+NORMATIVE_RE = re.compile(r"\bMUST(?:\s+NOT)?\b")
 
 
 @dataclasses.dataclass(frozen=True)
 class FeatureClaim:
     feature: str
     tier: str
+    status: str
+    tests: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class NormativeRule:
+    rule_id: str
+    document: str
+    line: int
+    requirement: str
     status: str
     tests: tuple[str, ...]
 
@@ -86,6 +103,46 @@ TEST_EVIDENCE: dict[str, tuple[str, ...]] = {
     "`typepython verify` library publishability checks": ("cargo test -p typepython-cli tests::verification",),
 }
 
+RULE_EVIDENCE_PATTERNS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = tuple(
+    (re.compile(pattern, re.IGNORECASE), tests)
+    for pattern, tests in [
+        (r"\.tpy|parser|type-expression grammar|syntax", TEST_EVIDENCE["`.tpy` parsing for Core syntax"]),
+        (r"\.pyi|stub emitter|public API surface", TEST_EVIDENCE["`.pyi` emission"]),
+        (r"\.py\b|runtime behavior|execution order|runtime semantics", TEST_EVIDENCE["`.py` emission"]),
+        (r"typealias|type alias", TEST_EVIDENCE["`typealias`"]),
+        (r"interface|Protocol", TEST_EVIDENCE["`interface`"]),
+        (r"data class|dataclass_transform|dataclass", TEST_EVIDENCE["`data class`"]),
+        (r"sealed", TEST_EVIDENCE["`sealed class` with same-module closure"]),
+        (r"overload", TEST_EVIDENCE["`overload def`"]),
+        (r"unsafe", TEST_EVIDENCE["`unsafe:`"]),
+        (r"ParamSpec|Concatenate", TEST_EVIDENCE["ParamSpec authoring including source-authored `P.args` / `P.kwargs` forwarding"]),
+        (r"recursive", TEST_EVIDENCE["Recursive type aliases"]),
+        (r"Literal|union", TEST_EVIDENCE["Unions and literals"]),
+        (r"inference|infer", TEST_EVIDENCE["Local inference"]),
+        (r"Self|receiver", TEST_EVIDENCE["Self and receiver typing"]),
+        (r"Callable|call-site", TEST_EVIDENCE["Callable compatibility and overload specificity"]),
+        (r"TypedDict|ReadOnly|Required|NotRequired", TEST_EVIDENCE["`TypedDict` utility transforms (`Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, `Required_`)"]),
+        (r"Annotated|ClassVar", TEST_EVIDENCE["`Annotated`, `ClassVar`, `Required`, `NotRequired`, and `ReadOnly` in their supported positions"]),
+        (r"NewType", TEST_EVIDENCE["NewType declarations and nominal compatibility"]),
+        (r"narrow|TypeGuard|TypeIs|assert|match", TEST_EVIDENCE["Narrowing (`is None`, `isinstance`, `TypeGuard`/`TypeIs`, `assert`, `match`, boolean composition)"]),
+        (r"property|classmethod|staticmethod|final|override|deprecated", TEST_EVIDENCE["Builtin decorator typing (`@property`, `@classmethod`, `@staticmethod`, `@final`, `@override`, `@deprecated`)"]),
+        (r"async|await|yield", TEST_EVIDENCE["Authored async semantics in `.tpy` (`async def`, `await`, `async for`, `async with`, `yield`, `yield from`)"]),
+        (r"with statement|context manager", TEST_EVIDENCE["`with` statement typing"]),
+        (r"for loop|comprehension", TEST_EVIDENCE["`for` loop and comprehension typing"]),
+        (r"except|exception", TEST_EVIDENCE["`try`/`except` exception variable typing"]),
+        (r"enum", TEST_EVIDENCE["Enum type support and enum member typing"]),
+        (r"Final", TEST_EVIDENCE["`Final` binding enforcement"]),
+        (r"abstract", TEST_EVIDENCE["Abstract class and `@abstractmethod` checking"]),
+        (r"namespace package|module discovery|logical module", TEST_EVIDENCE["Implicit namespace packages / PEP 420 project modeling"]),
+        (r"PEP 561|py\.typed|stub package|typed-package|partial-stub", TEST_EVIDENCE["PEP 561 typed-package and partial-stub resolution"]),
+        (r"typing_extensions|typing semantic|target_python|target version", TEST_EVIDENCE["Target-version compatibility matrix for emitted typing constructs"]),
+        (r"unknown|dynamic|untyped import", TEST_EVIDENCE["Untyped import fallback (`unknown`/`dynamic`)"]),
+        (r"diagnostic|TPY\d+|severity", TEST_EVIDENCE["Deterministic diagnostics"]),
+        (r"cache|incremental|invalidation|rechecking|summary", TEST_EVIDENCE["Cache invalidation"]),
+        (r"verify|wheel|sdist|artifact|publication", TEST_EVIDENCE["`typepython verify` library publishability checks"]),
+    ]
+)
+
 
 def feature_claims() -> list[FeatureClaim]:
     claims: list[FeatureClaim] = []
@@ -100,24 +157,93 @@ def feature_claims() -> list[FeatureClaim]:
     return claims
 
 
-def render_markdown(claims: Iterable[FeatureClaim]) -> str:
+def markdown_cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")
+
+
+def normalize_requirement(line: str) -> str:
+    line = line.strip()
+    line = re.sub(r"^[-*]\s+", "", line)
+    line = re.sub(r"^\d+\.\s+", "", line)
+    line = re.sub(r"\s+", " ", line)
+    return line
+
+
+def inferred_rule_tests(requirement: str) -> tuple[str, ...]:
+    tests: list[str] = []
+    for pattern, pattern_tests in RULE_EVIDENCE_PATTERNS:
+        if pattern.search(requirement):
+            tests.extend(pattern_tests)
+    return tuple(dict.fromkeys(tests))
+
+
+def normative_rules() -> list[NormativeRule]:
+    rules: list[NormativeRule] = []
+    for path in SPEC_PATHS:
+        document = path.relative_to(REPO_ROOT).as_posix()
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if NORMATIVE_RE.search(line) is None:
+                continue
+            requirement = normalize_requirement(line)
+            tests = inferred_rule_tests(requirement)
+            status = "mapped" if tests else "needs-mapping"
+            rules.append(
+                NormativeRule(
+                    rule_id=f"{path.stem}:L{line_number}",
+                    document=document,
+                    line=line_number,
+                    requirement=requirement,
+                    status=status,
+                    tests=tests,
+                )
+            )
+    return rules
+
+
+def render_markdown(claims: Iterable[FeatureClaim], rules: Iterable[NormativeRule]) -> str:
+    claims = list(claims)
+    rules = list(rules)
+    mapped_rules = sum(1 for rule in rules if rule.tests)
     lines = [
         "# TypePython Conformance Report",
         "",
         "This report maps the feature matrix in `docs/spec/conformance-and-test-plan-v1.md` to test evidence commands. It is intentionally conservative: missing evidence is reported as `missing`, not inferred from nearby tests.",
+        "",
+        "It also extracts normative `MUST` and `MUST NOT` rules from `docs/spec/` and maps each rule to the nearest concrete test family when one can be inferred. Rules without evidence remain visible as `needs-mapping` so conformance gaps cannot disappear from review.",
+        "",
+        f"Feature claims: {len(claims)}. Normative rules: {len(rules)} ({mapped_rules} mapped, {len(rules) - mapped_rules} need mapping).",
+        "",
+        "## Feature Matrix Evidence",
         "",
         "| Feature | Tier | Requirement | Evidence |",
         "| ------- | ---- | ----------- | -------- |",
     ]
     for claim in claims:
         evidence = "<br>".join(f"`{test}`" for test in claim.tests) if claim.tests else "missing"
-        lines.append(f"| {claim.feature} | {claim.tier} | {claim.status} | {evidence} |")
+        lines.append(f"| {markdown_cell(claim.feature)} | {claim.tier} | {claim.status} | {evidence} |")
+    lines.extend([
+        "",
+        "## Normative MUST Traceability",
+        "",
+        "| Rule | Source | Status | Requirement | Evidence |",
+        "| ---- | ------ | ------ | ----------- | -------- |",
+    ])
+    for rule in rules:
+        evidence = "<br>".join(f"`{test}`" for test in rule.tests) if rule.tests else "missing"
+        source = f"`{rule.document}:{rule.line}`"
+        lines.append(
+            f"| `{rule.rule_id}` | {source} | {rule.status} | {markdown_cell(rule.requirement)} | {evidence} |"
+        )
     lines.append("")
     return "\n".join(lines)
 
 
-def render_json(claims: Iterable[FeatureClaim]) -> str:
-    return json.dumps([dataclasses.asdict(claim) for claim in claims], indent=2, sort_keys=True) + "\n"
+def render_json(claims: Iterable[FeatureClaim], rules: Iterable[NormativeRule]) -> str:
+    payload = {
+        "feature_claims": [dataclasses.asdict(claim) for claim in claims],
+        "normative_rules": [dataclasses.asdict(rule) for rule in rules],
+    }
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
 def main() -> int:
@@ -128,7 +254,8 @@ def main() -> int:
     args = parser.parse_args()
 
     claims = feature_claims()
-    rendered = render_json(claims) if args.format == "json" else render_markdown(claims)
+    rules = normative_rules()
+    rendered = render_json(claims, rules) if args.format == "json" else render_markdown(claims, rules)
     if args.write:
         REPORT_PATH.write_text(rendered, encoding="utf-8")
         return 0
@@ -140,6 +267,8 @@ def main() -> int:
         if missing_must:
             joined = ", ".join(missing_must)
             raise SystemExit(f"missing conformance evidence for MUST feature(s): {joined}")
+        if not rules:
+            raise SystemExit("no normative MUST rules found in docs/spec")
         return 0
     print(rendered, end="")
     return 0
