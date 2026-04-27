@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pathlib
 import re
+import subprocess
+import sys
 import unittest
 
 
@@ -84,6 +86,21 @@ class RepoContractsTests(unittest.TestCase):
             f"rustup toolchain install {msrv} --profile minimal", rust_workflow
         )
         self.assertIn("make msrv-check", rust_workflow)
+
+    def test_bundled_stdlib_baseline_is_pinned_and_current(self) -> None:
+        baseline = read_text("stdlib/BASELINE.toml")
+        makefile = read_text("Makefile")
+        rust_workflow = read_text(".github/workflows/rust.yml")
+
+        self.assertRegex(baseline, r'typeshed_commit = "[0-9a-f]{40}"')
+        self.assertIn('upstream_repository = "https://github.com/python/typeshed"', baseline)
+        self.assertIn("stdlib-baseline-check:", makefile)
+        self.assertIn("scripts/refresh_stdlib_stubs.py --check", rust_workflow)
+        subprocess.run(
+            [sys.executable, "scripts/refresh_stdlib_stubs.py", "--check"],
+            cwd=REPO_ROOT,
+            check=True,
+        )
 
 
 if __name__ == "__main__":
