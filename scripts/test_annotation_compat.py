@@ -54,6 +54,35 @@ class AnnotationCompatTests(unittest.TestCase):
                 format=annotation_compat.AnnotationFormat.STRING,
             )
 
+    def test_audit_source_detects_runtime_annotation_consumers(self) -> None:
+        audit = annotation_compat.audit_source(
+            "import inspect\nimport typing\nfrom dataclasses import dataclass\n"
+            "@dataclass\nclass User:\n    name: str\n"
+            "def inspect_user() -> None:\n    typing.get_type_hints(User)\n    inspect.get_annotations(User)\n"
+        )
+
+        self.assertEqual(
+            audit.consumers,
+            (
+                annotation_compat.AnnotationConsumer.DATACLASS_DECORATOR,
+                annotation_compat.AnnotationConsumer.INSPECT_GET_ANNOTATIONS,
+                annotation_compat.AnnotationConsumer.TYPING_GET_TYPE_HINTS,
+            ),
+        )
+        self.assertTrue(audit.safe_for_runtime_introspection)
+
+    def test_audit_source_flags_nested_local_annotations(self) -> None:
+        audit = annotation_compat.audit_source(
+            "def outer():\n"
+            "    class Local:\n        pass\n"
+            "    def build(value: Local) -> 'Local':\n        return value\n"
+            "    return build\n"
+        )
+
+        self.assertFalse(audit.safe_for_runtime_introspection)
+        self.assertEqual({finding.code for finding in audit.findings}, {"TPY-A001"})
+        self.assertIn("local scope", audit.findings[0].message)
+
 
 if __name__ == "__main__":
     unittest.main()
