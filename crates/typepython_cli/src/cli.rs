@@ -101,6 +101,12 @@ pub(crate) struct VerifyArgs {
     )]
     pub(crate) checker_preset: Option<String>,
     #[arg(
+        long = "checker-allowlist",
+        value_name = "PATH",
+        help = "TOML allowlist of known checker disagreements to report without failing verification"
+    )]
+    pub(crate) checker_allowlist: Option<PathBuf>,
+    #[arg(
         long = "unsafe-runtime-imports",
         help = "Import emitted runtime modules during verification to compare runtime-visible public names; this executes project-controlled Python code"
     )]
@@ -123,6 +129,12 @@ pub(crate) struct CompatArgs {
         help = "Fail on any configured downstream checker rejection"
     )]
     pub(crate) strict_portability: bool,
+    #[arg(
+        long = "checker-allowlist",
+        value_name = "PATH",
+        help = "TOML allowlist of known checker disagreements to report without failing portability checks"
+    )]
+    pub(crate) checker_allowlist: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

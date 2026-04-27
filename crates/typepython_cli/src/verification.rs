@@ -58,6 +58,21 @@ struct PyProjectMetadata {
     project: Option<PyProjectProjectMetadata>,
 }
 
+#[derive(Debug, Default, serde::Deserialize)]
+struct CheckerAllowlist {
+    #[serde(default)]
+    disagreements: Vec<CheckerAllowlistEntry>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Eq, PartialEq)]
+pub(crate) struct CheckerAllowlistEntry {
+    pub(crate) checker: String,
+    pub(crate) contains: String,
+    pub(crate) reason: String,
+    pub(crate) issue: Option<String>,
+    pub(crate) expires: Option<String>,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct PyProjectProjectMetadata {
     #[serde(rename = "requires-python")]
@@ -185,8 +200,11 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
         );
     }
     let checkers = verify_checker_invocations(&args)?;
+    let checker_allowlist = load_checker_allowlist(&config, args.checker_allowlist.as_deref())?;
     if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
-        diagnostics.diagnostics.extend(verify_external_checkers(&config, &checkers).diagnostics);
+        diagnostics
+            .diagnostics
+            .extend(verify_external_checkers(&config, &checkers, &checker_allowlist).diagnostics);
     }
 
     let supplied_artifact_count = args.wheels.len() + args.sdists.len();
@@ -216,6 +234,23 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
 
     print_summary(args.run.format, &summary, &diagnostics)?;
     Ok(exit_code(&diagnostics))
+}
+
+fn load_checker_allowlist(
+    config: &ConfigHandle,
+    path: Option<&Path>,
+) -> Result<Vec<CheckerAllowlistEntry>> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+    let resolved_path =
+        if path.is_absolute() { path.to_path_buf() } else { config.config_dir.join(path) };
+    let contents = fs::read_to_string(&resolved_path)
+        .with_context(|| format!("unable to read checker allowlist {}", resolved_path.display()))?;
+    let allowlist: CheckerAllowlist = toml::from_str(&contents).with_context(|| {
+        format!("unable to parse checker allowlist {}", resolved_path.display())
+    })?;
+    Ok(allowlist.disagreements)
 }
 
 pub(crate) fn expand_checker_list(raw: &str) -> Result<Vec<String>> {
@@ -382,6 +417,7 @@ pub(crate) fn verify_publication_metadata(
 pub(crate) fn verify_external_checkers(
     config: &ConfigHandle,
     checkers: &[String],
+    allowlist: &[CheckerAllowlistEntry],
 ) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
     if checkers.is_empty() {
@@ -391,7 +427,7 @@ pub(crate) fn verify_external_checkers(
     let out_root = config.resolve_relative_path(&config.config.project.out_dir);
     let checker_diagnostics = checkers
         .par_iter()
-        .filter_map(|checker| verify_external_checker(config, &out_root, checker))
+        .filter_map(|checker| verify_external_checker(config, &out_root, checker, allowlist))
         .collect::<Vec<_>>();
     diagnostics.diagnostics.extend(checker_diagnostics);
 
@@ -812,6 +848,7 @@ fn verify_external_checker(
     config: &ConfigHandle,
     out_root: &Path,
     checker: &str,
+    allowlist: &[CheckerAllowlistEntry],
 ) -> Option<Diagnostic> {
     let invocation = external_checker_invocation(
         checker,
@@ -820,7 +857,35 @@ fn verify_external_checker(
     );
     let mut command = ProcessCommand::new(&invocation.program);
     command.args(&invocation.args).current_dir(&config.config_dir);
-    checker_diagnostic_from_output(&invocation.label, out_root, command.output())
+    let diagnostic = checker_diagnostic_from_output(&invocation.label, out_root, command.output())?;
+    Some(allowlisted_checker_diagnostic(&invocation.label, diagnostic, allowlist))
+}
+
+pub(crate) fn allowlisted_checker_diagnostic(
+    checker: &str,
+    diagnostic: Diagnostic,
+    allowlist: &[CheckerAllowlistEntry],
+) -> Diagnostic {
+    let Some(entry) = allowlist
+        .iter()
+        .find(|entry| entry.checker == checker && diagnostic.message.contains(&entry.contains))
+    else {
+        return diagnostic;
+    };
+
+    let mut warning = Diagnostic::warning(
+        diagnostic.code,
+        format!("known checker disagreement allowed for `{checker}`: {}", entry.reason),
+    )
+    .with_note(diagnostic.message)
+    .with_note(format!("matched allowlist substring `{}`", entry.contains));
+    if let Some(issue) = &entry.issue {
+        warning = warning.with_note(format!("tracking issue: {issue}"));
+    }
+    if let Some(expires) = &entry.expires {
+        warning = warning.with_note(format!("allowlist expires: {expires}"));
+    }
+    warning
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

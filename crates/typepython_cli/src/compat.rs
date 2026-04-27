@@ -15,6 +15,7 @@ pub(crate) fn run_compat(args: CompatArgs) -> Result<ExitCode> {
         sdists: Vec::new(),
         checkers,
         checker_preset: None,
+        checker_allowlist: args.checker_allowlist,
         unsafe_runtime_imports: false,
     };
     let command_name =
