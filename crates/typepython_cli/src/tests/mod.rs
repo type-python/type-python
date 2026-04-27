@@ -19,9 +19,10 @@ pub(super) use super::type_health::{build_type_health_report, run_type_health};
 pub(super) use super::verification::{
     CheckerAllowlistEntry, SuppliedArtifactKind, SuppliedVerifyArtifact,
     allowlisted_checker_diagnostic, expand_checker_list, external_checker_invocation, run_verify,
-    supplied_verify_artifacts, type_portability_score, verify_build_artifacts,
-    verify_checker_invocations, verify_packaged_artifacts, verify_publication_metadata,
-    verify_runtime_public_name_parity, verify_runtime_public_name_parity_for_artifact,
+    stub_portability_diagnostics, supplied_verify_artifacts, type_portability_score,
+    verify_build_artifacts, verify_checker_invocations, verify_packaged_artifacts,
+    verify_publication_metadata, verify_runtime_public_name_parity,
+    verify_runtime_public_name_parity_for_artifact,
 };
 pub(super) use super::{
     Cli, Command, InitArgs, OutputFormat, RunArgs, bytecode_path_for, embedded_config_template,
@@ -48,6 +49,7 @@ pub(super) use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
 pub(super) use typepython_emit::{EmitArtifact, write_runtime_outputs};
 pub(super) use typepython_graph::build as build_graph;
 pub(super) use typepython_incremental::IncrementalState;
+pub(super) use typepython_target::PythonTarget;
 pub(super) use zip::{ZipWriter, write::FileOptions};
 
 #[test]

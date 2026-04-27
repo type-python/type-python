@@ -3248,6 +3248,52 @@ fn type_portability_score_counts_only_blocking_checker_failures() {
 }
 
 #[test]
+fn stub_portability_diagnostics_warns_for_native_forms_before_target_support() {
+    let project_dir = temp_project_dir(
+        "stub_portability_diagnostics_warns_for_native_forms_before_target_support",
+    );
+    let diagnostics = {
+        let stub_path = project_dir.join("app.pyi");
+        fs::write(
+            &stub_path,
+            "from typing import ReadOnly\n\ntype Box[T] = list[T]\ndef identity[T = int](value: T) -> T: ...\n",
+        )
+        .expect("test stub should be written");
+
+        stub_portability_diagnostics(&stub_path, PythonTarget::PYTHON_3_10)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let rendered = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("Python 3.12 generic syntax"));
+    assert!(rendered.contains("Python 3.13 generic default syntax"));
+    assert!(rendered.contains("ReadOnly"));
+}
+
+#[test]
+fn stub_portability_diagnostics_accepts_supported_target_forms() {
+    let project_dir =
+        temp_project_dir("stub_portability_diagnostics_accepts_supported_target_forms");
+    let diagnostics = {
+        let stub_path = project_dir.join("app.pyi");
+        fs::write(
+            &stub_path,
+            "from typing import ReadOnly\n\ntype Box[T] = list[T]\ndef identity[T = int](value: T) -> T: ...\n",
+        )
+        .expect("test stub should be written");
+
+        stub_portability_diagnostics(&stub_path, PythonTarget::PYTHON_3_13)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(diagnostics.is_empty());
+}
+
+#[test]
 fn verify_checker_preset_expands_and_deduplicates_with_explicit_checkers() {
     let args = VerifyArgs {
         run: RunArgs { project: None, format: OutputFormat::Json },
