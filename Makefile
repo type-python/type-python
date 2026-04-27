@@ -3,7 +3,7 @@ MSRV ?= 1.94.0
 PYTHON ?= python3
 RUSTDOCFLAGS ?= -D warnings
 
-.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers repo-contracts bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
+.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers stdlib-baseline-check repo-contracts bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -36,6 +36,9 @@ test-cli-verification:
 test-downstream-checkers:
 	$(PYTHON) scripts/downstream_checker_smoke.py
 
+stdlib-baseline-check:
+	$(PYTHON) scripts/refresh_stdlib_stubs.py --check
+
 repo-contracts:
 	$(PYTHON) -m unittest scripts/test_repo_contracts.py
 
@@ -66,4 +69,4 @@ snapshot-review:
 docs:
 	RUSTDOCFLAGS="$(RUSTDOCFLAGS)" $(CARGO) doc --workspace --no-deps
 
-ci: fmt-check lint test-fast test-cli-verification test-downstream-checkers repo-contracts bench-check package-check
+ci: fmt-check lint test-fast test-cli-verification test-downstream-checkers stdlib-baseline-check repo-contracts bench-check package-check

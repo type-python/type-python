@@ -383,6 +383,7 @@ The downstream checker smoke suite currently covers:
 - `compat-package` on Python 3.10, 3.11, and 3.12, with emitted import-source assertions before mypy / pyright / ty
 - `native-package` on Python 3.13+, with emitted native typing syntax assertions and publication-metadata checks
 - Parser and bundled stdlib baselines are recorded in `stdlib/BASELINE.toml`; keep that file in sync when touching parser dependency versions or refreshing the bundled stdlib snapshot
+- Bundled stdlib refreshes are pinned to the upstream typeshed commit in `stdlib/BASELINE.toml`; run `python3 scripts/refresh_stdlib_stubs.py --typeshed-root <typeshed-checkout> --write` after copying a reviewed typeshed snapshot, then run `make stdlib-baseline-check` to verify `stdlib/REFRESH_STATS.json` and `stdlib/VERSIONS` are current
 
 For focused local runs, `scripts/downstream_checker_smoke.py` accepts:
 
