@@ -95,6 +95,12 @@ pub(crate) struct VerifyArgs {
     )]
     pub(crate) checkers: Vec<String>,
     #[arg(
+        long = "checker-preset",
+        value_name = "PRESET",
+        help = "Run a named checker preset; currently supports `all` for mypy, pyright, and ty"
+    )]
+    pub(crate) checker_preset: Option<String>,
+    #[arg(
         long = "unsafe-runtime-imports",
         help = "Import emitted runtime modules during verification to compare runtime-visible public names; this executes project-controlled Python code"
     )]

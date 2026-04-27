@@ -184,10 +184,9 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
             .diagnostics,
         );
     }
+    let checkers = verify_checker_invocations(&args)?;
     if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
-        diagnostics
-            .diagnostics
-            .extend(verify_external_checkers(&config, &args.checkers).diagnostics);
+        diagnostics.diagnostics.extend(verify_external_checkers(&config, &checkers).diagnostics);
     }
 
     let supplied_artifact_count = args.wheels.len() + args.sdists.len();
@@ -197,10 +196,10 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
             supplied_artifact_count
         ));
     }
-    if !args.checkers.is_empty() {
+    if !checkers.is_empty() {
         notes.push(format!(
             "ran {} external checker invocation(s) against the emitted build output",
-            args.checkers.len()
+            checkers.len()
         ));
     }
 
@@ -217,6 +216,37 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
 
     print_summary(args.run.format, &summary, &diagnostics)?;
     Ok(exit_code(&diagnostics))
+}
+
+pub(crate) fn expand_checker_list(raw: &str) -> Result<Vec<String>> {
+    let values = raw.split(',').map(str::trim).filter(|value| !value.is_empty());
+    let mut checkers = Vec::new();
+    for value in values {
+        if value == "all" {
+            checkers.extend([String::from("mypy"), String::from("pyright"), String::from("ty")]);
+        } else {
+            checkers.push(value.to_owned());
+        }
+    }
+    if checkers.is_empty() {
+        anyhow::bail!("checker list must name at least one checker");
+    }
+    checkers.sort();
+    checkers.dedup();
+    Ok(checkers)
+}
+
+pub(crate) fn verify_checker_invocations(args: &VerifyArgs) -> Result<Vec<String>> {
+    let mut checkers = args.checkers.clone();
+    if let Some(preset) = args.checker_preset.as_deref() {
+        checkers.extend(
+            expand_checker_list(preset)
+                .with_context(|| format!("unable to expand verify checker preset `{preset}`"))?,
+        );
+    }
+    checkers.sort();
+    checkers.dedup();
+    Ok(checkers)
 }
 
 pub(crate) fn verify_build_artifacts(
