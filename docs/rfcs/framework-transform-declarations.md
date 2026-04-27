@@ -143,6 +143,7 @@ Strict-mode diagnostics should cover:
 
 - unknown transform provider
 - provider metadata shape that does not match the target declaration kind
+- currently recognized provider declarations whose semantic application is not implemented yet (`TPY4020`)
 - unsupported function-to-object replacement when no replacement type is available
 - dynamic aliases that prevent safe constructor typing
 - field metadata that cannot be statically evaluated
