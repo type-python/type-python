@@ -1499,6 +1499,11 @@ fn render_authoritative_function_stub(
     context: &LoweredStubContext,
 ) -> String {
     let function_line = offset_to_line(source, function.name.range.start().to_usize());
+    if let Some(annotation) = context.value_overrides.get(&function_line) {
+        let indentation =
+            leading_indent(source.lines().nth(function_line.saturating_sub(1)).unwrap_or_default());
+        return format!("{}{}: {}", indentation, function.name.as_str(), annotation);
+    }
     if let Some(override_signature) = context.callable_overrides.get(&function_line) {
         let indentation =
             leading_indent(source.lines().nth(function_line.saturating_sub(1)).unwrap_or_default());

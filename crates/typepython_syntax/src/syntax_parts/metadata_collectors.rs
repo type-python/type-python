@@ -755,7 +755,8 @@ pub(super) fn collect_decorated_callable_sites(
                         owner_type_name: owner_type_name.map(str::to_owned),
                         name: function.name.as_str().to_owned(),
                         decorators,
-                        line: offset_to_line_column(source, function.range.start().to_usize()).0,
+                        line: offset_to_line_column(source, function.name.range.start().to_usize())
+                            .0,
                     });
                 }
             }

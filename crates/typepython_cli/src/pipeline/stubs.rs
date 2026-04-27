@@ -37,6 +37,19 @@ pub(super) fn build_typepython_stub_contexts(
         });
     }
 
+    for override_value in typepython_checking::collect_effective_value_stub_overrides(graph) {
+        let Some(path) = module_paths.get(&override_value.module_key) else {
+            continue;
+        };
+        let Some(context) = contexts.get_mut(path) else {
+            continue;
+        };
+        context.value_overrides.push(StubValueOverride {
+            line: override_value.line,
+            annotation: override_value.annotation,
+        });
+    }
+
     for synthetic_method in collect_synthetic_method_stubs(graph) {
         let Some(path) = module_paths.get(&synthetic_method.module_key) else {
             continue;
