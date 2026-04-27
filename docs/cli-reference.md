@@ -269,6 +269,7 @@ typepython verify [OPTIONS]
 | `--sdist PATH`      | Path to a `.tar.gz` sdist to verify (repeatable)                           |
 | `--checker COMMAND` | Run an external type checker against the emitted build output (repeatable) |
 | `--checker-preset PRESET` | Run a named checker preset; `all` expands to `mypy`, `pyright`, and `ty` |
+| `--checker-allowlist PATH` | TOML allowlist of known checker disagreements that should remain visible but non-blocking |
 | `--unsafe-runtime-imports` | Import emitted runtime modules to compare runtime-visible public names; this executes project-controlled Python code |
 
 **Checks performed:**
@@ -297,6 +298,17 @@ typepython verify --project . --unsafe-runtime-imports
 typepython verify --project . --checker-preset all
 ```
 
+Checker allowlists use TOML and are intended for temporary, reviewable checker disagreements:
+
+```toml
+[[disagreements]]
+checker = "pyright"
+contains = "message substring emitted by the checker"
+reason = "known checker limitation around generated shape metadata"
+issue = "https://github.com/example/project/issues/123"
+expires = "2026-12-31"
+```
+
 ---
 
 ### `typepython compat`
@@ -313,6 +325,7 @@ typepython compat [OPTIONS]
 | `--format FORMAT`        | Output format: `text` or `json`                                                             |
 | `--checkers LIST`        | Comma-separated checker list; default `all` expands to `mypy,pyright,ty`                    |
 | `--strict-portability`   | Keep portability failures build-blocking for every configured checker rejection              |
+| `--checker-allowlist PATH` | TOML allowlist of known checker disagreements that should remain visible but non-blocking   |
 
 Supported checker names use checker-specific CLI conventions:
 
