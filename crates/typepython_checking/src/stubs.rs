@@ -85,8 +85,7 @@ pub fn collect_effective_value_stub_overrides(
             node.declarations
                 .iter()
                 .filter(|declaration| {
-                    declaration.owner.is_none()
-                        && declaration.kind == typepython_binding::DeclarationKind::Function
+                    declaration.kind == typepython_binding::DeclarationKind::Function
                 })
                 .filter_map(|declaration| {
                     let site =
