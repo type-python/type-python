@@ -15,6 +15,7 @@ members = [
     "crates/typepython_target",
 ]
 resolver = "3"
+exclude = ["fuzz"]
 
 [workspace.package]
 authors = ["unadlib"]
