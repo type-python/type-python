@@ -1,0 +1,1 @@
+Callable[[str, int], bool]
