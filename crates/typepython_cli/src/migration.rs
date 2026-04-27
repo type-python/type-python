@@ -76,9 +76,11 @@ pub(crate) struct MigrationCoverageEntry {
 pub(crate) struct MigrationImpactEntry {
     pub(crate) path: String,
     pub(crate) downstream_references: usize,
+    pub(crate) downstream_public_importers: usize,
     pub(crate) untyped_declarations: usize,
     pub(crate) dynamic_boundaries: usize,
     pub(crate) unknown_boundaries: usize,
+    pub(crate) impact_score: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -276,7 +278,24 @@ pub(crate) fn build_migration_report(
         .collect::<Vec<_>>();
     directory_entries.sort_by(|left, right| left.path.cmp(&right.path));
 
+    let public_api_by_path = files
+        .iter()
+        .map(|stats| {
+            (
+                stats.entry.path.clone(),
+                migration_public_api_entry_for_module(
+                    stats.module_key.as_str(),
+                    &stats.entry.path,
+                    syntax_trees,
+                )
+                .map(|entry| entry.public_exports)
+                .unwrap_or(0),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
     let mut downstream_reference_counts = BTreeMap::<String, usize>::new();
+    let mut downstream_public_importers = BTreeMap::<String, usize>::new();
     for syntax in syntax_trees {
         for statement in &syntax.statements {
             let typepython_syntax::SyntaxStatement::Import(statement) = statement else {
@@ -293,6 +312,11 @@ pub(crate) fn build_migration_report(
                     .max_by_key(|stats| stats.module_key.len());
                 if let Some(stats) = target {
                     *downstream_reference_counts.entry(stats.entry.path.clone()).or_default() += 1;
+                    if public_api_by_path.get(&stats.entry.path).copied().unwrap_or(0) > 0 {
+                        *downstream_public_importers
+                            .entry(stats.entry.path.clone())
+                            .or_default() += 1;
+                    }
                 }
             }
         }
@@ -300,21 +324,34 @@ pub(crate) fn build_migration_report(
     let mut high_impact_untyped_files = files
         .iter()
         .filter(|stats| stats.entry.known_declarations < stats.entry.declarations)
-        .map(|stats| MigrationImpactEntry {
-            path: stats.entry.path.clone(),
-            downstream_references: downstream_reference_counts
-                .get(&stats.entry.path)
-                .copied()
-                .unwrap_or(0),
-            untyped_declarations: stats.entry.declarations - stats.entry.known_declarations,
-            dynamic_boundaries: stats.entry.dynamic_boundaries,
-            unknown_boundaries: stats.entry.unknown_boundaries,
+        .map(|stats| {
+            let downstream_references =
+                downstream_reference_counts.get(&stats.entry.path).copied().unwrap_or(0);
+            let downstream_public_importers =
+                downstream_public_importers.get(&stats.entry.path).copied().unwrap_or(0);
+            let untyped_declarations = stats.entry.declarations - stats.entry.known_declarations;
+            let impact_score = downstream_references * 10
+                + downstream_public_importers * 25
+                + untyped_declarations * 3
+                + stats.entry.dynamic_boundaries
+                + stats.entry.unknown_boundaries;
+            MigrationImpactEntry {
+                path: stats.entry.path.clone(),
+                downstream_references,
+                downstream_public_importers,
+                untyped_declarations,
+                dynamic_boundaries: stats.entry.dynamic_boundaries,
+                unknown_boundaries: stats.entry.unknown_boundaries,
+                impact_score,
+            }
         })
         .collect::<Vec<_>>();
     high_impact_untyped_files.sort_by(|left, right| {
         right
-            .downstream_references
-            .cmp(&left.downstream_references)
+            .impact_score
+            .cmp(&left.impact_score)
+            .then_with(|| right.downstream_public_importers.cmp(&left.downstream_public_importers))
+            .then_with(|| right.downstream_references.cmp(&left.downstream_references))
             .then_with(|| right.untyped_declarations.cmp(&left.untyped_declarations))
             .then_with(|| left.path.cmp(&right.path))
     });
@@ -354,6 +391,32 @@ pub(crate) fn build_migration_report(
 
 fn migration_public_api_entry(
     config: &ConfigHandle,
+    syntax: &typepython_syntax::SyntaxTree,
+) -> MigrationPublicApiEntry {
+    migration_public_api_entry_inner(
+        syntax
+            .source
+            .path
+            .strip_prefix(&config.config_dir)
+            .map(normalize_glob_path)
+            .unwrap_or_else(|_| syntax.source.path.display().to_string()),
+        syntax,
+    )
+}
+
+fn migration_public_api_entry_for_module(
+    module_key: &str,
+    path: &str,
+    syntax_trees: &[typepython_syntax::SyntaxTree],
+) -> Option<MigrationPublicApiEntry> {
+    syntax_trees
+        .iter()
+        .find(|syntax| syntax.source.logical_module == module_key)
+        .map(|syntax| migration_public_api_entry_inner(path.to_owned(), syntax))
+}
+
+fn migration_public_api_entry_inner(
+    path: String,
     syntax: &typepython_syntax::SyntaxTree,
 ) -> MigrationPublicApiEntry {
     let mut public_exports = 0usize;
@@ -442,12 +505,7 @@ fn migration_public_api_entry(
 
     incomplete_exports.sort();
     MigrationPublicApiEntry {
-        path: syntax
-            .source
-            .path
-            .strip_prefix(&config.config_dir)
-            .map(normalize_glob_path)
-            .unwrap_or_else(|_| syntax.source.path.display().to_string()),
+        path,
         public_exports,
         known_public_exports,
         completeness_percent: coverage_percent(known_public_exports, public_exports),
@@ -1014,9 +1072,11 @@ fn print_migration_report(
             println!("  high-impact untyped files:");
             for entry in &report.high_impact_untyped_files {
                 println!(
-                    "    {}: downstream_refs={}, untyped={}, dynamic={}, unknown={}",
+                    "    {}: score={}, downstream_refs={}, public_importers={}, untyped={}, dynamic={}, unknown={}",
                     entry.path,
+                    entry.impact_score,
                     entry.downstream_references,
+                    entry.downstream_public_importers,
                     entry.untyped_declarations,
                     entry.dynamic_boundaries,
                     entry.unknown_boundaries
