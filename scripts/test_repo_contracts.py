@@ -148,6 +148,16 @@ class RepoContractsTests(unittest.TestCase):
         ]
         self.assertEqual(disallowed, [])
 
+    def test_migration_guide_covers_strict_baseline_workflow(self) -> None:
+        migration_guide = read_text("docs/migration-guide.md")
+        cli_reference = read_text("docs/cli-reference.md")
+
+        self.assertIn("severity_overrides", migration_guide)
+        self.assertIn("--no-new-diagnostics", migration_guide)
+        self.assertIn("type: ignore[TPY4001]", migration_guide)
+        self.assertIn("severity_overrides", cli_reference)
+        self.assertIn("type: ignore[...]", cli_reference)
+
 
 if __name__ == "__main__":
     unittest.main()
