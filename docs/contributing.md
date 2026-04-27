@@ -295,6 +295,8 @@ interface Closeable:
 
 The CLI crate (`typepython_cli`) contains end-to-end tests that exercise the full pipeline. These tests create temporary project directories with `typepython.toml` and `.tpy` source files, then run the full init/check/build/verify flow.
 
+The downstream checker smoke suite is driven by `test-fixtures/downstream-checkers/matrix.json`, which declares each fixture, target Python version, and expected generated-stub fragments. Keep new downstream checker cases in that matrix rather than hard-coding them in the script.
+
 ### Coverage
 
 Coverage uses [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov). The local `make coverage` target cleans old coverage state, runs the full workspace test suite once, and writes:
