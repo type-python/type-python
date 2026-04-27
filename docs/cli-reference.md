@@ -388,19 +388,29 @@ Analyze an existing Python project for migration to TypePython.
 typepython migrate [OPTIONS]
 ```
 
-| Flag                  | Description                                     |
-| --------------------- | ----------------------------------------------- |
-| `--format FORMAT`     | Output format: `text` or `json`                 |
-| `--project PATH`      | Project directory                               |
-| `--report`            | Print a typing coverage summary                 |
-| `--emit-stubs PATH`   | Generate `.pyi` stubs from inferred `.py` types |
-| `--stub-out-dir PATH` | Output directory for generated stubs            |
+| Flag                     | Description                                           |
+| ------------------------ | ----------------------------------------------------- |
+| `--format FORMAT`        | Output format: `text` or `json`                       |
+| `--project PATH`         | Project directory                                     |
+| `--report`               | Print a typing coverage summary                       |
+| `--baseline PATH`        | Compare diagnostics against a saved migration baseline |
+| `--write-baseline PATH`  | Write the current diagnostic baseline as JSON          |
+| `--no-new-diagnostics`   | Fail when diagnostics appear outside the baseline      |
+| `--emit-stubs PATH`      | Generate `.pyi` stubs from inferred `.py` types       |
+| `--stub-out-dir PATH`    | Output directory for generated stubs                  |
 
 **Report mode** (`--report`):
 
 - Reports declaration coverage and dynamic/unknown boundary counts
 - Includes per-file and per-directory coverage entries
 - Identifies high-impact files with many untyped declarations
+- Can compare current diagnostics against a JSON baseline so CI can enforce no new type debt
+
+**Diagnostic baselines** (`--baseline`, `--write-baseline`, `--no-new-diagnostics`):
+
+- `--write-baseline .typepython/migration-baseline.json` records the current diagnostic set
+- `--baseline .typepython/migration-baseline.json` reports new and resolved diagnostics
+- `--baseline ... --no-new-diagnostics` exits with a diagnostic error if new diagnostics appear
 
 **Stub emission** (`--emit-stubs`):
 
@@ -413,6 +423,10 @@ typepython migrate [OPTIONS]
 ```bash
 # Get a migration report
 typepython migrate --project . --report
+
+# Establish and enforce a diagnostic baseline
+typepython migrate --project . --write-baseline .typepython/migration-baseline.json
+typepython migrate --project . --baseline .typepython/migration-baseline.json --no-new-diagnostics
 
 # Generate starter stubs
 typepython migrate --project . --emit-stubs src/ --stub-out-dir stubs/
