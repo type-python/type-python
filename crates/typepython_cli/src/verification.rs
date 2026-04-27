@@ -219,6 +219,10 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
             "ran {} external checker invocation(s) against the emitted build output",
             checkers.len()
         ));
+        notes.push(format!(
+            "type portability score: {}",
+            type_portability_score(&diagnostics, checkers.len())
+        ));
     }
 
     let summary = CommandSummary {
@@ -282,6 +286,27 @@ pub(crate) fn verify_checker_invocations(args: &VerifyArgs) -> Result<Vec<String
     checkers.sort();
     checkers.dedup();
     Ok(checkers)
+}
+
+pub(crate) fn type_portability_score(
+    diagnostics: &DiagnosticReport,
+    checker_count: usize,
+) -> String {
+    if checker_count == 0 {
+        return String::from("n/a");
+    }
+    let blocking_checker_failures = diagnostics
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.severity == typepython_diagnostics::Severity::Error
+                && diagnostic.message.contains("external checker `")
+        })
+        .count()
+        .min(checker_count);
+    let passed = checker_count - blocking_checker_failures;
+    let percent = (passed * 100) / checker_count;
+    format!("{percent}/100 ({passed}/{checker_count} checker(s) passing)")
 }
 
 pub(crate) fn verify_build_artifacts(
