@@ -155,6 +155,7 @@ typepython lsp     --project .          # Start language server
 typepython verify  --project .          # Structural publication validation (safe mode may ignore a project-controlled interpreter)
 typepython verify  --project . --unsafe-runtime-imports # Also import emitted modules for runtime parity checks
 typepython compat  --project .          # Validate emitted artifacts across mypy, pyright, and ty
+typepython api-diff old-stubs new-stubs # Compare public .pyi type surfaces
 typepython migrate --project . --report # Migration coverage report
 ```
 

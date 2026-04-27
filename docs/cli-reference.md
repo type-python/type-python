@@ -11,6 +11,7 @@ typepython [COMMAND] [OPTIONS]
 Project-oriented commands use these shared options:
 
 - `check`, `build`, `watch`, `verify`, `compat`, and `migrate` accept `--project PATH` and `--format text|json`
+- `api-diff` accepts two artifact paths and `--format text|json`
 - `clean` accepts `--project PATH`
 - `lsp` accepts `--project PATH` and speaks JSON-RPC over stdio instead of CLI JSON output
 - `init` has its own command-specific flags
@@ -326,6 +327,32 @@ typepython compat --project .
 
 # Run one checker while iterating locally
 typepython compat --project . --checkers pyright
+```
+
+---
+
+### `typepython api-diff`
+
+Compare two public typing surfaces and report conservative API drift. The first prototype accepts `.pyi` files or directories containing `.pyi` files; wheel, sdist, and source-directory normalization are reserved for the next implementation step.
+
+```bash
+typepython api-diff <old> <new> [OPTIONS]
+```
+
+| Flag              | Description                     |
+| ----------------- | ------------------------------- |
+| `--format FORMAT` | Output format: `text` or `json` |
+
+The report classifies:
+
+- removed public symbols as `likely type-breaking`
+- changed public signatures as `unknown risk`
+- added public symbols as `source-compatible`
+
+**Example:**
+
+```bash
+typepython api-diff dist/old-stubs dist/new-stubs --format json
 ```
 
 ---
