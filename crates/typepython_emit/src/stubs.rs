@@ -1412,6 +1412,21 @@ fn collect_authoritative_stub_edits(
             _ => None,
         })
         .collect();
+    let value_override_names: std::collections::BTreeSet<_> = suite
+        .iter()
+        .filter_map(|statement| match statement {
+            Stmt::FunctionDef(function)
+                if !function.decorator_list.iter().any(is_overload_decorator) =>
+            {
+                let function_line = offset_to_line(source, function.name.range.start().to_usize());
+                context
+                    .value_overrides
+                    .contains_key(&function_line)
+                    .then(|| function.name.as_str().to_owned())
+            }
+            _ => None,
+        })
+        .collect();
 
     for statement in suite {
         match statement {
@@ -1437,9 +1452,15 @@ fn collect_authoritative_stub_edits(
                 let end_offset = function.range.end().to_usize().saturating_sub(1);
                 let end_line =
                     offset_to_line(source, end_offset.max(function.range.start().to_usize()));
-                let replacement = if function.decorator_list.iter().any(is_overload_decorator) {
+                let replacement = if value_override_names.contains(function.name.as_str())
+                    && function.decorator_list.iter().any(is_overload_decorator)
+                {
+                    None
+                } else if function.decorator_list.iter().any(is_overload_decorator) {
                     Some(render_authoritative_function_stub(source, function, context))
-                } else if overloaded_names.contains(function.name.as_str()) {
+                } else if overloaded_names.contains(function.name.as_str())
+                    && !context.value_overrides.contains_key(&function_line)
+                {
                     None
                 } else {
                     Some(render_authoritative_function_stub(source, function, context))

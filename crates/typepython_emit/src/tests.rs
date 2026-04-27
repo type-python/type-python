@@ -1033,6 +1033,39 @@ fn generate_typepython_stub_source_can_replace_decorated_async_function_with_val
     assert!(!stub.contains("async def fetch("));
 }
 
+#[test]
+fn generate_typepython_stub_source_value_override_replaces_overload_group_surface() {
+    let module = LoweredModule {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(
+            "from typing import overload\n\n@overload\ndef build(name: str) -> int: ...\n@overload\ndef build(name: bytes) -> int: ...\n@task\ndef build(name):\n    return len(name)\n",
+        ),
+        source_map: (1..=9).map(|i| SourceMapEntry { original_line: i, lowered_line: i }).collect(),
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    };
+    let context = TypePythonStubContext {
+        value_overrides: vec![StubValueOverride {
+            line: 8,
+            annotation: String::from("Task[[str], int]"),
+        }],
+        callable_overrides: Vec::new(),
+        synthetic_methods: Vec::new(),
+        sealed_classes: Vec::new(),
+        guarded_declaration_lines: BTreeSet::new(),
+    };
+
+    let stub = generate_typepython_stub_source(&module, &context)
+        .expect("overloaded decorated value override stub should generate");
+
+    assert!(!stub.contains("@task"));
+    assert!(!stub.contains("@overload"));
+    assert!(stub.contains("build: Task[[str], int]"));
+    assert!(!stub.contains("def build("));
+}
+
 // ─── Snapshot (golden) tests for stub generation ──────────────────────
 
 #[test]

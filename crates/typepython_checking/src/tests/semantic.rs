@@ -435,6 +435,39 @@ fn decorated_async_function_transform_preserves_awaitable_result_surface() {
 }
 
 #[test]
+fn decorated_generic_function_transform_preserves_typevar_result_surface() {
+    let source_text = concat!(
+        "from typing import Callable, cast\n\n",
+        "class Task[**P, R]:\n",
+        "    def delay(self, *args: P.args, **kwargs: P.kwargs) -> R:\n",
+        "        ...\n\n",
+        "def task[**P, R](fn: Callable[P, R]) -> Task[P, R]:\n",
+        "    return cast(Task[P, R], Task())\n\n",
+        "@task\n",
+        "def echo[T](value: T) -> T:\n",
+        "    return value\n",
+    );
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let overrides = crate::collect_effective_value_stub_overrides(&graph);
+
+    assert_eq!(overrides.len(), 1);
+    assert_eq!(overrides[0].annotation, "Task[[T], T]");
+}
+
+#[test]
 fn check_accepts_function_to_object_decorator_transform_member_calls() {
     let result = check_temp_typepython_source(concat!(
         "from typing import Callable, cast\n\n",
