@@ -3169,6 +3169,81 @@ fn runtime_annotation_compatibility_diagnostics_warns_for_framework_consumers() 
 }
 
 #[test]
+fn pep561_readiness_report_marks_ready_project() {
+    let project_dir = temp_project_dir("pep561_readiness_report_marks_ready_project");
+    let report = {
+        fs::create_dir_all(project_dir.join("build/app")).expect("build dir should be created");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("config should be written");
+        fs::write(project_dir.join("build/app/__init__.py"), "pass\n")
+            .expect("runtime artifact should be written");
+        fs::write(project_dir.join("build/app/__init__.pyi"), "def build() -> int: ...\n")
+            .expect("stub artifact should be written");
+        fs::write(project_dir.join("build/app/py.typed"), "").expect("marker should be written");
+        let config = load(&project_dir).expect("config should load");
+
+        pep561_readiness_report(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join("build/app/__init__.py")),
+                stub_path: Some(project_dir.join("build/app/__init__.pyi")),
+            }],
+            &DiagnosticReport::default(),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.ready);
+    assert!(report.blocking_issues.is_empty());
+}
+
+#[test]
+fn pep561_readiness_report_explains_blocking_issues() {
+    let project_dir = temp_project_dir("pep561_readiness_report_explains_blocking_issues");
+    let report = {
+        fs::create_dir_all(project_dir.join("build/app")).expect("build dir should be created");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[emit]\nwrite_py_typed = false\n",
+        )
+        .expect("config should be written");
+        fs::write(project_dir.join("build/app/__init__.py"), "pass\n")
+            .expect("runtime artifact should be written");
+        let config = load(&project_dir).expect("config should load");
+        let diagnostics = DiagnosticReport {
+            diagnostics: vec![Diagnostic::error(
+                "TPY5003",
+                "wheel artifact `dist/demo.whl` is missing published file `app/py.typed`",
+            )],
+        };
+
+        pep561_readiness_report(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join("build/app/__init__.py")),
+                stub_path: None,
+            }],
+            &diagnostics,
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(!report.ready);
+    assert!(
+        report.blocking_issues.iter().any(|issue| issue.contains("does not include `.pyi` files"))
+    );
+    assert!(report.blocking_issues.iter().any(|issue| issue.contains("emit.write_py_typed")));
+    assert!(
+        report
+            .blocking_issues
+            .iter()
+            .any(|issue| issue.contains("missing published file `app/py.typed`"))
+    );
+}
+
+#[test]
 fn verify_runtime_module_importability_accepts_relative_output_root() {
     let project_dir =
         temp_project_dir("verify_runtime_module_importability_accepts_relative_output_root");
