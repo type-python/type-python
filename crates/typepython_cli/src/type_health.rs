@@ -46,6 +46,7 @@ pub(crate) struct TypePackageHealth {
     pub(crate) public_any_attributes: usize,
     pub(crate) overload_any_fallbacks: usize,
     pub(crate) public_untyped_attributes: usize,
+    pub(crate) unsupported_typing_extensions_imports: usize,
     pub(crate) runtime_version: Option<String>,
     pub(crate) stub_version: Option<String>,
     pub(crate) stub_version_matches_runtime: Option<bool>,
@@ -221,6 +222,7 @@ fn package_health(path: &Path, target_python: PythonTarget) -> Result<TypePackag
         public_any_attributes: public_any.attributes,
         overload_any_fallbacks: public_any.overload_fallbacks,
         public_untyped_attributes: public_any.untyped_attributes,
+        unsupported_typing_extensions_imports: public_any.unsupported_typing_extensions_imports,
         runtime_version,
         stub_version,
         stub_version_matches_runtime,
@@ -233,6 +235,7 @@ struct PublicAnyCounts {
     attributes: usize,
     overload_fallbacks: usize,
     untyped_attributes: usize,
+    unsupported_typing_extensions_imports: usize,
 }
 
 fn public_any_counts(path: &Path, target_python: PythonTarget) -> Result<PublicAnyCounts> {
@@ -276,11 +279,51 @@ fn collect_public_any_counts(
         } else if public_attribute_is_untyped(line) {
             counts.untyped_attributes += 1;
         }
+        counts.unsupported_typing_extensions_imports +=
+            unsupported_typing_extensions_imports(line, target_python);
         if !stripped.starts_with('@') && !stripped.is_empty() {
             next_signature_is_overload = false;
         }
     }
     Ok(())
+}
+
+fn unsupported_typing_extensions_imports(line: &str, target_python: PythonTarget) -> usize {
+    let stripped = line.trim_start();
+    let Some(imports) = stripped.strip_prefix("from typing_extensions import ") else {
+        return 0;
+    };
+    imports
+        .split(',')
+        .filter_map(|import| import.trim().split_whitespace().next())
+        .filter(|symbol| !symbol.is_empty())
+        .filter(|symbol| !is_known_typing_extensions_symbol(symbol, target_python))
+        .count()
+}
+
+fn is_known_typing_extensions_symbol(symbol: &str, target_python: PythonTarget) -> bool {
+    target_python.stdlib_owner(symbol).is_some()
+        || matches!(
+            symbol,
+            "Any"
+                | "Callable"
+                | "ClassVar"
+                | "Final"
+                | "Generic"
+                | "Literal"
+                | "Never"
+                | "NewType"
+                | "NoReturn"
+                | "Optional"
+                | "ParamSpec"
+                | "Protocol"
+                | "TypeAlias"
+                | "TypeGuard"
+                | "TypeVar"
+                | "TypedDict"
+                | "Union"
+                | "overload"
+        )
 }
 
 fn public_function_returns_any(line: &str) -> bool {
@@ -420,6 +463,10 @@ fn write_type_lock(path: &Path, report: &TypeHealthReport, inputs: &TypeLockInpu
             "public_untyped_attributes = {}\n",
             package.public_untyped_attributes
         ));
+        rendered.push_str(&format!(
+            "unsupported_typing_extensions_imports = {}\n",
+            package.unsupported_typing_extensions_imports
+        ));
         if let Some(version) = &package.runtime_version {
             rendered.push_str(&format!("runtime_version = \"{}\"\n", toml_string(version)));
         }
@@ -443,7 +490,7 @@ fn print_type_health_text(report: &TypeHealthReport) {
     println!("  score: {}", report.score);
     for package in &report.packages {
         println!(
-            "  package: {} py.typed={} stub_only={} partial={} public_any_returns={} public_any_attributes={} overload_any_fallbacks={} public_untyped_attributes={} runtime_version={} stub_version={} version_match={}",
+            "  package: {} py.typed={} stub_only={} partial={} public_any_returns={} public_any_attributes={} overload_any_fallbacks={} public_untyped_attributes={} unsupported_typing_extensions_imports={} runtime_version={} stub_version={} version_match={}",
             package.name,
             package.has_py_typed,
             package.is_stub_only,
@@ -452,6 +499,7 @@ fn print_type_health_text(report: &TypeHealthReport) {
             package.public_any_attributes,
             package.overload_any_fallbacks,
             package.public_untyped_attributes,
+            package.unsupported_typing_extensions_imports,
             package.runtime_version.as_deref().unwrap_or("?"),
             package.stub_version.as_deref().unwrap_or("?"),
             package
