@@ -19,7 +19,7 @@ use typepython_emit::{EmitArtifact, TypePythonStubContext, generate_typepython_s
 use typepython_incremental::decode_snapshot;
 use typepython_lowering::{BackportRequirement, LoweredModule};
 use typepython_syntax::{SourceFile, SourceKind};
-use typepython_target::PythonTarget;
+use typepython_target::{PythonTarget, RuntimeFeature};
 use zip::ZipArchive;
 
 use crate::cli::VerifyArgs;
@@ -789,6 +789,10 @@ fn verify_build_artifact(config: &ConfigHandle, artifact: &EmitArtifact) -> Vec<
         } else if let Some(diagnostic) = verify_emitted_text_artifact(stub_path) {
             diagnostics.push(diagnostic);
         } else {
+            diagnostics.extend(stub_portability_diagnostics(
+                stub_path,
+                config.config.project.target_python,
+            ));
             diagnostics.extend(stub_metadata_expectation_warnings(stub_path));
         }
     }
@@ -1597,6 +1601,104 @@ fn verify_stub_syntax_rules(
     }
 
     None
+}
+
+pub(crate) fn stub_portability_diagnostics(
+    path: &Path,
+    target_python: PythonTarget,
+) -> Vec<Diagnostic> {
+    let Ok(rendered) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let mut diagnostics = Vec::new();
+
+    for (index, line) in rendered.lines().enumerate() {
+        let line_number = index + 1;
+        let trimmed = line.trim_start();
+        if (trimmed.starts_with("type ") || native_header_uses_type_params(trimmed))
+            && !target_python.supports(RuntimeFeature::InlineTypeParams)
+        {
+            diagnostics.push(
+                Diagnostic::warning(
+                    "TPY5003",
+                    format!(
+                        "emitted stub artifact `{}` uses Python 3.12 generic syntax that may not be portable for target Python {}",
+                        path.display(),
+                        target_python
+                    ),
+                )
+                .with_note(format!(
+                    "line {line_number}: use compat emit style or lower to TypeVar/TypeAlias forms before invoking downstream checkers"
+                )),
+            );
+        }
+        if native_type_params_include_default(trimmed)
+            && !target_python.supports(RuntimeFeature::GenericDefaults)
+        {
+            diagnostics.push(
+                Diagnostic::warning(
+                    "TPY5003",
+                    format!(
+                        "emitted stub artifact `{}` uses Python 3.13 generic default syntax that may not be portable for target Python {}",
+                        path.display(),
+                        target_python
+                    ),
+                )
+                .with_note(format!(
+                    "line {line_number}: remove defaulted type parameters or emit typing_extensions-compatible aliases"
+                )),
+            );
+        }
+    }
+
+    for (needle, feature, rewrite) in [
+        (
+            "typing.ReadOnly",
+            RuntimeFeature::TypingReadOnly,
+            "import ReadOnly from typing_extensions for Python targets before 3.13",
+        ),
+        (
+            "from typing import ReadOnly",
+            RuntimeFeature::TypingReadOnly,
+            "import ReadOnly from typing_extensions for Python targets before 3.13",
+        ),
+        (
+            "typing.TypeIs",
+            RuntimeFeature::TypingTypeIs,
+            "import TypeIs from typing_extensions for Python targets before 3.13",
+        ),
+        (
+            "from typing import TypeIs",
+            RuntimeFeature::TypingTypeIs,
+            "import TypeIs from typing_extensions for Python targets before 3.13",
+        ),
+        (
+            "typing.NoDefault",
+            RuntimeFeature::TypingNoDefault,
+            "avoid NoDefault or gate it behind Python 3.13+ output",
+        ),
+        (
+            "from typing import NoDefault",
+            RuntimeFeature::TypingNoDefault,
+            "avoid NoDefault or gate it behind Python 3.13+ output",
+        ),
+    ] {
+        if rendered.contains(needle) && !target_python.supports(feature) {
+            diagnostics.push(
+                Diagnostic::warning(
+                    "TPY5003",
+                    format!(
+                        "emitted stub artifact `{}` references `{needle}`, which may not be portable for target Python {}",
+                        path.display(),
+                        target_python
+                    ),
+                )
+                .with_note(rewrite),
+            );
+        }
+    }
+
+    diagnostics
 }
 
 fn stub_metadata_expectation_warnings(path: &Path) -> Vec<Diagnostic> {
