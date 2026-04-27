@@ -226,6 +226,40 @@ fn build_migration_report_tracks_untyped_import_candidates() {
 }
 
 #[test]
+fn build_migration_report_tracks_inline_suppressions() {
+    let project_dir = temp_project_dir("build_migration_report_tracks_inline_suppressions");
+    let report = {
+        fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app/__init__.tpy"),
+            "value: int = \"x\"  # type: ignore[TPY4001]\nother = 1  # type: ignore\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let discovery = collect_source_paths(&config).expect("test setup should succeed");
+        let syntax_trees = load_syntax_trees(
+            &discovery.sources,
+            false,
+            &config.config.project.target_python.to_string(),
+        )
+        .expect("test setup should succeed");
+        build_migration_report(&config, &syntax_trees)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.inline_suppression_files.len(), 1);
+    let entry = &report.inline_suppression_files[0];
+    assert!(entry.path.ends_with("src/app/__init__.tpy"));
+    assert_eq!(entry.suppression_count, 2);
+    assert_eq!(entry.directives[0].line, 1);
+    assert_eq!(entry.directives[0].codes, Some(vec![String::from("TPY4001")]));
+    assert_eq!(entry.directives[1].line, 2);
+    assert_eq!(entry.directives[1].codes, None);
+}
+
+#[test]
 fn migrate_command_parses_emit_stubs_flags() {
     let cli = Cli::parse_from([
         "typepython",
