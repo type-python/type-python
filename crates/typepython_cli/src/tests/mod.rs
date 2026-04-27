@@ -17,8 +17,9 @@ pub(super) use super::pipeline::{
 };
 pub(super) use super::type_health::{build_type_health_report, run_type_health};
 pub(super) use super::verification::{
-    SuppliedArtifactKind, SuppliedVerifyArtifact, expand_checker_list, external_checker_invocation,
-    run_verify, supplied_verify_artifacts, verify_build_artifacts, verify_checker_invocations,
+    CheckerAllowlistEntry, SuppliedArtifactKind, SuppliedVerifyArtifact,
+    allowlisted_checker_diagnostic, expand_checker_list, external_checker_invocation, run_verify,
+    supplied_verify_artifacts, verify_build_artifacts, verify_checker_invocations,
     verify_packaged_artifacts, verify_publication_metadata, verify_runtime_public_name_parity,
     verify_runtime_public_name_parity_for_artifact,
 };

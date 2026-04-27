@@ -12,6 +12,8 @@ fn compat_command_parses_checker_preset_flags() {
         "--checkers",
         "mypy,pyright",
         "--strict-portability",
+        "--checker-allowlist",
+        "checker-allowlist.toml",
     ]);
 
     let super::Command::Compat(args) = cli.command else {
@@ -22,6 +24,7 @@ fn compat_command_parses_checker_preset_flags() {
     assert_eq!(args.run.format, super::OutputFormat::Json);
     assert_eq!(args.checkers, "mypy,pyright");
     assert!(args.strict_portability);
+    assert_eq!(args.checker_allowlist, Some(PathBuf::from("checker-allowlist.toml")));
 }
 
 #[test]
@@ -95,6 +98,7 @@ fn run_compat_uses_verify_pipeline_and_configured_checker() {
             run: RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
             checkers: checker_path.display().to_string(),
             strict_portability: false,
+            checker_allowlist: None,
         })
         .expect("compat should succeed with a passing checker");
 

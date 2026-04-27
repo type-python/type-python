@@ -60,6 +60,7 @@ fn run_verify_bootstraps_outputs_after_clean_project() {
             sdists: Vec::new(),
             checkers: Vec::new(),
             checker_preset: None,
+            checker_allowlist: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should succeed");
@@ -119,6 +120,7 @@ fn run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled() {
             sdists: Vec::new(),
             checkers: Vec::new(),
             checker_preset: None,
+            checker_allowlist: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should succeed");
@@ -161,6 +163,7 @@ fn run_verify_invokes_external_checker_on_emitted_output() {
             sdists: Vec::new(),
             checkers: vec![checker_path.display().to_string()],
             checker_preset: None,
+            checker_allowlist: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should succeed with a passing checker");
@@ -198,6 +201,7 @@ fn run_verify_reports_external_checker_failure() {
             sdists: Vec::new(),
             checkers: vec![checker_path.display().to_string()],
             checker_preset: None,
+            checker_allowlist: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should complete with checker diagnostics")
@@ -229,6 +233,7 @@ fn run_verify_reports_python_companion_stub_signature_mismatch() {
             sdists: Vec::new(),
             checkers: Vec::new(),
             checker_preset: None,
+            checker_allowlist: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should run")
@@ -269,6 +274,7 @@ fn run_verify_reports_python_companion_stub_signature_mismatch_in_wheel() {
             sdists: Vec::new(),
             checkers: Vec::new(),
             checker_preset: None,
+            checker_allowlist: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should run")
@@ -305,6 +311,7 @@ fn run_verify_skips_runtime_import_probes_by_default() {
             sdists: Vec::new(),
             checkers: Vec::new(),
             checker_preset: None,
+            checker_allowlist: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should run")
@@ -343,6 +350,7 @@ fn run_verify_reports_runtime_import_failure_when_unsafe_runtime_imports_enabled
             sdists: Vec::new(),
             checkers: Vec::new(),
             checker_preset: None,
+            checker_allowlist: None,
             unsafe_runtime_imports: true,
         })
         .expect("verify should run")
@@ -392,6 +400,7 @@ fn run_verify_ignores_project_python_executable_by_default() {
             sdists: Vec::new(),
             checkers: Vec::new(),
             checker_preset: None,
+            checker_allowlist: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should run")
@@ -3176,6 +3185,8 @@ fn verify_command_parses_supplied_artifact_flags() {
         "pyright",
         "--checker-preset",
         "all",
+        "--checker-allowlist",
+        "checker-allowlist.toml",
     ]);
 
     let super::Command::Verify(args) = cli.command else {
@@ -3184,6 +3195,7 @@ fn verify_command_parses_supplied_artifact_flags() {
     let supplied = supplied_verify_artifacts(&args);
     assert_eq!(args.checkers, vec![String::from("pyright")]);
     assert_eq!(args.checker_preset, Some(String::from("all")));
+    assert_eq!(args.checker_allowlist, Some(PathBuf::from("checker-allowlist.toml")));
     assert!(args.unsafe_runtime_imports);
     assert_eq!(supplied.len(), 2);
     assert!(supplied.iter().any(|artifact| {
@@ -3197,6 +3209,30 @@ fn verify_command_parses_supplied_artifact_flags() {
 }
 
 #[test]
+fn checker_allowlist_downgrades_matching_checker_rejection_to_warning() {
+    let diagnostic = Diagnostic::error(
+        "TPY5003",
+        "external checker `pyright` rejected emitted build output under `.typepython/build`: unsupported transform",
+    );
+    let allowed = allowlisted_checker_diagnostic(
+        "pyright",
+        diagnostic,
+        &[CheckerAllowlistEntry {
+            checker: String::from("pyright"),
+            contains: String::from("unsupported transform"),
+            reason: String::from("tracked checker limitation"),
+            issue: Some(String::from("https://example.invalid/issue/1")),
+            expires: Some(String::from("2026-12-31")),
+        }],
+    );
+
+    assert_eq!(allowed.severity.to_string(), "warning");
+    assert!(allowed.message.contains("known checker disagreement allowed"));
+    assert!(allowed.notes.iter().any(|note| note.contains("unsupported transform")));
+    assert!(allowed.notes.iter().any(|note| note.contains("allowlist expires")));
+}
+
+#[test]
 fn verify_checker_preset_expands_and_deduplicates_with_explicit_checkers() {
     let args = VerifyArgs {
         run: RunArgs { project: None, format: OutputFormat::Json },
@@ -3204,6 +3240,7 @@ fn verify_checker_preset_expands_and_deduplicates_with_explicit_checkers() {
         sdists: Vec::new(),
         checkers: vec![String::from("pyright")],
         checker_preset: Some(String::from("all")),
+        checker_allowlist: None,
         unsafe_runtime_imports: false,
     };
 

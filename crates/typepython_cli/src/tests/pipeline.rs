@@ -463,6 +463,7 @@ fn run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed() {
             sdists: Vec::new(),
             checkers: Vec::new(),
             checker_preset: None,
+            checker_allowlist: None,
             unsafe_runtime_imports: false,
         })
         .expect("verify should run to completion");
