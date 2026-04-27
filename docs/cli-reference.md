@@ -268,6 +268,7 @@ typepython verify [OPTIONS]
 | `--wheel PATH`      | Path to a `.whl` file to verify (repeatable)                               |
 | `--sdist PATH`      | Path to a `.tar.gz` sdist to verify (repeatable)                           |
 | `--checker COMMAND` | Run an external type checker against the emitted build output (repeatable) |
+| `--checker-preset PRESET` | Run a named checker preset; `all` expands to `mypy`, `pyright`, and `ty` |
 | `--unsafe-runtime-imports` | Import emitted runtime modules to compare runtime-visible public names; this executes project-controlled Python code |
 
 **Checks performed:**
@@ -291,6 +292,9 @@ typepython verify --project . --wheel dist/my_package-1.0.0-py3-none-any.whl
 
 # Also import emitted runtime modules for public-name parity checks
 typepython verify --project . --unsafe-runtime-imports
+
+# Run the stable downstream checker matrix during publication verification
+typepython verify --project . --checker-preset all
 ```
 
 ---
