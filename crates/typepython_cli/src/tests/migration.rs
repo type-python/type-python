@@ -319,10 +319,32 @@ fn migration_diagnostic_baseline_reports_new_and_resolved_diagnostics() {
 
     assert_eq!(comparison.baseline_diagnostics, 2);
     assert_eq!(comparison.current_diagnostics, 2);
+    assert_eq!(comparison.blocking_new_diagnostics, 1);
     assert_eq!(comparison.new_diagnostics.len(), 1);
     assert_eq!(comparison.new_diagnostics[0].code, "TPY3001");
     assert_eq!(comparison.resolved_diagnostics.len(), 1);
     assert_eq!(comparison.resolved_diagnostics[0].code, "TPY2001");
+}
+
+#[test]
+fn migration_diagnostic_baseline_applies_severity_overrides() {
+    let mut baseline_report = DiagnosticReport::default();
+    baseline_report.push(Diagnostic::error("TPY1001", "baseline parse error"));
+    let mut current_report = DiagnosticReport::default();
+    current_report.push(Diagnostic::error("TPY3001", "new import debt"));
+
+    let mut baseline = build_migration_diagnostic_baseline(&baseline_report);
+    baseline.severity_overrides.insert(String::from("TPY3001"), String::from("warning"));
+    let current = build_migration_diagnostic_baseline(&current_report);
+    let comparison = compare_migration_diagnostic_baseline(
+        String::from(".typepython/migration-baseline.json"),
+        &baseline,
+        &current,
+    );
+
+    assert_eq!(comparison.new_diagnostics.len(), 1);
+    assert_eq!(comparison.blocking_new_diagnostics, 0);
+    assert_eq!(comparison.new_diagnostics[0].severity, "warning");
 }
 
 #[test]
