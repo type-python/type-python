@@ -482,25 +482,7 @@ pub(super) fn undecidable_decorator_diagnostics(
                 nodes,
                 declaration,
             ) {
-                Some(callable) if callable.callable_parts().is_some() => None,
-                Some(non_callable) => Some(Diagnostic::error(
-                    "TPY4001",
-                    format!(
-                        "decorated declaration `{}` in module `{}` resolves to non-callable type `{}` after applying decorator{} `{}`",
-                        declaration.name,
-                        node.module_path.display(),
-                        diagnostic_type_text(&non_callable),
-                        if decorated.decorators.len() == 1 { "" } else { "s" },
-                        decorated.decorators.join("`, `"),
-                    ),
-                )
-                .with_span(Span::new(
-                    node.module_path.display().to_string(),
-                    decorated.line,
-                    1,
-                    decorated.line,
-                    1,
-                ))),
+                Some(_) => None,
                 None => Some(Diagnostic::error(
                     "TPY4001",
                     format!(

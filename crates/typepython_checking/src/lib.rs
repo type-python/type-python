@@ -49,7 +49,10 @@ pub(crate) use self::declarations::*;
 pub(crate) use self::generic_solver::*;
 pub(crate) use self::semantic::*;
 pub(crate) use self::source_facts::*;
-pub use self::stubs::{collect_effective_callable_stub_overrides, collect_synthetic_method_stubs};
+pub use self::stubs::{
+    collect_effective_callable_stub_overrides, collect_effective_value_stub_overrides,
+    collect_synthetic_method_stubs,
+};
 pub(crate) use self::type_core::*;
 pub(crate) use self::type_system::*;
 pub(crate) use typepython_syntax::{
@@ -125,6 +128,14 @@ pub struct EffectiveCallableStubOverride {
     pub line: usize,
     pub params: Vec<typepython_syntax::FunctionParam>,
     pub returns: String,
+}
+
+/// Stub value override derived from checker-resolved decorated callable information.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct EffectiveValueStubOverride {
+    pub module_key: String,
+    pub line: usize,
+    pub annotation: String,
 }
 
 /// Synthetic method emitted into authoritative stubs for checker-synthesized behavior.

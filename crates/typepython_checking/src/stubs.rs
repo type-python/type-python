@@ -5,11 +5,12 @@ use typepython_graph::ModuleGraph;
 use typepython_syntax::{FunctionParam, MethodKind, SourceKind};
 
 use crate::{
-    CheckerContext, EffectiveCallableStubOverride, SyntheticMethodStub,
+    CheckerContext, EffectiveCallableStubOverride, EffectiveValueStubOverride, SyntheticMethodStub,
     decorated_function_return_type_from_callable_annotation,
     direct_function_signature_sites_from_callable_annotation,
     resolve_dataclass_transform_class_shape_from_decl_with_context,
     resolve_decorated_callable_annotation_for_declaration_with_context,
+    resolve_decorated_callable_semantic_type_for_declaration_with_context,
     resolve_decorated_callable_site_with_context,
     resolve_plain_dataclass_class_shape_from_decl_with_context,
 };
@@ -61,6 +62,56 @@ pub fn collect_effective_callable_stub_overrides(
             .then(left.owner_type_name.cmp(&right.owner_type_name))
             .then(left.line.cmp(&right.line))
             .then(left.name.cmp(&right.name))
+    });
+    overrides
+}
+
+#[must_use]
+pub fn collect_effective_value_stub_overrides(
+    graph: &ModuleGraph,
+) -> Vec<EffectiveValueStubOverride> {
+    let context = CheckerContext::new_with_bound_surface_facts_and_strict(
+        &graph.nodes,
+        ImportFallback::Unknown,
+        None,
+        None,
+        true,
+    );
+    let mut overrides = graph
+        .nodes
+        .iter()
+        .filter(|node| node.module_kind == SourceKind::TypePython)
+        .flat_map(|node| {
+            node.declarations
+                .iter()
+                .filter(|declaration| {
+                    declaration.owner.is_none()
+                        && declaration.kind == typepython_binding::DeclarationKind::Function
+                })
+                .filter_map(|declaration| {
+                    let site =
+                        resolve_decorated_callable_site_with_context(&context, node, declaration)?;
+                    let transformed =
+                        resolve_decorated_callable_semantic_type_for_declaration_with_context(
+                            &context,
+                            node,
+                            context.nodes,
+                            declaration,
+                        )?;
+                    if transformed.callable_parts().is_some() {
+                        return None;
+                    }
+                    Some(EffectiveValueStubOverride {
+                        module_key: node.module_key.clone(),
+                        line: site.line,
+                        annotation: crate::render_semantic_type(&transformed),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    overrides.sort_by(|left, right| {
+        left.module_key.cmp(&right.module_key).then(left.line.cmp(&right.line))
     });
     overrides
 }
