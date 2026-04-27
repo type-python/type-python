@@ -143,6 +143,28 @@ mod tests {
         );
         assert_eq!(info.providers[0].fallback, FrameworkTransformFallback::NonStrictDegrade);
     }
+
+    #[test]
+    fn framework_transform_collector_reads_provider_declaration() {
+        let info = crate::collect_framework_transform_module_info(
+            "@framework_transform(kind=\"function_to_object_decorator\", capabilities=(\"function_to_object_replacement\", \"generic_preservation\"), fallback=\"non_strict_degrade\")\ndef celery_task(fn):\n    return fn\n",
+        );
+
+        assert_eq!(info.providers.len(), 1);
+        assert_eq!(info.providers[0].name, "celery_task");
+        assert_eq!(
+            info.providers[0].provider_kind,
+            Some(FrameworkTransformProviderKind::FunctionDecorator),
+        );
+        assert_eq!(
+            info.providers[0].capabilities,
+            vec![
+                FrameworkTransformCapability::FunctionToObjectReplacement,
+                FrameworkTransformCapability::GenericPreservation,
+            ],
+        );
+        assert_eq!(info.providers[0].fallback, FrameworkTransformFallback::NonStrictDegrade);
+    }
 }
 
 /// Parser output for a source file.

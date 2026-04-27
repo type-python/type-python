@@ -160,6 +160,7 @@ pub fn collect_module_surface_metadata(source: &str) -> ModuleSurfaceMetadata {
         let mut typed_dict_classes = Vec::new();
         let mut dataclass_transform_providers = Vec::new();
         let mut dataclass_transform_classes = Vec::new();
+        let mut framework_transform_providers = Vec::new();
         let mut direct_function_signatures = Vec::new();
         let mut direct_method_signatures = Vec::new();
 
@@ -180,6 +181,15 @@ pub fn collect_module_surface_metadata(source: &str) -> ModuleSurfaceMetadata {
                             )
                             .0,
                         });
+                    }
+                    if let Some(provider) = framework_transform_provider_site(
+                        &normalized,
+                        function.name.as_str(),
+                        &function.decorator_list,
+                        &import_bindings,
+                        offset_to_line_column(&normalized, function.range.start().to_usize()).0,
+                    ) {
+                        framework_transform_providers.push(provider);
                     }
                     direct_function_signatures.push(DirectFunctionSignatureSite {
                         name: function.name.as_str().to_owned(),
@@ -221,6 +231,15 @@ pub fn collect_module_surface_metadata(source: &str) -> ModuleSurfaceMetadata {
                             )
                             .0,
                         });
+                    }
+                    if let Some(provider) = framework_transform_provider_site(
+                        &normalized,
+                        class_def.name.as_str(),
+                        &class_def.decorator_list,
+                        &import_bindings,
+                        offset_to_line_column(&normalized, class_def.range.start().to_usize()).0,
+                    ) {
+                        framework_transform_providers.push(provider);
                     }
                     dataclass_transform_classes.push(collect_dataclass_transform_class_site(
                         &normalized,
@@ -267,7 +286,9 @@ pub fn collect_module_surface_metadata(source: &str) -> ModuleSurfaceMetadata {
                 classes: dataclass_transform_classes,
             },
             decorator_transform: DecoratorTransformModuleInfo { callables: decorated_callables },
-            framework_transform: FrameworkTransformModuleInfo::default(),
+            framework_transform: FrameworkTransformModuleInfo {
+                providers: framework_transform_providers,
+            },
             direct_function_signatures,
             direct_method_signatures,
         }
@@ -804,9 +825,126 @@ pub(super) fn is_non_transform_builtin_decorator(name: &str) -> bool {
             | "deprecated"
             | "warnings.deprecated"
             | "typing_extensions.deprecated"
+            | "framework_transform"
+            | "typepython.framework_transform"
     ) || name.ends_with(".setter")
         || name.ends_with(".getter")
         || name.ends_with(".deleter")
+}
+
+pub(super) fn framework_transform_provider_site(
+    source: &str,
+    provider_name: &str,
+    decorators: &[ruff_python_ast::Decorator],
+    import_bindings: &BTreeMap<String, String>,
+    line: usize,
+) -> Option<FrameworkTransformProviderSite> {
+    decorators.iter().find_map(|decorator| {
+        let expression = &decorator.expression;
+        is_framework_transform_expr(expression, import_bindings).then(|| {
+            let (provider_kind, capabilities, fallback) =
+                framework_transform_metadata_from_expr(source, expression, import_bindings);
+            FrameworkTransformProviderSite {
+                name: provider_name.to_owned(),
+                provider_kind,
+                capabilities,
+                fallback,
+                line,
+            }
+        })
+    })
+}
+
+pub(super) fn framework_transform_metadata_from_expr(
+    source: &str,
+    expr: &Expr,
+    import_bindings: &BTreeMap<String, String>,
+) -> (
+    Option<FrameworkTransformProviderKind>,
+    Vec<FrameworkTransformCapability>,
+    FrameworkTransformFallback,
+) {
+    let Expr::Call(call) = expr else {
+        return (None, Vec::new(), FrameworkTransformFallback::default());
+    };
+    let mut provider_kind = None;
+    let mut capabilities = Vec::new();
+    let mut fallback = FrameworkTransformFallback::default();
+    for keyword in &call.arguments.keywords {
+        let Some(name) = keyword.arg.as_ref().map(|name| name.as_str()) else {
+            continue;
+        };
+        match name {
+            "kind" => {
+                provider_kind = extract_string_literal_value(source, &keyword.value)
+                    .and_then(|value| framework_transform_provider_kind(&value));
+            }
+            "capabilities" => {
+                capabilities = expr_name_list(&keyword.value, source, import_bindings)
+                    .into_iter()
+                    .filter_map(|value| framework_transform_capability(&value))
+                    .collect();
+            }
+            "fallback" => {
+                if let Some(value) = extract_string_literal_value(source, &keyword.value) {
+                    fallback = framework_transform_fallback(&value);
+                }
+            }
+            _ => {}
+        }
+    }
+    (provider_kind, capabilities, fallback)
+}
+
+pub(super) fn is_framework_transform_expr(
+    expr: &Expr,
+    import_bindings: &BTreeMap<String, String>,
+) -> bool {
+    decorator_target_name(expr)
+        .map(|name| normalize_imported_name(&name, import_bindings))
+        .is_some_and(|name| {
+            matches!(name.as_str(), "framework_transform" | "typepython.framework_transform")
+        })
+}
+
+pub(super) fn framework_transform_provider_kind(
+    value: &str,
+) -> Option<FrameworkTransformProviderKind> {
+    match value {
+        "class_decorator" => Some(FrameworkTransformProviderKind::ClassDecorator),
+        "base_class" => Some(FrameworkTransformProviderKind::BaseClass),
+        "metaclass" => Some(FrameworkTransformProviderKind::Metaclass),
+        "function_decorator" | "function_to_object_decorator" => {
+            Some(FrameworkTransformProviderKind::FunctionDecorator)
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn framework_transform_capability(value: &str) -> Option<FrameworkTransformCapability> {
+    match value {
+        "field_collection" => Some(FrameworkTransformCapability::FieldCollection),
+        "constructor_generation" => Some(FrameworkTransformCapability::ConstructorGeneration),
+        "alias_handling" => Some(FrameworkTransformCapability::AliasHandling),
+        "required_optional_fields" => Some(FrameworkTransformCapability::RequiredOptionalFields),
+        "readonly_fields" => Some(FrameworkTransformCapability::ReadonlyFields),
+        "descriptor_backed_attributes" => {
+            Some(FrameworkTransformCapability::DescriptorBackedAttributes)
+        }
+        "method_synthesis" => Some(FrameworkTransformCapability::MethodSynthesis),
+        "function_to_object_replacement" => {
+            Some(FrameworkTransformCapability::FunctionToObjectReplacement)
+        }
+        "generic_preservation" => Some(FrameworkTransformCapability::GenericPreservation),
+        _ => None,
+    }
+}
+
+pub(super) fn framework_transform_fallback(value: &str) -> FrameworkTransformFallback {
+    match value {
+        "non_strict_degrade" => FrameworkTransformFallback::NonStrictDegrade,
+        _ => FrameworkTransformFallback::StrictDiagnostic,
+    }
 }
 
 pub(super) fn extract_dataclass_transform_field(

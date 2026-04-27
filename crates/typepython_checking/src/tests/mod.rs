@@ -1123,15 +1123,22 @@ fn binding_metadata_carries_framework_transform_channel() {
         path: PathBuf::from("virtual/framework.tpy"),
         kind: SourceKind::TypePython,
         logical_module: String::from("framework"),
-        text: String::from("def celery_task(fn):\n    return fn\n"),
+        text: String::from(
+            "@framework_transform(kind=\"function_to_object_decorator\")\ndef celery_task(fn):\n    return fn\n",
+        ),
     };
     let tree = parse_with_options(source, ParseOptions::default());
 
     let binding = bind(&tree);
 
     assert!(
-        binding.surface_facts.framework_transform_module_info.providers.is_empty(),
-        "framework transform metadata should have an explicit bound channel even before parser collection lands",
+        binding
+            .surface_facts
+            .framework_transform_module_info
+            .providers
+            .iter()
+            .any(|provider| provider.name == "celery_task"),
+        "binding should preserve framework transform provider declarations",
     );
 }
 
