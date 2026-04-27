@@ -3134,6 +3134,41 @@ fn runtime_annotation_compatibility_diagnostics_warns_for_local_scope_annotation
 }
 
 #[test]
+fn runtime_annotation_compatibility_diagnostics_warns_for_framework_consumers() {
+    let project_dir = temp_project_dir(
+        "runtime_annotation_compatibility_diagnostics_warns_for_framework_consumers",
+    );
+    let diagnostics = {
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\ntarget_python = \"3.14\"\n",
+        )
+        .expect("test setup should succeed");
+        let runtime_path = project_dir.join("app.py");
+        fs::write(
+            &runtime_path,
+            "from fastapi import Depends, FastAPI\nfrom pydantic import BaseModel, Field\n\napp = FastAPI()\n\nclass User(BaseModel):\n    name: str = Field(alias='user_name')\n\n@app.get('/users/{name}')\ndef read_user(name: str, current: str = Depends()) -> User:\n    return User(name=name)\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        runtime_annotation_compatibility_diagnostics(
+            &config,
+            &runtime_path,
+            PythonTarget::PYTHON_3_14,
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let rendered = DiagnosticReport { diagnostics: diagnostics.clone() }.as_text();
+    assert!(rendered.contains("TPY5004"), "{rendered}");
+    assert!(rendered.contains("fastapi.route_decorator"), "{rendered}");
+    assert!(rendered.contains("fastapi.Depends"), "{rendered}");
+    assert!(rendered.contains("pydantic.BaseModel"), "{rendered}");
+    assert!(rendered.contains("pydantic.Field"), "{rendered}");
+}
+
+#[test]
 fn verify_runtime_module_importability_accepts_relative_output_root() {
     let project_dir =
         temp_project_dir("verify_runtime_module_importability_accepts_relative_output_root");
