@@ -114,6 +114,12 @@ fn validate_adapter_manifest(
             "adapter manifest must declare at least one transform",
         ));
     }
+    if manifest.golden_tests.is_empty() {
+        report.push(Diagnostic::error(
+            "TPY7003",
+            "adapter manifest must declare at least one golden test",
+        ));
+    }
     for transform in &manifest.transforms {
         validate_transform(transform, &mut report);
     }
@@ -258,20 +264,27 @@ fn validate_golden_test(
             ));
             continue;
         }
-        if label == "input" {
-            let candidate =
-                base_dir.map_or_else(|| Path::new(path).to_path_buf(), |base| base.join(path));
-            if !candidate.is_file() {
-                report.push(Diagnostic::error(
-                    "TPY7003",
-                    format!(
-                        "adapter golden test `{}` input does not exist: {}",
-                        golden.name,
-                        candidate.display()
-                    ),
-                ));
-            }
+        let candidate =
+            base_dir.map_or_else(|| Path::new(path).to_path_buf(), |base| base.join(path));
+        if !candidate.is_file() {
+            report.push(Diagnostic::error(
+                "TPY7003",
+                format!(
+                    "adapter golden test `{}` {label} does not exist: {}",
+                    golden.name,
+                    candidate.display()
+                ),
+            ));
         }
+    }
+    if golden.checkers.is_empty() {
+        report.push(Diagnostic::error(
+            "TPY7003",
+            format!(
+                "adapter golden test `{}` must name at least one downstream checker",
+                golden.name
+            ),
+        ));
     }
     for checker in &golden.checkers {
         if !matches!(checker.as_str(), "mypy" | "pyright" | "ty") {

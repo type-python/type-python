@@ -26,6 +26,11 @@ fn run_adapter_validate_accepts_safe_manifest() {
     let result = {
         let input = project_dir.join("fixture.tpy");
         fs::write(&input, "class User:\n    pass\n").expect("test fixture should be written");
+        fs::create_dir_all(project_dir.join("expected/app")).expect("golden dir should exist");
+        fs::write(project_dir.join("expected/app/__init__.py"), "class User:\n    pass\n")
+            .expect("runtime golden should be written");
+        fs::write(project_dir.join("expected/app/__init__.pyi"), "class User: ...\n")
+            .expect("stub golden should be written");
         let manifest = project_dir.join("typepython-framework.toml");
         fs::write(
             &manifest,
