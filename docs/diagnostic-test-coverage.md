@@ -2,7 +2,7 @@
 
 This generated report maps every documented `TPYxxxx` diagnostic code to implementation files and Rust test files that mention the code. It is a traceability audit: `needs-test` means the code is emitted by implementation code but no Rust test currently names that diagnostic code directly.
 
-Tracked codes: 32 (32 covered, 0 need tests, 0 reserved).
+Tracked codes: 33 (33 covered, 0 need tests, 0 reserved).
 
 | Code | Severity | Status | Description | Implementation evidence | Test evidence |
 | ---- | -------- | ------ | ----------- | ----------------------- | ------------- |
@@ -31,6 +31,7 @@ Tracked codes: 32 (32 covered, 0 need tests, 0 reserved).
 | `TPY4017` | error | covered | Invalid TypedDict transform target or key selection | `crates/typepython_lowering/src/typeddict.rs` | `crates/typepython_lowering/src/tests.rs` |
 | `TPY4018` | error | covered | Conditional return type does not cover all cases | `crates/typepython_checking/src/semantic.rs` | `crates/typepython_checking/src/tests/calls.rs`<br>`crates/typepython_checking/src/tests/semantic.rs` |
 | `TPY4019` | warning | covered | Unsafe boundary operation used outside `unsafe:` | `crates/typepython_checking/src/semantic.rs`<br>`crates/typepython_lsp/src/requests/analysis/code_actions.rs` | `crates/typepython_checking/src/tests/advanced.rs`<br>`crates/typepython_checking/src/tests/semantic.rs`<br>`crates/typepython_lsp/src/tests.rs` |
+| `TPY4020` | error | covered | Framework transform declaration cannot be applied by the current checker | `crates/typepython_checking/src/semantic.rs` | `crates/typepython_checking/src/tests/semantic.rs` |
 | `TPY4101` | warning/error | covered | Use of deprecated declaration | `crates/typepython_checking/src/calls/reporting.rs` | `crates/typepython_checking/src/tests/advanced.rs` |
 | `TPY5001` | error | covered | Stub (`.pyi`) generation failure | `crates/typepython_cli/src/pipeline.rs`<br>`crates/typepython_emit/src/runtime.rs` | `crates/typepython_emit/src/tests.rs` |
 | `TPY5002` | error | covered | Best-effort emit was disabled by `no_emit_on_error = true` after semantic errors were reported | `crates/typepython_cli/src/pipeline.rs` | `crates/typepython_cli/src/tests/pipeline.rs` |
