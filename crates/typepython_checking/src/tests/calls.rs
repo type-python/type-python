@@ -120,6 +120,26 @@ fn check_accepts_framework_class_decorator_constructor_call() {
 }
 
 #[test]
+fn check_accepts_framework_base_class_constructor_call() {
+    let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\"))\nclass ModelBase:\n    pass\n\nclass User(ModelBase):\n    name: str\n\nuser: User = User(\"Ada\")\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_accepts_framework_metaclass_constructor_call() {
+    let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"metaclass\", capabilities=(\"field_collection\", \"constructor_generation\"))\nclass ModelMeta:\n    pass\n\nclass User(metaclass=ModelMeta):\n    name: str\n\nuser: User = User(\"Ada\")\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
 fn check_reports_framework_class_decorator_constructor_type_mismatch() {
     let result = check_temp_typepython_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    age: int\n\nuser: User = User(\"oops\")\n",
