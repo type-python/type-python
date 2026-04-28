@@ -473,13 +473,13 @@ This is high-value productization work, but it should not block the first framew
   - [x] stub package versions
   - [x] checker versions used for validation
 - [x] Add a `--fail-under` option for type-health score.
-- [ ] Add a package maintainer mode that validates wheel/sdist type metadata before release.
-- [ ] Integrate with `typepython verify`.
+- [x] Add a package maintainer mode that validates wheel/sdist type metadata before release.
+- [x] Integrate with `typepython verify`.
 
 ### Acceptance Criteria
 
 - [x] Users can identify which dependencies are degrading their typing precision.
-- [ ] Library authors can validate that published wheels expose correct PEP 561 metadata.
+- [x] Library authors can validate that published wheels expose correct PEP 561 metadata.
 - [x] CI can lock and review the typing inputs used for a release.
 
 ## P1: Pydantic and FastAPI Integration

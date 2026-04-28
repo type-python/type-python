@@ -261,16 +261,17 @@ Validate build artifacts for publication. Checks consistency between runtime and
 typepython verify [OPTIONS]
 ```
 
-| Flag                | Description                                                                |
-| ------------------- | -------------------------------------------------------------------------- |
-| `--project PATH`    | Project directory                                                          |
-| `--format FORMAT`   | Output format: `text` or `json`                                            |
-| `--wheel PATH`      | Path to a `.whl` file to verify (repeatable)                               |
-| `--sdist PATH`      | Path to a `.tar.gz` sdist to verify (repeatable)                           |
-| `--checker COMMAND` | Run an external type checker against the emitted build output (repeatable) |
-| `--checker-preset PRESET` | Run a named checker preset; `all` expands to `mypy`, `pyright`, and `ty` |
-| `--checker-allowlist PATH` | TOML allowlist of known checker disagreements that should remain visible but non-blocking |
-| `--unsafe-runtime-imports` | Import emitted runtime modules to compare runtime-visible public names; this executes project-controlled Python code |
+| Flag                        | Description                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------ |
+| `--project PATH`            | Project directory                                                                                |
+| `--format FORMAT`           | Output format: `text` or `json`                                                                  |
+| `--wheel PATH`              | Path to a `.whl` file to verify (repeatable)                                                     |
+| `--sdist PATH`              | Path to a `.tar.gz` sdist to verify (repeatable)                                                 |
+| `--checker COMMAND`         | Run an external type checker against the emitted build output (repeatable)                       |
+| `--checker-preset PRESET`   | Run a named checker preset; `all` expands to `mypy`, `pyright`, and `ty`                         |
+| `--checker-allowlist PATH`  | TOML allowlist of known checker disagreements that should remain visible but non-blocking        |
+| `--publication-type-health` | Run package-maintainer type-health checks and fail on PEP 561 metadata or type precision debt    |
+| `--unsafe-runtime-imports`  | Import emitted runtime modules to compare runtime-visible public names; executes project code    |
 
 **Checks performed:**
 
@@ -281,6 +282,7 @@ typepython verify [OPTIONS]
 - Packaging metadata consistency: `Requires-Python` and `typing_extensions` declarations keep pace with emitted native/backport requirements
 - Runtime-annotation compatibility audit: warns when emitted `.py` contains Python 3.14+ annotation consumers or nested local-scope annotations that make runtime introspection fragile
 - PEP 561 readiness summary: explains whether the build is ready for inline typed-package publication and lists blocking issues versus advisories
+- Optional package-maintainer type-health mode: `--publication-type-health` reuses `typepython type-health` metadata checks to fail releases with missing `py.typed`, stale stubs, or public `Any`/untyped precision debt
 
 By default, `verify` stays on structural checks and does not import emitted runtime modules. In that safe mode, TypePython may ignore a project-controlled `resolution.python_executable` and fall back to the host default interpreter for structural helper probes and interpreter-backed package discovery. Pass `--unsafe-runtime-imports` if you also want runtime-visible public-name parity checks for cases like dynamically computed `__all__` and verification against the configured interpreter environment.
 
@@ -298,6 +300,9 @@ typepython verify --project . --unsafe-runtime-imports
 
 # Run the stable downstream checker matrix during publication verification
 typepython verify --project . --checker-preset all
+
+# Enforce maintainer-focused PEP 561 and type-health metadata checks
+typepython verify --project . --publication-type-health
 ```
 
 Checker allowlists use TOML and are intended for temporary, reviewable checker disagreements:
