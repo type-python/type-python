@@ -454,33 +454,33 @@ This is high-value productization work, but it should not block the first framew
 
 ### TODO
 
-- [ ] Add a `typepython type-health` command.
-- [ ] Inspect installed dependencies for `py.typed`.
-- [ ] Detect stub-only packages following the `*-stubs` convention.
-- [ ] Detect partial stub packages.
-- [ ] Report runtime package version vs stub package version compatibility when metadata is available.
-- [ ] Detect common sources of poor typing:
-  - [ ] missing `py.typed`
-  - [ ] partial stubs with broad `Any`
-  - [ ] public functions returning `Any`
-  - [ ] public classes with untyped attributes
-  - [ ] overloaded APIs with fallback `Any`
-  - [ ] unsupported `typing_extensions` features for the configured target
-- [ ] Generate `.typepython/type-lock.toml` to record:
-  - [ ] Python target versions
-  - [ ] `typing_extensions` version
-  - [ ] typeshed commit
-  - [ ] stub package versions
-  - [ ] checker versions used for validation
-- [ ] Add a `--fail-under` option for type-health score.
+- [x] Add a `typepython type-health` command.
+- [x] Inspect installed dependencies for `py.typed`.
+- [x] Detect stub-only packages following the `*-stubs` convention.
+- [x] Detect partial stub packages.
+- [x] Report runtime package version vs stub package version compatibility when metadata is available.
+- [x] Detect common sources of poor typing:
+  - [x] missing `py.typed`
+  - [x] partial stubs with broad `Any`
+  - [x] public functions returning `Any`
+  - [x] public classes with untyped attributes
+  - [x] overloaded APIs with fallback `Any`
+  - [x] unsupported `typing_extensions` features for the configured target
+- [x] Generate `.typepython/type-lock.toml` to record:
+  - [x] Python target versions
+  - [x] `typing_extensions` version
+  - [x] typeshed commit
+  - [x] stub package versions
+  - [x] checker versions used for validation
+- [x] Add a `--fail-under` option for type-health score.
 - [ ] Add a package maintainer mode that validates wheel/sdist type metadata before release.
 - [ ] Integrate with `typepython verify`.
 
 ### Acceptance Criteria
 
-- [ ] Users can identify which dependencies are degrading their typing precision.
+- [x] Users can identify which dependencies are degrading their typing precision.
 - [ ] Library authors can validate that published wheels expose correct PEP 561 metadata.
-- [ ] CI can lock and review the typing inputs used for a release.
+- [x] CI can lock and review the typing inputs used for a release.
 
 ## P1: Pydantic and FastAPI Integration
 
