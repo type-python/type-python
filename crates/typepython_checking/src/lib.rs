@@ -1140,6 +1140,10 @@ fn collect_node_semantic_diagnostics(
     );
     push_diagnostics(
         diagnostics,
+        unclosed_lifecycle_resource_diagnostics(context, node, options.strict),
+    );
+    push_diagnostics(
+        diagnostics,
         unsafe_boundary_diagnostics(context, node, options.strict, options.warn_unsafe),
     );
     push_diagnostics(

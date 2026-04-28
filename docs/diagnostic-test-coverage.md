@@ -2,7 +2,7 @@
 
 This generated report maps every documented `TPYxxxx` diagnostic code to implementation files and Rust test files that mention the code. It is a traceability audit: `needs-test` means the code is emitted by implementation code but no Rust test currently names that diagnostic code directly.
 
-Tracked codes: 36 (36 covered, 0 need tests, 0 reserved).
+Tracked codes: 37 (37 covered, 0 need tests, 0 reserved).
 
 | Code | Severity | Status | Description | Implementation evidence | Test evidence |
 | ---- | -------- | ------ | ----------- | ----------------------- | ------------- |
@@ -34,6 +34,7 @@ Tracked codes: 36 (36 covered, 0 need tests, 0 reserved).
 | `TPY4020` | error | covered | Framework transform declaration cannot be applied by the current checker | `crates/typepython_checking/src/calls/callable_resolution.rs`<br>`crates/typepython_checking/src/semantic.rs` | `crates/typepython_checking/src/tests/semantic.rs` |
 | `TPY4021` | error | covered | Framework field alias is dynamic and cannot be used for safe constructor typing | `crates/typepython_checking/src/semantic.rs` | `crates/typepython_checking/src/tests/semantic.rs` |
 | `TPY4022` | warning | covered | Lifecycle-marked call result is ignored | `crates/typepython_checking/src/semantic.rs` | `crates/typepython_checking/src/tests/semantic.rs` |
+| `TPY4023` | warning | covered | Lifecycle-marked resource is not closed or consumed | `crates/typepython_checking/src/semantic.rs` | `crates/typepython_checking/src/tests/semantic.rs` |
 | `TPY4101` | warning/error | covered | Use of deprecated declaration | `crates/typepython_checking/src/calls/reporting.rs` | `crates/typepython_checking/src/tests/advanced.rs` |
 | `TPY7003` | error | covered | Framework adapter manifest is invalid | `crates/typepython_cli/src/adapter.rs` | `crates/typepython_cli/src/tests/adapter.rs` |
 | `TPY5001` | error | covered | Stub (`.pyi`) generation failure | `crates/typepython_cli/src/pipeline.rs`<br>`crates/typepython_emit/src/runtime.rs` | `crates/typepython_emit/src/tests.rs` |

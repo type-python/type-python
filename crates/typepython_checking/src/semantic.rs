@@ -178,6 +178,64 @@ pub(super) fn ignored_lifecycle_result_diagnostics(
         .collect()
 }
 
+pub(super) fn unclosed_lifecycle_resource_diagnostics(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    strict: bool,
+) -> Vec<Diagnostic> {
+    if !strict || node.module_kind != SourceKind::TypePython {
+        return Vec::new();
+    }
+
+    let Some(info) = context.load_decorator_transform_module_info(node) else {
+        return Vec::new();
+    };
+    let marked_factories = info
+        .callables
+        .into_iter()
+        .filter_map(|site| {
+            let obligation = lifecycle_resource_obligation(&site.decorators)?;
+            site.owner_type_name.is_none().then_some((site.name, obligation))
+        })
+        .collect::<Vec<_>>();
+
+    if marked_factories.is_empty() {
+        return Vec::new();
+    }
+
+    node.assignments
+        .iter()
+        .filter_map(|assignment| {
+            let callee = assignment.value_callee.as_ref()?;
+            let (_, obligation) = marked_factories.iter().find(|(name, _)| name == callee)?;
+            if lifecycle_resource_is_satisfied(
+                node,
+                assignment.owner_name.as_deref(),
+                &assignment.name,
+            ) {
+                return None;
+            }
+            Some(
+                Diagnostic::warning(
+                    "TPY4023",
+                    format!(
+                        "resource `{}` created by `{}` is not {} before scope exit",
+                        assignment.name, callee, obligation.action,
+                    ),
+                )
+                .with_span(Span::new(
+                    node.module_path.display().to_string(),
+                    assignment.line,
+                    1,
+                    assignment.line,
+                    1,
+                ))
+                .with_note(obligation.note),
+            )
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy)]
 struct LifecycleObligation {
     marker: &'static str,
@@ -201,6 +259,40 @@ fn lifecycle_obligation(decorators: &[String]) -> Option<LifecycleObligation> {
             }),
             _ => None,
         }
+    })
+}
+
+fn lifecycle_resource_obligation(decorators: &[String]) -> Option<LifecycleObligation> {
+    decorators.iter().find_map(|decorator| {
+        let short = decorator.rsplit('.').next().unwrap_or(decorator);
+        match short {
+            "must_close" => Some(LifecycleObligation {
+                marker: "@must_close",
+                action: "closed",
+                note: "call `.close()` on the resource, use it in a `with` block, return it, or pass it onward intentionally",
+            }),
+            "must_consume" => Some(LifecycleObligation {
+                marker: "@must_consume",
+                action: "consumed",
+                note: "consume the stream, close it, return it, or pass it onward intentionally",
+            }),
+            _ => None,
+        }
+    })
+}
+
+fn lifecycle_resource_is_satisfied(
+    node: &typepython_graph::ModuleNode,
+    owner_name: Option<&str>,
+    name: &str,
+) -> bool {
+    node.method_calls.iter().any(|call| {
+        call.current_owner_name.as_deref() == owner_name
+            && call.owner_name == name
+            && matches!(call.method.as_str(), "close" | "consume" | "read")
+    }) || node.returns.iter().any(|return_site| {
+        return_site.owner_name.as_str() == owner_name.unwrap_or_default()
+            && return_site.value_name.as_deref() == Some(name)
     })
 }
 

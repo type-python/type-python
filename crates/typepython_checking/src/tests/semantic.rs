@@ -103,6 +103,40 @@ fn check_warns_for_ignored_must_use_result() {
 }
 
 #[test]
+fn check_warns_for_unclosed_lifecycle_resource() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def must_close[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "class Resource:\n",
+            "    def close(self) -> None:\n",
+            "        pass\n\n",
+            "@must_close\n",
+            "def open_resource() -> Resource:\n",
+            "    return Resource()\n\n",
+            "def leak() -> None:\n",
+            "    resource = open_resource()\n\n",
+            "def ok() -> None:\n",
+            "    resource = open_resource()\n",
+            "    resource.close()\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4023"), "{rendered}");
+    assert!(rendered.contains("resource"), "{rendered}");
+    assert!(rendered.contains("open_resource"), "{rendered}");
+    assert!(!rendered.contains("TPY4001"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unsupported_framework_transform_provider_in_strict_mode() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(
