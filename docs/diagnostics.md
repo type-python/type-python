@@ -120,6 +120,7 @@ This is the largest category, covering all type checking rules.
 | `TPY4018` | error         | Conditional return type does not cover all cases                                                                   |
 | `TPY4019` | warning       | Unsafe boundary operation used outside `unsafe:`                                                                   |
 | `TPY4020` | error         | Framework transform declaration cannot be applied by the current checker                                           |
+| `TPY4021` | error         | Framework field alias is dynamic and cannot be used for safe constructor typing                                    |
 | `TPY4101` | warning/error | Use of deprecated declaration                                                                                      |
 
 #### TPY4001 -- Type mismatch
