@@ -152,3 +152,12 @@ and toy ORM manifest sketches that use the same constrained metadata model.
 - Checker expectations name only supported downstream checkers.
 - Dynamic aliases and other runtime-only metadata are diagnosed rather than guessed.
 - Public registry distribution is deferred until multiple adapters prove the abstraction.
+
+## Boundary validators
+
+Frameworks that own runtime validation should expose that through declarative boundary metadata rather
+than TypePython-generated whole-program checks. A boundary adapter names the trusted edge
+(`http_request`, `http_response`, `cli_param`, `config_file`, `message_payload`, `plugin_entrypoint`,
+or `serialized_payload`), the schema type, and whether validation is delegated to the framework or
+generated for project-owned code. See [boundary validator generation](rfcs/boundary-validator-generation.md)
+for the prototype contract.

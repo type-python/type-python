@@ -166,6 +166,11 @@ class User:
             raise TypeError(...)
 ```
 
+Runtime validators are intended for explicit trust boundaries, not whole-program checking. Keep them
+out of public `.pyi` contracts unless a framework adapter intentionally exports a validation API. See
+[the boundary validator generation RFC](rfcs/boundary-validator-generation.md) for HTTP, CLI, config,
+message, plugin, and serialization boundary guidance.
+
 ## Sealed Classes
 
 Declare sealed class hierarchies for exhaustive pattern matching:

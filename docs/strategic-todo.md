@@ -782,26 +782,26 @@ Full runtime type checking would be too invasive and too slow. Boundary-only gen
 
 ### TODO
 
-- [ ] Define what counts as a validation boundary.
-- [ ] Support boundary annotations for:
-  - [ ] HTTP request and response payloads
-  - [ ] CLI command parameters
-  - [ ] config files
-  - [ ] message queue payloads
-  - [ ] plugin entrypoints
-  - [ ] JSON/YAML/TOML serialization boundaries
-- [ ] Decide whether TypePython generates validators directly or delegates to existing libraries.
-- [ ] Add an adapter interface for Pydantic/msgspec/cattrs-style validators.
-- [ ] Generate validation code only when explicitly requested.
-- [ ] Keep generated validators out of public `.pyi` unless intentionally exported.
-- [ ] Add diagnostics when a type cannot be faithfully validated at runtime.
-- [ ] Add examples for API payloads and config loading.
+- [x] Define what counts as a validation boundary.
+- [x] Support boundary annotations for:
+  - [x] HTTP request and response payloads
+  - [x] CLI command parameters
+  - [x] config files
+  - [x] message queue payloads
+  - [x] plugin entrypoints
+  - [x] JSON/YAML/TOML serialization boundaries
+- [x] Decide whether TypePython generates validators directly or delegates to existing libraries.
+- [x] Add an adapter interface for Pydantic/msgspec/cattrs-style validators.
+- [x] Generate validation code only when explicitly requested.
+- [x] Keep generated validators out of public `.pyi` unless intentionally exported.
+- [x] Add diagnostics when a type cannot be faithfully validated at runtime.
+- [x] Add examples for API payloads and config loading.
 
 ### Acceptance Criteria
 
-- [ ] A project can opt into runtime validation at selected boundaries.
-- [ ] The default TypePython workflow still has no mandatory runtime dependency.
-- [ ] Generated validation behavior is explicit and reviewable.
+- [x] A project can opt into runtime validation at selected boundaries.
+- [x] The default TypePython workflow still has no mandatory runtime dependency.
+- [x] Generated validation behavior is explicit and reviewable.
 
 ## P2: Must-Use, Must-Await, and Must-Close Diagnostics
 
