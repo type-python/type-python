@@ -177,7 +177,9 @@ transform path rather than a Pydantic-specific checker branch. A `base_class` pr
 `required_optional_fields` capabilities can model a tiny `BaseModel` fixture whose annotated
 fields use `Field(default=...)`, `Field(default_factory=...)`, and `Field(alias=...)` metadata.
 The generated constructor treats aliased fields without defaults as required, while defaults and
-default factories make fields optional.
+default factories make fields optional. When a provider advertises `readonly_fields`, statically
+known `frozen_default=True` model metadata and `Field(frozen=True)` field metadata feed the same
+frozen-field mutation diagnostics as dataclass-transform shapes.
 
 Known unsupported Pydantic features remain explicit future work:
 
