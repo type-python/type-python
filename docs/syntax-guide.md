@@ -150,20 +150,25 @@ The `frozen` attribute is controlled by the standard `@dataclass(frozen=True)` p
 
 **Runtime validators (experimental):**
 
-When `emit.runtime_validators = true`, data classes gain a `__tpy_validate__()` method:
+When `emit.runtime_validators = true`, selected data-class boundaries gain a classmethod
+`__tpy_validate__()` method. The generated runtime code records which adapter owns validation:
 
 ```python
 # Generated (experimental)
 @dataclass
 class User:
+    __tpy_validate_boundary__ = True
+    __tpy_validation_adapter__ = "builtin"
     name: str
     age: int
 
-    def __tpy_validate__(self) -> None:
-        if not isinstance(self.name, str):
+    @classmethod
+    def __tpy_validate__(cls, __data: dict) -> "User":
+        if not isinstance(__data["name"], str):
             raise TypeError(...)
-        if not isinstance(self.age, int):
+        if not isinstance(__data["age"], int):
             raise TypeError(...)
+        return cls(name=__data["name"], age=__data["age"])
 ```
 
 Runtime validators are intended for explicit trust boundaries, not whole-program checking. Keep them

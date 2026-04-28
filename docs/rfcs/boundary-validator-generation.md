@@ -28,10 +28,12 @@ compilation. A future source form or adapter manifest may identify a boundary wi
 | `plugin_entrypoint` | dynamically loaded object | project-local adapter |
 | `serialized_payload` | JSON/YAML/TOML blob | explicit serializer adapter |
 
-The current built-in `emit.runtime_validators = true` option remains intentionally narrow: it can emit
-data-class runtime validators for project-owned generated code. Broader framework validation should
-delegate to existing libraries through adapter metadata instead of generating a TypePython-specific
-runtime.
+The built-in `emit.runtime_validators = true` option remains opt-in and intentionally narrow by
+default: it emits data-class runtime validators for project-owned generated code. Selected
+boundaries can now opt into adapter delegation by setting `__tpy_validate_boundary__ = True` and
+`__tpy_validation_adapter__ = "builtin" | "pydantic" | "msgspec" | "cattrs"` on the generated
+runtime class. Non-built-in adapters delegate to the framework/library-owned validation entrypoint
+instead of adding a TypePython-specific runtime dependency.
 
 ## Adapter interface
 
