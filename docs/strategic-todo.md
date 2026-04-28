@@ -592,7 +592,7 @@ TypePython already has LSP infrastructure. It should use that position to make m
 - [ ] Add "Explain this type" hover support.
 - [ ] Add "Find source of `Any`" and "Find source of `Unknown`" navigation.
 - [ ] Add quick fixes for portable typing rewrites:
-  - [ ] `typing.List` to `list` when target allows it
+  - [x] `typing.List` to `list` when target allows it
   - [ ] target-compatible `typing_extensions` import selection
   - [ ] overload normalization
   - [ ] `TypedDict` key requiredness fixes
