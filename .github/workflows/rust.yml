@@ -57,7 +57,7 @@ jobs:
         run: python scripts/diagnostic_test_coverage.py --check
 
       - name: Install downstream checker smoke tools
-        run: python -m pip install --upgrade mypy pyright ty
+        run: python -m pip install --upgrade -r scripts/downstream-checker-requirements.txt
 
       - name: Run downstream checker smoke test
         run: python scripts/downstream_checker_smoke.py
