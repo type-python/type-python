@@ -212,6 +212,48 @@ fn diff_api_surfaces_recommends_minor_for_additive_changes() {
 }
 
 #[test]
+fn diff_api_surfaces_classifies_precision_improvements_as_likely_type_compatible() {
+    let project_dir = temp_project_dir("diff_api_surfaces_likely_type_compatible");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(old_dir.join("app.pyi"), "from typing import Any\ndef load() -> Any: ...\n")
+            .expect("old stub should be written");
+        fs::write(new_dir.join("app.pyi"), "def load() -> str: ...\n")
+            .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should succeed")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].classification, "likely type-compatible");
+}
+
+#[test]
+fn diff_api_surfaces_classifies_new_any_as_likely_type_breaking() {
+    let project_dir = temp_project_dir("diff_api_surfaces_new_any_type_breaking");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(old_dir.join("app.pyi"), "def load() -> str: ...\n")
+            .expect("old stub should be written");
+        fs::write(new_dir.join("app.pyi"), "from typing import Any\ndef load() -> Any: ...\n")
+            .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should succeed")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].classification, "likely type-breaking");
+}
+
+#[test]
 fn diff_api_surfaces_recommends_patch_for_unchanged_surfaces() {
     let project_dir = temp_project_dir("diff_api_surfaces_recommends_patch_for_unchanged_surfaces");
     let report = {

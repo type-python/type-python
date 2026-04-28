@@ -149,7 +149,7 @@ pub(crate) fn diff_api_surfaces(old: &Path, new: &Path) -> Result<ApiSurfaceDiff
                         kind: new_symbol.kind.clone(),
                         old_signature: Some(old_symbol.signature.clone()),
                         new_signature: Some(new_symbol.signature.clone()),
-                        classification: String::from("unknown risk"),
+                        classification: classify_changed_symbol(old_symbol, new_symbol),
                     });
                 }
                 _ => {}
@@ -167,6 +167,27 @@ pub(crate) fn diff_api_surfaces(old: &Path, new: &Path) -> Result<ApiSurfaceDiff
         release_notes,
         semver_recommendation,
     })
+}
+
+fn classify_changed_symbol(old_symbol: &PublicSymbol, new_symbol: &PublicSymbol) -> String {
+    if old_symbol.kind != new_symbol.kind {
+        return String::from("unknown risk");
+    }
+    let old_dynamic = signature_mentions_dynamic_type(&old_symbol.signature);
+    let new_dynamic = signature_mentions_dynamic_type(&new_symbol.signature);
+    if old_dynamic && !new_dynamic {
+        return String::from("likely type-compatible");
+    }
+    if !old_dynamic && new_dynamic {
+        return String::from("likely type-breaking");
+    }
+    String::from("unknown risk")
+}
+
+fn signature_mentions_dynamic_type(signature: &str) -> bool {
+    signature
+        .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+        .any(|token| matches!(token, "Any" | "Unknown" | "unknown" | "dynamic"))
 }
 
 fn semver_recommendation(
