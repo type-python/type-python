@@ -20,6 +20,7 @@ class CodeCell:
     untyped_functions: tuple[str, ...]
     dict_like_records: tuple[str, ...]
     dataframe_boundaries: tuple[str, ...]
+    schema_annotations: tuple[str, ...]
     side_effects: tuple[str, ...]
 
     def to_json(self) -> dict[str, object]:
@@ -172,6 +173,10 @@ def analyze_source(index: int, source: str, previous_defs: set[str]) -> CodeCell
         untyped_functions=tuple(sorted(facts.untyped_functions)),
         dict_like_records=tuple(sorted(facts.dict_like_records)),
         dataframe_boundaries=tuple(sorted(facts.dataframe_boundaries)),
+        schema_annotations=tuple(
+            f"{name}: DataFrameSchema[unknown]"
+            for name in sorted(facts.dataframe_boundaries)
+        ),
         side_effects=tuple(sorted(facts.side_effects)),
     )
 
@@ -202,7 +207,12 @@ def build_pyi_preview(cells: Sequence[CodeCell]) -> str:
                 for target in targets:
                     for name in sorted(assigned_names(target)):
                         if not name.startswith("_"):
-                            lines.append(f"{name}: object")
+                            annotation = (
+                                "DataFrameSchema[unknown]"
+                                if name in cell.dataframe_boundaries
+                                else "object"
+                            )
+                            lines.append(f"{name}: {annotation}")
     return "\n".join(lines) + ("\n" if lines else "")
 
 

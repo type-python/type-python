@@ -39,12 +39,14 @@ class NotebookIngestTests(unittest.TestCase):
         self.assertEqual(report.cells[0].dict_like_records, ("raw",))
         self.assertEqual(report.cells[1].uses_previous, ("raw",))
         self.assertEqual(report.cells[1].dataframe_boundaries, ("df",))
+        self.assertEqual(report.cells[1].schema_annotations, ("df: DataFrameSchema[unknown]",))
         self.assertEqual(report.cells[1].untyped_functions, ("summarize",))
         self.assertEqual(report.cells[1].implicit_globals, ())
         self.assertEqual(report.cells[2].uses_previous, ("df", "summarize"))
         self.assertEqual(report.cells[2].side_effects, ("print",))
         self.assertIn("# %% notebook cell 2", report.candidate_tpy)
         self.assertIn("def summarize(...): ...", report.pyi_preview)
+        self.assertIn("df: DataFrameSchema[unknown]", report.pyi_preview)
 
 
 if __name__ == "__main__":

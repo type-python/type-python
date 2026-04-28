@@ -873,7 +873,7 @@ Possible later work:
   - [x] side-effectful cells
 - [x] Generate candidate `.tpy` modules from selected cells.
 - [x] Generate `.pyi` previews for extracted modules.
-- [ ] Add lightweight schema annotations for pandas/polars-like tabular boundaries.
+- [x] Add lightweight schema annotations for pandas/polars-like tabular boundaries.
 - [x] Avoid committing to full tensor shape algebra in this workflow.
 
 ## Deferred: Typestate
