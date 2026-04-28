@@ -264,7 +264,7 @@ Make TypePython credible as a compiler that users can place in a release pipelin
   - [x] emit/stub generation
   - [x] CLI verify
 - [x] Publish coverage artifact in CI.
-- [ ] Establish minimum coverage thresholds only after baseline stabilization.
+- [x] Establish minimum coverage thresholds only after baseline stabilization.
 
 ### Fuzzing TODO
 

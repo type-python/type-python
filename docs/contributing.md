@@ -305,7 +305,7 @@ Coverage uses [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov). The
 - `coverage/coverage.txt` for quick terminal/artifact review
 - `target/llvm-cov/html/` for a browsable report
 
-The GitHub Actions `coverage` job uploads those three outputs as the `rust-coverage` artifact. Coverage thresholds are intentionally not enforced yet; establish minimums only after the baseline stabilizes.
+The GitHub Actions `coverage` job uploads those three outputs as the `rust-coverage` artifact. The same `make coverage` target enforces the repository's stabilized minimum line coverage through `COVERAGE_MIN_LINES`, which currently defaults to a conservative `20` and can be raised as the baseline improves.
 
 ### Fuzzing
 
