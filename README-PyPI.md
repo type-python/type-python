@@ -1,78 +1,125 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/type-python/type-python/main/logo.png" alt="TypePython" width="128" />
+  <img src="https://raw.githubusercontent.com/type-python/type-python/main/logo.png" alt="TypePython" width="160" />
 </p>
 
 <h1 align="center">TypePython</h1>
 
 <p align="center">
-  <strong>Write richer types. Emit standard Python.</strong>
+  <strong>Write richer types in <code>.tpy</code>. Ship plain <code>.py</code> + <code>.pyi</code>.</strong>
 </p>
 
 ---
 
-A statically-typed authoring language that compiles to standard Python.
+TypePython is a typed dialect of Python that compiles to standard `.py` + `.pyi`.
+It brings TypeScript-class ergonomics — `sealed` classes, exhaustive `match`,
+strict null checks, `unknown`, `interface`, `data class` — to a language whose
+output runs anywhere CPython runs.
 
-Write `.tpy` source files with `interface`, `data class`, `sealed class`, inline generics, and strict null safety. The compiler emits standard `.py` + `.pyi` files for Python 3.10-3.14. No custom runtime, no vendor lock-in.
+**No custom runtime. No per-checker plugin. No vendor lock-in.**
+
+> Status: **alpha** (v0.3.0). The compiler core, type checker, and LSP are
+> stable; framework adapters and runtime validators are in prototype.
+> Bug reports and contributions are very welcome.
 
 ## Install
 
 ```bash
 pip install type-python
-typepython --help
-```
-
-The Python package bridge supports **Python 3.9+**. Generated projects can target **Python 3.10 through 3.14**.
-
-Published wheels bundle the Rust CLI binary. Prebuilt wheels are available for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64. Other platforms fall back to the source distribution and require Rust + `cargo`.
-
-## Quick Start
-
-```bash
-typepython init --dir my-project
-cd my-project
+typepython init --dir hello && cd hello
 typepython check --project .
 typepython build --project .
 ```
 
-Example source:
+You now have `.typepython/build/` with `.py` + `.pyi` + `py.typed` ready for
+any Python interpreter, IDE, or downstream type checker.
+
+- **Wheels** are prebuilt for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64.
+  Other platforms fall back to source and need Rust + `cargo`.
+- **Python**: the package bridge supports 3.9+; generated projects target 3.10 – 3.14.
+
+## See it in 15 lines
 
 ```python
-# src/app/__init__.tpy
+# src/app/expr.tpy
 
 sealed class Expr:
     pass
 
-data class Num(Expr):
-    value: int
-
-data class Add(Expr):
-    left: Expr
-    right: Expr
+class Num(Expr):  value: int
+class Add(Expr):  left: Expr; right: Expr
+class Neg(Expr):  operand: Expr
 
 def evaluate(expr: Expr) -> int:
     match expr:
-        case Num(value=v):
-            return v
-        case Add(left=l, right=r):
-            return evaluate(l) + evaluate(r)
-    # Compiler proves all cases are covered -- no default needed.
+        case Num(value=v):           return v
+        case Add(left=l, right=r):   return evaluate(l) + evaluate(r)
+        case Neg(operand=o):         return -evaluate(o)
+    # No default branch needed — the compiler proves the match is exhaustive.
+    # Add a fourth subclass and TypePython tells you exactly where to update.
 ```
 
-## What You Get
+`typepython build` lowers that to ordinary Python and writes a matching `.pyi`
+that any modern type checker can consume — no TypePython runtime required.
 
-| Your code (`.tpy`)                | Emitted output (`.py` / `.pyi`)                    |
-| --------------------------------- | -------------------------------------------------- |
-| `sealed class Expr:`              | `class Expr:  # tpy:sealed`                        |
-| `data class Num(Expr):`           | `@dataclass` plus ordinary `class Num(Expr):`      |
-| `interface Drawable:`             | `class Drawable(Protocol):`                        |
-| `overload def f(x: int) -> int:`  | `@overload` plus ordinary `def f(x: int) -> int:`  |
-| `typealias Pair[T] = tuple[T, T]` | `T = TypeVar("T"); Pair: TypeAlias = tuple[T, T]`  |
+## What you write vs. what ships
 
-- **Rich type system** -- `unknown`, `dynamic`, `Never`, strict nulls, sealed exhaustiveness, generic defaults, TypeVarTuple
-- **TypedDict utilities** -- `Partial`, `Required_`, `Readonly`, `Mutable`, `Pick`, `Omit`
-- **Full toolchain** -- `init`, `check`, `build`, `watch`, `clean`, `verify`, `lsp`, `migrate`
-- **LSP server** -- hover, go-to-definition, references, rename, completions, signature help, diagnostics
-- **Standard output** -- emitted `.py` + `.pyi` work with mypy, pyright, and ty out of the box
+| You write (`.tpy`)                    | TypePython emits (`.py` / `.pyi`)                         |
+| ------------------------------------- | --------------------------------------------------------- |
+| `interface Drawable:`                 | `class Drawable(Protocol):`                               |
+| `data class User:`                    | `@dataclass class User:`                                  |
+| `sealed class Expr:`                  | ordinary class + `tpy:sealed` marker                      |
+| `overload def parse(...)`             | `@overload def parse(...)`                                |
+| `typealias Pair[T] = tuple[T, T]`     | `T = TypeVar("T")` + `Pair: TypeAlias = tuple[T, T]`      |
+| `def first[T](xs: list[T]) -> T:`     | inline generic on 3.13+, `TypeVar`-based on 3.10 – 3.12   |
+| `unsafe: eval(expr)`                  | valid Python, marker erased — runtime behavior preserved  |
+| `unknown` (must narrow before use)    | `object` in `.pyi`                                        |
+| `Partial[Config]` / `Pick[Config, …]` | expanded `TypedDict` shapes (PEP 655 / 705)               |
+
+## Why not just mypy / pyright / PEP 695?
+
+| Capability                                              | mypy strict | pyright strict | PEP 695 `.py` | **TypePython `.tpy`** |
+| ------------------------------------------------------- | :---------: | :------------: | :-----------: | :-------------------: |
+| `sealed class` + compiler-proved exhaustiveness         |      —      |       —        |       —       |          ✅           |
+| `unknown` — safe dynamic boundary, must narrow          |      —      |       —        |       —       |          ✅           |
+| `unsafe:` audit fence for `eval` / `exec` / `setattr`   |      —      |       —        |       —       |          ✅           |
+| First-class `interface` / `data class` / `typealias`    |    via      |     via        |    via        |     keyword           |
+| Inline generics `def f[T]` on **any** target ≥ 3.10     |     3.12+   |     3.12+      |     3.12+     |          ✅           |
+| `TypedDict` transforms (`Partial`, `Pick`, `Readonly`…) |      —      |       —        |       —       |          ✅           |
+| Output consumed by mypy / pyright / ty unmodified       |     N/A     |     N/A        |       ✅       |          ✅           |
+
+TypePython doesn't replace those checkers. It sits **one step earlier**: you
+author in `.tpy`, the compiler emits standard typed Python that those tools
+then consume normally.
+
+## What you also get
+
+- **Rust-native, incremental compiler** — public-API fingerprints skip
+  downstream rechecks when only a body changes.
+- **Full toolchain** — `init`, `check`, `build`, `watch`, `clean`, `verify`,
+  `compat`, `api-diff`, `type-health`, `migrate`, `lsp`.
+- **LSP server** — hover, go to definition, references, rename, completions,
+  signature help, real-time diagnostics, and code-action quick fixes.
+  Bring your own LSP-capable editor (VS Code, Neovim, Helix, Sublime, Emacs).
+- **Standard, portable output** — emitted `.py` + `.pyi` work with mypy,
+  pyright, and ty out of the box. PEP 561 `py.typed` is written automatically.
+- **Mixed projects** — `.tpy`, `.py`, and `.pyi` live in the same source tree.
+  `.py` is pass-through; `.pyi` is stub-authoritative.
+
+## For library authors
+
+Five commands aimed at people who *publish* typed Python:
+
+```bash
+typepython build       --project .
+typepython verify      --project . --checker-preset all
+typepython compat      --project . --profile library-portable
+typepython api-diff    dist/previous.whl .typepython/build
+typepython type-health --project . --fail-under 85
+```
+
+These catch missing/stale `py.typed`, wheel ↔ build-tree drift, multi-checker
+portability gaps, public-API drift between releases, and runtime-annotation
+hazards for frameworks that introspect annotations.
 
 ## Documentation
 
@@ -81,11 +128,16 @@ def evaluate(expr: Expr) -> int:
 - [Type System](https://github.com/type-python/type-python/blob/main/docs/type-system.md)
 - [Configuration](https://github.com/type-python/type-python/blob/main/docs/configuration.md)
 - [CLI Reference](https://github.com/type-python/type-python/blob/main/docs/cli-reference.md)
+- [Diagnostics (TPYxxxx codes)](https://github.com/type-python/type-python/blob/main/docs/diagnostics.md)
+- [LSP Integration](https://github.com/type-python/type-python/blob/main/docs/lsp.md)
 - [Interoperability](https://github.com/type-python/type-python/blob/main/docs/interop.md)
-- [Language Spec](https://github.com/type-python/type-python/blob/main/docs/spec/language-spec-v1.md)
+- [Migration Guide](https://github.com/type-python/type-python/blob/main/docs/migration-guide.md)
+- [Framework Adapters](https://github.com/type-python/type-python/blob/main/docs/framework-adapters.md)
+- [Language Spec v1](https://github.com/type-python/type-python/blob/main/docs/spec/language-spec-v1.md)
 
 ## Links
 
 - [Repository](https://github.com/type-python/type-python)
-- [Issues](https://github.com/type-python/type-python/issues)
+- [Issues / bug reports](https://github.com/type-python/type-python/issues)
+- [Contributing](https://github.com/type-python/type-python/blob/main/docs/contributing.md)
 - [License (MIT)](https://github.com/type-python/type-python/blob/main/LICENSE)

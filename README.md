@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="logo.png" alt="TypePython" width="128" />
+  <img src="logo.png" alt="TypePython" width="160" />
 </p>
 
 <h1 align="center">TypePython</h1>
 
 <p align="center">
-  <strong>Compile framework-shaped Python into checker-portable <code>.py</code> + <code>.pyi</code>.</strong>
+  <strong>Write richer types in <code>.tpy</code>. Ship plain <code>.py</code> + <code>.pyi</code>.</strong>
 </p>
 
 <p align="center">
@@ -13,215 +13,213 @@
   <a href="https://github.com/type-python/type-python/actions/workflows/rust.yml"><img src="https://github.com/type-python/type-python/actions/workflows/rust.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="Python 3.9+" /></a>
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-msrv%201.94.0-orange.svg" alt="Rust" /></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/built%20with-rust-orange.svg" alt="Built with Rust" /></a>
+  <a href="https://github.com/type-python/type-python/issues"><img src="https://img.shields.io/badge/status-alpha-yellow.svg" alt="Alpha" /></a>
 </p>
 
 <p align="center">
-  TypePython is a static shape compiler for typed Python projects.<br/>
-  It lets framework-heavy code describe generated static surfaces once, then emits ordinary Python,
-  authoritative stubs, and publication-ready typing metadata for mypy, pyright, ty, IDEs, and PyPI.<br/>
-  No mandatory runtime. No checker-specific plugin path.
+  TypePython is a typed dialect of Python that compiles to standard <code>.py</code> + <code>.pyi</code>.<br/>
+  It brings TypeScript-class ergonomics — <code>sealed</code> classes, exhaustive <code>match</code>,
+  strict null checks, <code>unknown</code>, <code>interface</code>, <code>data class</code> —
+  to a language whose output runs anywhere CPython runs.<br/>
+  <em>No custom runtime. No per-checker plugin. No vendor lock-in.</em>
 </p>
 
 ---
 
-## Why TypePython
-
-Python already has type checkers. TypePython sits one step earlier.
-
-```
-you write .tpy + framework shape metadata
-        |
-        v
-TypePython compiles standard artifacts
-        |
-        v
-.py + .pyi + py.typed
-        |
-        v
-mypy / pyright / ty / IDEs / package consumers
-```
-
-The goal is not to replace mypy, pyright, ty, or Pyrefly. The goal is to make the typed surface those tools consume more explicit, portable, and release-ready.
-
-This matters most when normal Python annotations cannot express the static shape that a runtime framework creates:
-
-- Pydantic-style model constructors and field aliases
-- ORM mapped attributes and generated class members
-- task decorators that replace functions with task objects
-- route, dependency, CLI, and command decorators
-- dataclass-like frameworks that go beyond the standardized `dataclass_transform` lane
-
-TypePython preserves framework runtime behavior in emitted `.py` and emits the transformed static surface in `.pyi`, so downstream tools do not need TypePython-specific support.
-
-## Who It Helps
-
-| If you are...               | TypePython helps you...                                                                                                           |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **Framework author**        | Ship checker-neutral static shape metadata instead of maintaining one plugin per checker.                                         |
-| **Library maintainer**      | Generate and verify `.pyi`, `py.typed`, wheel/sdist contents, and public typing API diffs before release.                         |
-| **Large application team**  | Migrate gradually with `unknown`, strict nulls, diagnostic baselines, type budgets, and checker portability reports.              |
-| **Platform / typing owner** | Centralize framework transforms, dependency type-health checks, and multi-checker CI policy.                                      |
-| **IDE integrator**          | Use the built-in LSP for diagnostics, hover, definitions, references, rename, completions, formatting, and emitted-stub previews. |
-
-## Framework Shape Demo
-
-Frameworks often create a useful runtime API that ordinary type checkers cannot infer without custom plugins. TypePython models that static shape declaratively and lowers it into standard artifacts.
+## See it in 15 lines
 
 ```python
-# framework metadata, sidecar stubs, or a local framework module
+# src/app/expr.tpy
 
-def framework_transform(*args, **kwargs):
-    def wrap(obj):
-        return obj
-    return wrap
-
-def Field(*, default=None, default_factory=None, alias=None, frozen=False):
-    return default
-
-@framework_transform(
-    kind="base_class",
-    capabilities=(
-        "field_collection",
-        "constructor_generation",
-        "alias_handling",
-        "required_optional_fields",
-        "readonly_fields",
-    ),
-)
-class BaseModel:
+sealed class Expr:
     pass
+
+class Num(Expr):  value: int
+class Add(Expr):  left: Expr; right: Expr
+class Neg(Expr):  operand: Expr
+
+def evaluate(expr: Expr) -> int:
+    match expr:
+        case Num(value=v):           return v
+        case Add(left=l, right=r):   return evaluate(l) + evaluate(r)
+        case Neg(operand=o):         return -evaluate(o)
+    # No default branch needed — the compiler proves the match is exhaustive.
+    # Add a fourth subclass and TypePython tells you exactly where to update.
 ```
+
+`typepython build` lowers that to ordinary Python and writes a matching `.pyi` that any modern type checker can consume:
 
 ```python
-# app/models.tpy
-
-class User(BaseModel):
-    id: int = Field(alias="user_id", frozen=True)
-    name: str = Field(default="Ada")
-    tags: object = Field(default_factory=list)
-
-user: User = User(user_id=1)
+# .typepython/build/app/expr.py        # runs on stock CPython, no TypePython runtime
+class Expr:
+    pass  # tpy:sealed
+class Num(Expr): ...
+class Add(Expr): ...
+class Neg(Expr): ...
+def evaluate(expr: Expr) -> int: ...
 ```
 
-TypePython can expose the checker-facing constructor and generated shape in `.pyi` while leaving the runtime framework code alone:
-
-```python
-class User(BaseModel):
-    id: int
-    name: str
-    tags: object
-
-    def __init__(
-        self,
-        user_id: int,
-        name: str = ...,
-        tags: object = ...,
-    ) -> None: ...
-```
-
-The runtime framework still owns validation and behavior. TypePython owns the static artifact that mypy, pyright, ty, and IDEs can read.
-
-See [Framework Adapters](docs/framework-adapters.md) and the downstream checker fixtures under [`test-fixtures/downstream-checkers/`](test-fixtures/downstream-checkers/).
-
-## Language Ergonomics
-
-TypePython also gives `.tpy` authors a stricter and more expressive type authoring layer:
-
-| TypePython source                 | Standard emitted surface                       |
-| --------------------------------- | ---------------------------------------------- |
-| `interface Drawable:`             | `class Drawable(Protocol):`                    |
-| `data class User:`                | `@dataclass` plus ordinary `class User:`       |
-| `sealed class Expr:`              | ordinary class plus TypePython sealed metadata |
-| `overload def parse(...):`        | `@overload def parse(...):`                    |
-| `typealias Pair[T] = tuple[T, T]` | `TypeVar` + `TypeAlias` or native `type` alias |
-| `def first[T](xs: list[T]) -> T:` | compat or native generic function output       |
-| `unsafe: eval(expr)`              | valid Python block preserving runtime behavior |
-
-Safety-focused additions include:
-
-- `unknown` for safe dynamic boundaries that must be narrowed before use
-- explicit `dynamic` for intentional opt-out behavior
-- strict null checks with `T | None`
-- sealed class and enum exhaustiveness checks
-- `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `Required_` transforms for `TypedDict` and shape-backed experiments
-- `ParamSpec`, `TypeVarTuple`, generic defaults, recursive aliases, `Self`, `NewType`, and standard decorator typing
-
-See [Syntax Guide](docs/syntax-guide.md) and [Type System](docs/type-system.md).
-
-## Publishing Workflow
-
-TypePython is designed for projects that publish or depend on typed Python packages.
-
-```bash
-typepython build --project .
-typepython verify --project . --checker-preset all
-typepython compat --project . --profile library-portable
-typepython api-diff dist/previous.whl .typepython/build
-typepython type-health --project . --fail-under 85
-```
-
-These commands help catch:
-
-- missing or stale `.py`, `.pyi`, and `py.typed` artifacts
-- wheel/sdist contents that diverge from the local build tree
-- checker portability problems across mypy, pyright, and ty
-- public typing API drift between releases
-- untyped or low-precision dependency surfaces
-- runtime annotation compatibility risks for annotation-inspecting frameworks
-
-See [Interoperability](docs/interop.md), [CLI Reference](docs/cli-reference.md), and [Migration Guide](docs/migration-guide.md).
-
-## Install
+## Install & first project (60 seconds)
 
 ```bash
 pip install type-python
-typepython --help
-```
-
-The Python package bridge supports **Python 3.9+**. Generated TypePython projects can target **Python 3.10 through 3.14**.
-
-Published wheels are platform-specific because they bundle the Rust CLI binary. Prebuilt wheels are available for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64. Other platforms fall back to the source distribution and require Rust + `cargo`.
-
-The workspace MSRV is Rust 1.94.0. `./scripts/bootstrap-rust.sh` installs the same Rust 1.94.0 toolchain used by CI.
-
-Build from source:
-
-```bash
-git clone https://github.com/type-python/type-python.git
-cd type-python
-./scripts/bootstrap-rust.sh
-cargo build --release -p typepython-cli
-```
-
-## Quick Start
-
-```bash
-typepython init --dir my-project
-cd my-project
+typepython init --dir hello && cd hello
 typepython check --project .
 typepython build --project .
 ```
 
-The starter project writes:
+You now have `.typepython/build/` with `.py` + `.pyi` + `py.typed` ready for any Python interpreter, IDE, or downstream type checker.
 
-```text
-my-project/
-  typepython.toml
-  src/
-    app/
-      __init__.tpy
+> **Wheels** are prebuilt for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64. Other platforms fall back to source and need Rust + `cargo`.
+> **Python**: the package bridge supports 3.9+; generated projects target 3.10 – 3.14.
+
+## What you actually write vs. what ships
+
+| You write (`.tpy`)                    | TypePython emits (`.py` / `.pyi`)                         |
+| ------------------------------------- | --------------------------------------------------------- |
+| `interface Drawable:`                 | `class Drawable(Protocol):`                               |
+| `data class User:`                    | `@dataclass class User:`                                  |
+| `sealed class Expr:`                  | ordinary class + `tpy:sealed` marker                      |
+| `overload def parse(...)`             | `@overload def parse(...)`                                |
+| `typealias Pair[T] = tuple[T, T]`     | `T = TypeVar("T")` + `Pair: TypeAlias = tuple[T, T]`      |
+| `def first[T](xs: list[T]) -> T:`     | inline generic on 3.13+, `TypeVar`-based on 3.10 – 3.12   |
+| `unsafe: eval(expr)`                  | valid Python, marker erased — runtime behavior preserved  |
+| `unknown` (must narrow before use)    | `object` in `.pyi`                                        |
+| `Partial[Config]` / `Pick[Config, …]` | expanded `TypedDict` shapes (PEP 655 / 705)               |
+
+Full lowering map: [`docs/interop.md`](docs/interop.md) · syntax tour: [`docs/syntax-guide.md`](docs/syntax-guide.md).
+
+## Why not just mypy / pyright / PEP 695?
+
+Python's type story has gotten genuinely good. TypePython exists for the gaps that source-only annotations still can't close.
+
+| Capability                                              | mypy strict | pyright strict | PEP 695 `.py` | **TypePython `.tpy`** |
+| ------------------------------------------------------- | :---------: | :------------: | :-----------: | :-------------------: |
+| `sealed class` + compiler-proved exhaustiveness         |      —      |       —        |       —       |          ✅           |
+| `unknown` — safe dynamic boundary, must narrow          |      —      |       —        |       —       |          ✅           |
+| `unsafe:` audit fence for `eval` / `exec` / `setattr`   |      —      |       —        |       —       |          ✅           |
+| First-class `interface` / `data class` / `typealias`    |    via      |     via        |    via        |     keyword           |
+| Inline generics `def f[T]` on **any** target ≥ 3.10     |     3.12+   |     3.12+      |     3.12+     |          ✅           |
+| `TypedDict` transforms (`Partial`, `Pick`, `Readonly`…) |      —      |       —        |       —       |          ✅           |
+| Framework shapes beyond `dataclass_transform`           |   plugin    |    plugin      |       —       |    declarative        |
+| Output consumed by mypy / pyright / ty unmodified       |     N/A     |     N/A        |       ✅       |          ✅           |
+
+TypePython doesn't replace those checkers. It sits **one step earlier**: you author in `.tpy`, the compiler emits standard typed Python that those tools then consume normally.
+
+## Who this is for
+
+- **Python developers who envy TypeScript.** You want sealed unions, exhaustiveness, `unknown`, strict nulls, and `interface` without inventing five mypy plugins to get there.
+- **Library authors.** You publish a typed package and need `py.typed`, `.pyi`, wheel/sdist contents, and public-API drift to all stay in sync. `verify`, `compat`, and `api-diff` are built for that.
+- **Application teams adopting types gradually.** Mix `.tpy`, `.py`, and `.pyi` in the same source tree; baseline existing debt; gate new debt with type-budgets.
+- **Framework authors** (advanced, currently prototype). Describe your runtime-generated shape **once**, declaratively, and stop maintaining one plugin per checker.
+- **Platform / typing owners.** Centralize multi-checker policy, dependency type-health checks, and framework adapters in CI.
+
+## Tour of the toolchain
+
+```bash
+typepython init      --dir my-project        # scaffold
+typepython check     --project .             # type check only
+typepython build     --project .             # emit .py + .pyi + py.typed
+typepython watch     --project .             # rebuild on save (~80 ms debounce)
+typepython lsp       --project .             # JSON-RPC LSP over stdio
+
+typepython verify    --project .             # structural .py / .pyi parity
+typepython compat    --project . --profile library-portable
+typepython api-diff  old-stubs new-stubs     # public typing API drift
+typepython type-health --project . --fail-under 85
+typepython migrate   --project . --report    # adoption baseline
 ```
 
-Project configuration can live in `typepython.toml` or `[tool.typepython]` in `pyproject.toml`:
+- All project-oriented commands accept `--format text|json` for CI.
+- The Rust core is incremental: a public-API fingerprint per module skips downstream rechecks when only a body changes; persistent state lives under `.typepython/cache/`.
+- Diagnostics ship as a documented catalog of `TPYxxxx` codes ([`docs/diagnostics.md`](docs/diagnostics.md)), with machine-readable suggestions for code-action fixes.
+
+Full reference: [`docs/cli-reference.md`](docs/cli-reference.md).
+
+## Editor support
+
+`typepython lsp --project .` is a stdio LSP server with:
+
+- real-time diagnostics, hover, go to definition, references, rename
+- completions, signature help
+- formatting via `ruff format`, `black`, or a configured formatter
+- code actions for migration and portability fixes
+- project commands (`migrate`, `compat`, `type-health`, emitted-output preview, `Any` / `Unknown` source lookup)
+
+There is **no official editor extension yet** — any LSP-capable editor (VS Code, Neovim, Helix, Sublime Text, Emacs) can launch the server. Setup snippets are in [`docs/lsp.md`](docs/lsp.md).
+
+## Standard, portable output — by design
+
+TypePython makes one strong promise about its output:
+
+> Emitted `.py` and `.pyi` contain **only standard Python typing constructs**. Nothing TypePython-specific leaves the build directory.
+
+A few stronger guarantees are author-time only — they live in your `.tpy` source and don't survive into the consumer-facing artifacts:
+
+| TypePython author-time guarantee   | At the boundary                                |
+| ---------------------------------- | ---------------------------------------------- |
+| `unknown` requires narrowing       | lowers to `object` in `.pyi`                   |
+| `sealed class` exhaustiveness      | external checkers see a normal class           |
+| `unsafe:` audit fence              | erased; lowered to valid Python                |
+| `TypedDict` transforms             | expanded to standard `TypedDict` shapes        |
+
+This trade is intentional: **you get stronger checks while authoring; consumers get clean, portable Python they can read with mypy, pyright, ty, IDEs, and any PEP 561 tool**. See [`docs/interop.md`](docs/interop.md).
+
+## For library and framework authors
+
+Two pieces of the toolchain are aimed squarely at people who *publish* typed Python.
+
+**Publishing workflow** — keep your typed surface release-ready:
+
+```bash
+typepython build       --project .
+typepython verify      --project . --checker-preset all
+typepython compat      --project . --profile library-portable
+typepython api-diff    dist/previous.whl .typepython/build
+typepython type-health --project . --fail-under 85
+```
+
+These catch missing/stale `py.typed`, wheel ↔ build-tree drift, multi-checker portability gaps, public-API drift between releases, and runtime-annotation hazards for frameworks that introspect annotations.
+
+**Framework shape adapters** *(prototype tier)* — describe a runtime-generated API once, lower it into `.pyi` declaratively, and skip per-checker plugins:
+
+```python
+# A framework-side declaration (Pydantic-style, abridged):
+@framework_transform(kind="base_class",
+                     capabilities=("field_collection",
+                                   "constructor_generation",
+                                   "alias_handling"))
+class BaseModel: ...
+```
+
+`.pyi` then exposes the generated `__init__(...)`, alias-aware fields, and shape transforms automatically. See [`docs/framework-adapters.md`](docs/framework-adapters.md) and the downstream-checker fixtures under [`test-fixtures/downstream-checkers/`](test-fixtures/downstream-checkers/).
+
+## Project status
+
+TypePython is **alpha** (v0.3.0). The breakdown:
+
+| Tier             | What's there                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Stable core**  | `.tpy` / `.py` / `.pyi` parsing and project discovery; checker for the documented Core v1 feature set; `.py` lowering and `.pyi` generation; incremental CLI / LSP cache; `build`, `check`, `verify`, `compat`, `api-diff`, `type-health`, `migrate`; LSP diagnostics, navigation, completion, hover, formatting, code actions.                                    |
+| **Prototype**    | framework transform metadata and `typepython-framework.toml` adapter validation; framework shape synthesis for representative fixture families; boundary validator generation and delegated validator adapters; checker portability profiles and allowlists.                                                                                                      |
+| **Experimental** | shape projection beyond `TypedDict` and dataclass-backed shapes; conditional return syntax; sync/async dual emit paths; notebook ingestion and other deferred research tracks.                                                                                                                                                                                     |
+
+Conformance and diagnostic-coverage reports are checked into the repo: [`docs/conformance-report.md`](docs/conformance-report.md), [`docs/diagnostic-test-coverage.md`](docs/diagnostic-test-coverage.md).
+
+> **It's early.** The compiler is one maintainer plus contributors; the spec is a v1 draft. Expect rough edges. Bug reports, design feedback, and PRs all carry weight at this stage.
+
+## Configuration
+
+Project config lives in `typepython.toml`, or in `[tool.typepython]` inside `pyproject.toml`:
 
 ```toml
 [project]
 src = ["src"]
-target_python = "3.10"
+target_python = "3.10"            # 3.10 – 3.14 supported
 
 [typing]
-profile = "application"    # "library" | "application" | "migration"
+profile = "application"           # "library" | "application" | "migration"
 strict = true
 strict_nulls = true
 
@@ -230,140 +228,83 @@ emit_pyi = true
 no_emit_on_error = true
 ```
 
-See [Configuration](docs/configuration.md).
-
-## CLI
-
-```bash
-typepython init    --dir my-project
-typepython check   --project .
-typepython build   --project .
-typepython watch   --project .
-typepython clean   --project .
-typepython lsp     --project .
-
-typepython verify  --project .
-typepython verify  --project . --unsafe-runtime-imports
-typepython verify  --project . --checker-preset all
-typepython compat  --project . --profile library-portable
-typepython api-diff old-stubs new-stubs
-typepython type-health --project . --fail-under 85
-typepython migrate --project . --report
-typepython adapter validate typepython-framework.toml
-```
-
-Project-oriented commands support `--format text|json` where applicable. `typepython lsp` speaks JSON-RPC over stdio. See [CLI Reference](docs/cli-reference.md).
-
-## Migration
-
-You can adopt TypePython incrementally:
-
-- start new modules as `.tpy` while existing `.py` files remain in the graph
-- use `typing.profile = "migration"` for a lenient first pass
-- establish a diagnostic baseline and fail CI only on new debt
-- track public `Any` / `Unknown` exports with type budget gates
-- generate starter `.pyi` stubs from existing `.py` sources
-
-See [Migration Guide](docs/migration-guide.md).
-
-## Editor Support
-
-`typepython lsp --project .` provides a stdio Language Server Protocol server with:
-
-- real-time diagnostics
-- hover, go to definition, references, rename
-- completions and signature help
-- formatting through `ruff format`, `black`, or a configured formatter
-- code actions for common migration and portability fixes
-- project commands for `migrate`, `compat`, `type-health`, emitted-output preview, and `Any` / `Unknown` source lookup
-
-TypePython does not currently ship an official editor extension. Any editor with generic LSP support can launch the server. See [LSP Integration](docs/lsp.md).
+Full reference: [`docs/configuration.md`](docs/configuration.md).
 
 ## Examples
 
-| Example                                     | Shows                                                         |
+| Example                                     | Demonstrates                                                  |
 | ------------------------------------------- | ------------------------------------------------------------- |
 | [`hello-world/`](examples/hello-world/)     | Minimal starter project                                       |
 | [`todo-app/`](examples/todo-app/)           | `data class`, `TypedDict`, overloads, enum, null narrowing    |
 | [`shapes/`](examples/shapes/)               | sealed classes, exhaustive `match`, interface, generics       |
-| [`http-client/`](examples/http-client/)     | interface bounds, generic classes, overloads, TypedDict       |
+| [`http-client/`](examples/http-client/)     | interface bounds, generic classes, overloads, `TypedDict`     |
 | [`config-loader/`](examples/config-loader/) | `unknown`, unsafe boundaries, trust-boundary parsing patterns |
 | [`event-system/`](examples/event-system/)   | sealed events, interfaces, data classes, generics             |
 | [`showcase/`](examples/showcase/)           | multi-file feature showcase                                   |
 
-Framework and downstream checker fixtures live in [`test-fixtures/downstream-checkers/`](test-fixtures/downstream-checkers/).
+Framework and downstream-checker fixtures: [`test-fixtures/downstream-checkers/`](test-fixtures/downstream-checkers/).
 
-## Status
+## Migration path
 
-Stable core:
+You don't have to convert a codebase to start using TypePython.
 
-- `.tpy`, `.py`, and `.pyi` parsing and project discovery
-- checker diagnostics for the documented Core v1 feature set
-- `.py` lowering and `.pyi` generation
-- incremental CLI/LSP analysis cache
-- `build`, `check`, `verify`, `compat`, `api-diff`, `type-health`, and `migrate`
-- LSP diagnostics, navigation, completion, hover, formatting, and code actions
+- Add new modules as `.tpy`; existing `.py` and `.pyi` stay in the graph (`.py` is pass-through, `.pyi` is stub-authoritative).
+- Run `typing.profile = "migration"` for a lenient first pass.
+- Establish a diagnostic baseline; CI fails only on **new** debt.
+- Track public `Any` / `unknown` exports with `type-health` budgets.
+- Generate starter `.pyi` from existing `.py`.
 
-Prototype:
+Full guide: [`docs/migration-guide.md`](docs/migration-guide.md).
 
-- framework transform metadata and `typepython-framework.toml` adapter validation
-- framework shape synthesis for representative fixture families
-- boundary validator generation and delegated validator adapters
-- checker portability profiles and allowlists
+## Naming, briefly
 
-Experimental:
-
-- shape projection beyond `TypedDict` and dataclass-backed shapes
-- conditional return syntax
-- sync/async dual emit paths
-- notebook ingestion and other deferred research tracks
-
-The conformance and diagnostic coverage reports are generated under [`docs/conformance-report.md`](docs/conformance-report.md) and [`docs/diagnostic-test-coverage.md`](docs/diagnostic-test-coverage.md).
-
-## Boundary Semantics
-
-Emitted artifacts are intentionally standard Python. Some stronger TypePython guarantees are author-time guarantees:
-
-| TypePython guarantee                    | Emitted boundary                                     |
-| --------------------------------------- | ---------------------------------------------------- |
-| `unknown` requires narrowing before use | lowers to `object` in `.pyi`                         |
-| `sealed class` exhaustiveness           | external checkers see a normal class                 |
-| `unsafe:` auditing fence                | erased from public stubs and lowered to valid Python |
-| TypedDict transform provenance          | emitted as expanded standard `TypedDict` shapes      |
-
-This trade-off keeps generated packages portable. Use TypePython to enforce stronger checks while authoring `.tpy`; downstream consumers receive standard, well-typed Python artifacts. See [Interoperability](docs/interop.md).
+| Where you see it    | Identifier      |
+| ------------------- | --------------- |
+| `pip install …`     | `type-python`   |
+| Python import root  | `typepython`    |
+| CLI command         | `typepython`    |
+| Source file suffix  | `.tpy`          |
+| Config file         | `typepython.toml` or `[tool.typepython]` in `pyproject.toml` |
 
 ## Documentation
 
-|                                                  |                                          |
-| ------------------------------------------------ | ---------------------------------------- |
-| [Getting Started](docs/getting-started.md)       | Installation and first project           |
-| [Syntax Guide](docs/syntax-guide.md)             | TypePython syntax extensions             |
-| [Type System](docs/type-system.md)               | Types, assignability, narrowing          |
-| [Configuration](docs/configuration.md)           | Full `typepython.toml` reference         |
-| [CLI Reference](docs/cli-reference.md)           | Commands, flags, output formats          |
-| [Diagnostics](docs/diagnostics.md)               | All TPYxxxx error codes                  |
-| [LSP Integration](docs/lsp.md)                   | Editor setup and capabilities            |
-| [Interoperability](docs/interop.md)              | mypy/pyright/ty compatibility            |
-| [Migration Guide](docs/migration-guide.md)       | Adopting TypePython in existing projects |
-| [Framework Adapters](docs/framework-adapters.md) | Declarative framework transform adapters |
-| [Architecture](docs/architecture.md)             | Crate map, pipeline, dependency graph    |
-| [Contributing](docs/contributing.md)             | Development setup and PR workflow        |
-| [FAQ](docs/faq.md)                               | Frequently asked questions               |
-| [Language Spec](docs/spec/language-spec-v1.md)   | Normative language semantics             |
+| Read this when…                              | Doc                                              |
+| -------------------------------------------- | ------------------------------------------------ |
+| You want a guided first project              | [Getting Started](docs/getting-started.md)       |
+| You're learning the syntax                   | [Syntax Guide](docs/syntax-guide.md)             |
+| You want the assignability / narrowing rules | [Type System](docs/type-system.md)               |
+| You're tuning `typepython.toml`              | [Configuration](docs/configuration.md)           |
+| You're scripting CI                          | [CLI Reference](docs/cli-reference.md)           |
+| You hit a `TPYxxxx` error                    | [Diagnostics](docs/diagnostics.md)               |
+| You're wiring it into your editor            | [LSP Integration](docs/lsp.md)                   |
+| You care how the output behaves in mypy/pyright | [Interoperability](docs/interop.md)           |
+| You're adopting it in an existing codebase   | [Migration Guide](docs/migration-guide.md)       |
+| You're a framework author                    | [Framework Adapters](docs/framework-adapters.md) |
+| You want the crate map / pipeline diagram    | [Architecture](docs/architecture.md)             |
+| You're sending a PR                          | [Contributing](docs/contributing.md)             |
+| You have a quick question                    | [FAQ](docs/faq.md)                               |
+| You need normative semantics                 | [Language Spec v1](docs/spec/language-spec-v1.md) |
 
-## Contributing
+## Contributing & community
+
+The compiler is a Rust workspace (MSRV 1.94.0) of focused crates — parser, binder, graph, checker, lowering, emit, incremental, LSP, CLI. The architecture diagram in [`docs/architecture.md`](docs/architecture.md) is the fastest way to orient yourself.
+
+Local development:
 
 ```bash
-make ci
+./scripts/bootstrap-rust.sh           # pinned Rust 1.94.0
+cargo build --release -p typepython-cli
+make ci                                # full validation suite
 make test
 make bench
-make bump-version VERSION=0.0.8
-make snapshot-review
 ```
 
-See [Contributing](docs/contributing.md) for the full development workflow.
+Good first contributions: triaging diagnostic-message ergonomics, adding fixtures under `examples/` or `test-fixtures/downstream-checkers/`, expanding the syntax/type-system docs, or filling in TODOs in the experimental tier.
+
+Bug reports and design feedback go in [GitHub Issues](https://github.com/type-python/type-python/issues). Larger discussions can start as an RFC under [`docs/rfcs/`](docs/rfcs).
+
+See [`docs/contributing.md`](docs/contributing.md) for the full PR workflow.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © contributors

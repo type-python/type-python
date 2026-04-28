@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 import pathlib
 import sys
+import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -44,6 +45,26 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
             if case.expected_stub_fragments is None:
                 continue
             self.assertEqual(set(case.expected_stub_fragments), set(case.targets))
+
+    def test_checker_build_dir_uses_visible_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = pathlib.Path(tmp) / "project"
+            build_dir = project_dir / ".typepython" / "build"
+            package_dir = build_dir / "app"
+            package_dir.mkdir(parents=True)
+            (package_dir / "__init__.pyi").write_text(
+                "def parse_count(value: str) -> int: ...\n",
+                encoding="utf-8",
+            )
+
+            checker_build_dir = downstream_checker_smoke.prepare_checker_build_dir(
+                build_dir,
+                project_dir,
+            )
+
+            self.assertEqual(checker_build_dir, project_dir / "checker-build")
+            self.assertTrue((checker_build_dir / "app" / "__init__.pyi").exists())
+            self.assertFalse(checker_build_dir.relative_to(project_dir).parts[0].startswith("."))
 
 
 if __name__ == "__main__":

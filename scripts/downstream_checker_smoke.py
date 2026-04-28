@@ -118,6 +118,14 @@ def assert_expected_stub_fragments(
         )
 
 
+def prepare_checker_build_dir(build_dir: pathlib.Path, project_dir: pathlib.Path) -> pathlib.Path:
+    checker_build_dir = project_dir / "checker-build"
+    if checker_build_dir.exists():
+        shutil.rmtree(checker_build_dir)
+    shutil.copytree(build_dir, checker_build_dir)
+    return checker_build_dir
+
+
 def checker_command(
     checker: str,
     target: str,
@@ -157,7 +165,8 @@ def check_fixture(case: FixtureCase, checkers: tuple[str, ...]) -> None:
 
             build_dir = project_dir / ".typepython" / "build"
             consumer_path = source_dir / "checker-consumer.py"
-            build_consumer_path = build_dir / "checker_consumer.py"
+            checker_build_dir = prepare_checker_build_dir(build_dir, project_dir)
+            build_consumer_path = checker_build_dir / "checker_consumer.py"
             if expected_failure_checkers and not consumer_path.exists():
                 raise SystemExit(
                     f"negative downstream checker fixture `{case.name}` is missing {consumer_path}"
@@ -166,7 +175,7 @@ def check_fixture(case: FixtureCase, checkers: tuple[str, ...]) -> None:
                 assert_expected_stub_fragments(build_dir, target, case.expected_stub_fragments)
 
             for checker in checkers:
-                command = checker_command(checker, target, build_dir)
+                command = checker_command(checker, target, checker_build_dir)
                 if checker in expected_failure_checkers:
                     shutil.copy2(consumer_path, build_consumer_path)
                     run_expect_failure(command, cwd=project_dir)
