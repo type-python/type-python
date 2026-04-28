@@ -186,6 +186,26 @@ pub(crate) fn collect_missing_import_code_actions(
     )]
 }
 
+pub(crate) fn collect_portable_typing_rewrite_code_actions(
+    document: &DocumentState,
+    range: LspRange,
+) -> Vec<Value> {
+    portable_typing_rewrite_sites(&document.text)
+        .into_iter()
+        .filter(|site| range_intersects(range, site.range))
+        .map(|site| {
+            code_action(
+                format!(
+                    "Rewrite `{}` to checker-portable `{}`",
+                    site.legacy, site.replacement
+                ),
+                &document.uri,
+                vec![LspTextEdit { range: site.range, new_text: site.replacement }],
+            )
+        })
+        .collect()
+}
+
 pub(crate) fn collect_project_workflow_code_actions(document: &DocumentState) -> Vec<Value> {
     vec![
         command_code_action(
@@ -228,6 +248,111 @@ pub(crate) fn command_code_action(title: String, command: String, uri: &str) -> 
             "arguments": [uri]
         }
     })
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct PortableTypingRewriteSite {
+    legacy: String,
+    replacement: String,
+    range: LspRange,
+}
+
+pub(crate) fn portable_typing_rewrite_sites(text: &str) -> Vec<PortableTypingRewriteSite> {
+    let mut sites = Vec::new();
+    let imported_legacy_names = imported_legacy_typing_names(text);
+    for (line_index, line) in text.lines().enumerate() {
+        collect_qualified_portable_typing_sites(line_index, line, &mut sites);
+        collect_imported_portable_typing_sites(line_index, line, &imported_legacy_names, &mut sites);
+    }
+    sites
+}
+
+fn imported_legacy_typing_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("from typing import ") {
+            continue;
+        }
+        for item in trimmed.trim_start_matches("from typing import ").split(',') {
+            let Some(name) = item.split_whitespace().next() else {
+                continue;
+            };
+            if matches!(name, "List" | "Dict" | "Tuple" | "Set" | "FrozenSet") {
+                names.push(name.to_owned());
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn collect_qualified_portable_typing_sites(
+    line_index: usize,
+    line: &str,
+    sites: &mut Vec<PortableTypingRewriteSite>,
+) {
+    for (legacy, replacement) in [
+        ("typing.List", "list"),
+        ("typing.Dict", "dict"),
+        ("typing.Tuple", "tuple"),
+        ("typing.Set", "set"),
+        ("typing.FrozenSet", "frozenset"),
+    ] {
+        let mut search_start = 0usize;
+        while let Some(relative) = line[search_start..].find(legacy) {
+            let start = search_start + relative;
+            let end = start + legacy.len();
+            sites.push(PortableTypingRewriteSite {
+                legacy: legacy.to_owned(),
+                replacement: replacement.to_owned(),
+                range: LspRange {
+                    start: LspPosition { line: line_index as u32, character: start as u32 },
+                    end: LspPosition { line: line_index as u32, character: end as u32 },
+                },
+            });
+            search_start = end;
+        }
+    }
+}
+
+fn collect_imported_portable_typing_sites(
+    line_index: usize,
+    line: &str,
+    imported_legacy_names: &[String],
+    sites: &mut Vec<PortableTypingRewriteSite>,
+) {
+    if line.trim_start().starts_with("from typing import ") {
+        return;
+    }
+    let legacy_names = [
+        ("List", "list"),
+        ("Dict", "dict"),
+        ("Tuple", "tuple"),
+        ("Set", "set"),
+        ("FrozenSet", "frozenset"),
+    ];
+    for token in tokenize_identifiers(line) {
+        let Some((legacy, replacement)) = legacy_names.iter().find(|(legacy, _)| token.name == *legacy)
+        else {
+            continue;
+        };
+        if token.preceded_by_dot || !imported_legacy_names.iter().any(|name| name == legacy) {
+            continue;
+        }
+        sites.push(PortableTypingRewriteSite {
+            legacy: (*legacy).to_owned(),
+            replacement: (*replacement).to_owned(),
+            range: LspRange {
+                start: LspPosition {
+                    line: line_index as u32,
+                    character: token.range.start.character,
+                },
+                end: LspPosition { line: line_index as u32, character: token.range.end.character },
+            },
+        });
+    }
 }
 
 pub(crate) fn import_insertion_range(document: &DocumentState) -> LspRange {

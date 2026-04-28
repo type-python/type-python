@@ -601,6 +601,7 @@ impl AnalysisHost {
         actions.extend(collect_missing_annotation_code_actions(workspace, document, range));
         actions.extend(collect_unsafe_code_actions(document, range, params));
         actions.extend(collect_missing_import_code_actions(workspace, document, range));
+        actions.extend(collect_portable_typing_rewrite_code_actions(document, range));
         actions.extend(collect_project_workflow_code_actions(document));
         Ok(json!(actions))
     }

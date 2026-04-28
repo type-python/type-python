@@ -943,6 +943,53 @@ fn code_actions_offer_missing_import_fix() {
 }
 
 #[test]
+fn code_actions_offer_checker_portable_typing_list_rewrite() {
+    let config = temp_workspace(
+        "code_actions_offer_checker_portable_typing_list_rewrite",
+        &[(
+            "src/app/__init__.tpy",
+            "import typing\nfrom typing import List\n\nqualified: typing.List[int] = []\nimported: List[str] = []\n",
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let qualified_actions = server
+        .handle_code_action(json!({
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 3, "character": 11},
+                "end": {"line": 3, "character": 22}
+            },
+            "context": {"diagnostics": []}
+        }))
+        .expect("code action should succeed");
+    let qualified_actions = qualified_actions.as_array().expect("actions should be an array");
+    let qualified = qualified_actions
+        .iter()
+        .find(|action| action["title"] == json!("Rewrite `typing.List` to checker-portable `list`"))
+        .expect("qualified typing.List rewrite should be present");
+    assert_eq!(qualified["edit"]["changes"][uri.as_str()][0]["newText"], json!("list"));
+
+    let imported_actions = server
+        .handle_code_action(json!({
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 4, "character": 10},
+                "end": {"line": 4, "character": 14}
+            },
+            "context": {"diagnostics": []}
+        }))
+        .expect("code action should succeed");
+    let imported_actions = imported_actions.as_array().expect("actions should be an array");
+    let imported = imported_actions
+        .iter()
+        .find(|action| action["title"] == json!("Rewrite `List` to checker-portable `list`"))
+        .expect("imported List rewrite should be present");
+    assert_eq!(imported["edit"]["changes"][uri.as_str()][0]["newText"], json!("list"));
+}
+
+#[test]
 fn code_actions_offer_project_workflow_commands() {
     let config = temp_workspace(
         "code_actions_offer_project_workflow_commands",
