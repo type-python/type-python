@@ -1194,6 +1194,66 @@ fn code_actions_offer_machine_applicable_return_suggestion() {
 }
 
 #[test]
+fn diagnostics_include_fix_portability_metadata() {
+    let config = temp_workspace(
+        "diagnostics_include_fix_portability_metadata",
+        &[("src/app/__init__.tpy", "def run() -> None:\n    eval(\"1\")\n")],
+    );
+    let path = config.config_dir.join("src/app/__init__.tpy");
+    let uri = path_to_uri(&path);
+    let text = fs::read_to_string(&path).expect("source file should be readable");
+    let syntax = parse_with_options(
+        SourceFile {
+            path: path.clone(),
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: text.clone(),
+        },
+        ParseOptions::default(),
+    );
+    let document = DocumentState {
+        uri: uri.clone(),
+        path: path.clone(),
+        text,
+        syntax,
+        local_symbols: BTreeMap::new(),
+        local_value_types: BTreeMap::new(),
+    };
+    let report = DiagnosticReport {
+        diagnostics: vec![
+            typepython_diagnostics::Diagnostic::warning(
+                "TPY4019",
+                "unsafe boundary operation `eval(...)` must appear inside `unsafe:`",
+            )
+            .with_span(typepython_diagnostics::Span::new(
+                path.display().to_string(),
+                2,
+                5,
+                2,
+                14,
+            )),
+            typepython_diagnostics::Diagnostic::warning(
+                "TPY4024",
+                "field `name` is missing a type annotation",
+            )
+            .with_span(typepython_diagnostics::Span::new(
+                path.display().to_string(),
+                1,
+                1,
+                1,
+                1,
+            )),
+        ],
+    };
+
+    let diagnostics = diagnostics_by_uri(&[document], &report);
+    let diagnostics = diagnostics.get(&uri).expect("diagnostics should map to the document URI");
+
+    assert_eq!(diagnostics[0].data.as_ref().unwrap()["fixPortability"], json!("typepython-only"));
+    assert_eq!(diagnostics[1].data.as_ref().unwrap()["fixPortability"], json!("checker-portable"));
+}
+
+#[test]
 fn did_change_reports_overlay_sync_failure_for_unopened_document() {
     let config = temp_config(
         "did_change_reports_overlay_sync_failure_for_unopened_document",

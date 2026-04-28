@@ -247,6 +247,7 @@ pub(crate) fn diagnostics_by_uri(
         let Some(uri) = path_to_uri.get(&normalized) else {
             continue;
         };
+        let data = diagnostic_lsp_data(diagnostic);
         by_uri.entry(uri.clone()).or_default().push(LspDiagnostic {
             range: LspRange {
                 start: LspPosition {
@@ -269,13 +270,28 @@ pub(crate) fn diagnostics_by_uri(
             } else {
                 format!("{} ({})", diagnostic.message, diagnostic.notes.join("; "))
             },
-            data: (!diagnostic.suggestions.is_empty()).then(|| {
-                json!({
-                    "suggestions": diagnostic.suggestions,
-                })
-            }),
+            data,
         });
     }
 
     by_uri
+}
+
+fn diagnostic_lsp_data(diagnostic: &Diagnostic) -> Option<Value> {
+    let mut data = serde_json::Map::new();
+    if !diagnostic.suggestions.is_empty() {
+        data.insert(String::from("suggestions"), json!(diagnostic.suggestions));
+    }
+    if let Some(portability) = diagnostic_fix_portability(&diagnostic.code) {
+        data.insert(String::from("fixPortability"), json!(portability));
+    }
+    (!data.is_empty()).then(|| Value::Object(data))
+}
+
+fn diagnostic_fix_portability(code: &str) -> Option<&'static str> {
+    match code {
+        "TPY4019" | "TPY4025" => Some("typepython-only"),
+        "TPY4020" | "TPY4021" | "TPY4024" => Some("checker-portable"),
+        _ => None,
+    }
 }
