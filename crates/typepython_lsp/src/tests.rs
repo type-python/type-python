@@ -178,6 +178,28 @@ fn hover_renders_projected_typeddict_shape_aliases() {
 }
 
 #[test]
+fn hover_explains_resolved_value_types() {
+    let config = temp_workspace(
+        "hover_explains_resolved_value_types",
+        &[("src/app/__init__.tpy", "count: int = 1\n")],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let hover = server
+        .handle_hover(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 0, "character": 2}
+        }))
+        .expect("hover should succeed");
+    let contents = hover["contents"]["value"].as_str().expect("hover contents should be text");
+
+    assert!(contents.contains("value count: int"), "{contents}");
+    assert!(contents.contains("**Type explanation:** value type"), "{contents}");
+    assert!(contents.contains("emitted stubs"), "{contents}");
+}
+
+#[test]
 fn signature_help_returns_function_signature() {
     let config = temp_config(
         "signature_help_returns_function_signature",

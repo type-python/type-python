@@ -174,10 +174,11 @@ impl AnalysisHost {
                 }
             })
             .unwrap_or_else(|| symbol.legacy_detail.clone());
+        let explanation = hover_explanation(&detail);
         Ok(json!({
             "contents": {
                 "kind": "markdown",
-                "value": format!("```typepython\n{}\n```", detail)
+                "value": format!("```typepython\n{}\n```\n\n{}", detail, explanation)
             },
             "range": symbol.range
         }))
@@ -410,6 +411,24 @@ fn projected_shape_hover_detail(
         }
     }
     Some(lines.join("\n"))
+}
+
+fn hover_explanation(detail: &str) -> &'static str {
+    if detail.starts_with("function ") {
+        "**Type explanation:** callable signature; parameter annotations describe accepted inputs and the return annotation describes the value produced."
+    } else if detail.starts_with("method ") {
+        "**Type explanation:** method signature; receiver-specific overload and member resolution chose this callable surface."
+    } else if detail.starts_with("value ") || detail.starts_with("field ") {
+        "**Type explanation:** value type; this annotation or inferred type is what TypePython uses for downstream checks and emitted stubs."
+    } else if detail.starts_with("typealias ") {
+        "**Type explanation:** type alias expansion; this is the public type expression consumers see after TypePython resolves the alias."
+    } else if detail.starts_with("class ") {
+        "**Type explanation:** class surface; bases and generated members determine constructor, attribute, and stub behavior."
+    } else if detail.starts_with("Shape ") {
+        "**Type explanation:** projected shape; requiredness and readonly markers show the checker-portable TypedDict surface."
+    } else {
+        "**Type explanation:** resolved symbol surface used by TypePython analysis and editor navigation."
+    }
 }
 
 fn resolve_projected_hover_shape(
