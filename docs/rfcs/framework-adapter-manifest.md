@@ -14,6 +14,12 @@ The manifest is intentionally not a public registry format. It is a local valida
 first-party fixtures until at least one validation-model adapter and one non-validation adapter have
 proven the abstraction.
 
+Because manifests lower into ordinary `.py`/`.pyi` artifacts, a framework can ship TypePython adapter
+metadata without also maintaining a mypy plugin or checker-specific extension. The prototype contract
+is deliberately narrower: adapters may be distributed with a framework package or companion metadata
+package, but TypePython treats them as local, reviewable data until several independent adapters prove
+the same manifest path.
+
 ## Manifest shape
 
 ```toml
@@ -117,6 +123,11 @@ Local validation needs enough metadata to explain whether an adapter can be used
 - supported Python targets
 - required downstream checker coverage
 - stability marker (`prototype`, `experimental`, or future `stable`)
+
+For the prototype SDK, `stability = "prototype"` is the only supported marker. Future `experimental`
+or `stable` values require multiple adapters, downstream checker fixtures, runtime-smoke coverage,
+and a versioning policy; accepting those values before then would imply a compatibility promise the
+manifest format has not earned.
 
 ## Non-goals
 

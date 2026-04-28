@@ -8,6 +8,16 @@ The prototype adapter format is `typepython-framework.toml`. It is intentionally
 experimental: adapters are validated before use, but TypePython does not yet load a public registry
 or execute adapter Python code.
 
+Adapters are a checker-neutral shipping surface, not a replacement for framework runtime code. A
+framework can distribute `typepython-framework.toml` plus golden fixtures alongside its package or in
+a companion metadata package, and TypePython validates that data into ordinary `.py`/`.pyi` outputs
+for mypy, pyright, ty, and IDEs. No mypy plugin, pyright extension, or TypePython-specific runtime is
+part of the contract.
+
+The SDK remains prototype-only. The only accepted stability marker today is `prototype`, and adapter
+authors should treat every manifest as a local contract until multiple independently maintained
+adapters have validated the same abstraction across checker and runtime-smoke fixtures.
+
 ## First-party adapters
 
 Use a first-party adapter when the framework or application code lives in the same repository as the
@@ -67,6 +77,28 @@ Third-party adapters must still be declarative. They must not import the framewo
 framework decorators, or run adapter Python during compilation or validation. If framework behavior
 depends on runtime-computed metadata, the adapter must either reject it with a deterministic
 diagnostic or mark the affected static surface as dynamic.
+
+### Shipping without checker plugins
+
+A third-party framework should ship these files together:
+
+```text
+framework-package/
+  py.typed
+  typepython-framework.toml
+  adapter-golden/
+    input.tpy
+    expected.py
+    expected.pyi
+```
+
+The framework keeps its runtime decorators, base classes, and descriptors. The adapter describes only
+the static shape TypePython can emit into `.pyi` artifacts. Downstream projects then run standard
+checkers against those artifacts; they do not install or configure a checker-specific plugin.
+
+Do not mark an adapter stable because one local fixture passes. Until the Pydantic-like validation
+fixture, toy task queue, toy ORM, and at least one FastAPI-like route/dependency fixture all exercise
+the same manifest path, adapter authors should document compatibility as prototype-only.
 
 ## Minimal manifest example
 

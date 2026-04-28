@@ -689,10 +689,10 @@ The ecosystem needs a constrained adapter model: expressive enough for common ru
 
 ### Acceptance Criteria
 
-- [ ] A framework can ship a TypePython adapter without depending on a mypy plugin.
+- [x] A framework can ship a TypePython adapter without depending on a mypy plugin.
 - [x] Adapter behavior is deterministic, reviewable, and testable.
 - [x] TypePython can reject unsafe or unsupported adapter declarations before compilation.
-- [ ] The SDK is not treated as stable until multiple adapters have been implemented.
+- [x] The SDK is not treated as stable until multiple adapters have been implemented.
 
 ## P2: Sync/Async Dual Emit
 
