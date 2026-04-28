@@ -148,6 +148,15 @@ fn check_reports_framework_class_decorator_constructor_type_mismatch() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
     assert!(rendered.contains("synthesized dataclass-transform field `age` expects `int`"));
+    let diagnostic = result
+        .diagnostics
+        .diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.message.contains("synthesized dataclass-transform field `age` expects `int`")
+        })
+        .expect("expected synthesized framework field diagnostic");
+    assert_eq!(diagnostic.span.as_ref().map(|span| span.line), Some(10));
 }
 
 #[test]
@@ -222,6 +231,13 @@ fn check_reports_framework_generated_class_attribute_without_capability() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4002"), "{rendered}");
     assert!(rendered.contains("has no member `objects`"), "{rendered}");
+    let diagnostic = result
+        .diagnostics
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("has no member `objects`"))
+        .expect("expected framework generated member diagnostic");
+    assert_eq!(diagnostic.span.as_ref().map(|span| span.line), Some(10));
 }
 
 #[test]

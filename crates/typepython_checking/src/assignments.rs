@@ -552,6 +552,8 @@ pub(crate) struct DataclassTransformClassShape {
     pub(crate) fields: Vec<DataclassTransformFieldShape>,
     pub(crate) frozen: bool,
     pub(crate) has_explicit_init: bool,
+    pub(crate) origin_path: Option<String>,
+    pub(crate) origin_line: Option<usize>,
 }
 
 impl Shape {

@@ -80,7 +80,7 @@ pub(super) fn direct_member_access_diagnostics(
                 .is_some();
 
             (!has_member).then(|| {
-                Diagnostic::error(
+                let diagnostic = Diagnostic::error(
                     "TPY4002",
                     format!(
                         "type `{}` in module `{}` has no member `{}`",
@@ -88,7 +88,30 @@ pub(super) fn direct_member_access_diagnostics(
                         node.module_path.display(),
                         access.member
                     ),
+                );
+                let mut visiting = BTreeSet::new();
+                if let Some(shape) = resolve_framework_transform_class_shape_from_decl_with_context(
+                    &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+                    nodes,
+                    class_node,
+                    class_decl,
+                    &mut visiting,
                 )
+                    && let Some(line) = shape.origin_line
+                {
+                    diagnostic.with_span(Span::new(
+                        shape
+                            .origin_path
+                            .clone()
+                            .unwrap_or_else(|| class_node.module_path.display().to_string()),
+                        line,
+                        1,
+                        line,
+                        1,
+                    ))
+                } else {
+                    diagnostic
+                }
             })
         })
         .collect()

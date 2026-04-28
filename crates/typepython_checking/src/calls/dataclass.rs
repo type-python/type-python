@@ -141,6 +141,8 @@ pub(super) fn resolve_plain_dataclass_class_shape_from_decl_with_context(
         fields,
         frozen: class_site.plain_dataclass_frozen,
         has_explicit_init,
+        origin_path: Some(class_node.module_path.display().to_string()),
+        origin_line: Some(class_site.line),
     })
 }
 
@@ -434,7 +436,13 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
         fields.push(synthesized);
     }
 
-    Some(DataclassTransformClassShape { fields, frozen: supports_readonly, has_explicit_init })
+    Some(DataclassTransformClassShape {
+        fields,
+        frozen: supports_readonly,
+        has_explicit_init,
+        origin_path: Some(class_node.module_path.display().to_string()),
+        origin_line: Some(class_site.line),
+    })
 }
 
 pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
@@ -605,6 +613,8 @@ pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
         fields,
         frozen: metadata.frozen_default,
         has_explicit_init,
+        origin_path: Some(class_node.module_path.display().to_string()),
+        origin_line: Some(class_site.line),
     })
 }
 

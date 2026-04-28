@@ -113,7 +113,7 @@ TypePython can generate the final `.pyi` surface itself, so the output can be co
 - [x] Extend checker class-shape resolution beyond `dataclass_transform`.
 - [x] Extend checker callable resolution for non-callable decorator replacement.
 - [x] Extend stub generation to emit the transformed public surface rather than the raw source declaration.
-- [ ] Extend source maps so diagnostics point to the original framework declaration site.
+- [x] Extend source maps so diagnostics point to the original framework declaration site.
 - [x] Extend LSP hover/signature help to show transformed constructors and transformed callables.
 - [x] Add `verify` checks that transformed `.pyi` surfaces remain compatible with emitted runtime names.
 

@@ -135,6 +135,8 @@ fn shared_shape_can_wrap_dataclass_transform_fields() {
             }],
             frozen: true,
             has_explicit_init: false,
+            origin_path: Some(String::from("example.tpy")),
+            origin_line: Some(1),
         },
         crate::ShapeSourceKind::DataclassTransform,
     );

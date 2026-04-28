@@ -1410,15 +1410,19 @@ pub(super) fn dataclass_transform_constructor_arity_diagnostic(
 ) -> Option<Diagnostic> {
     let positional_fields = shape.fields.iter().filter(|field| !field.kw_only).collect::<Vec<_>>();
     if call.arg_count > positional_fields.len() {
-        return Some(Diagnostic::error(
-            "TPY4001",
-            format!(
-                "call to `{}` in module `{}` expects at most {} positional argument(s) but received {}",
-                call.callee,
-                node.module_path.display(),
-                positional_fields.len(),
-                call.arg_count
+        return Some(with_dataclass_transform_shape_origin(
+            Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` expects at most {} positional argument(s) but received {}",
+                    call.callee,
+                    node.module_path.display(),
+                    positional_fields.len(),
+                    call.arg_count
+                ),
             ),
+            node,
+            shape,
         ));
     }
 
@@ -1438,16 +1442,50 @@ pub(super) fn dataclass_transform_constructor_arity_diagnostic(
         .map(|(_, field)| field.keyword_name.clone())
         .collect::<Vec<_>>();
     (!missing_required.is_empty()).then(|| {
-        Diagnostic::error(
-            "TPY4001",
-            format!(
-                "call to `{}` in module `{}` is missing required synthesized dataclass-transform field(s): {}",
-                call.callee,
-                node.module_path.display(),
-                missing_required.join(", ")
+        with_dataclass_transform_shape_origin(
+            Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` is missing required synthesized dataclass-transform field(s): {}",
+                    call.callee,
+                    node.module_path.display(),
+                    missing_required.join(", ")
+                ),
             ),
+            node,
+            shape,
         )
     })
+}
+
+fn dataclass_transform_shape_origin_span(
+    node: &typepython_graph::ModuleNode,
+    shape: &DataclassTransformClassShape,
+) -> Option<Span> {
+    shape.origin_line.map(|line| {
+        Span::new(
+            shape
+                .origin_path
+                .clone()
+                .unwrap_or_else(|| node.module_path.display().to_string()),
+            line,
+            1,
+            line,
+            1,
+        )
+    })
+}
+
+fn with_dataclass_transform_shape_origin(
+    diagnostic: Diagnostic,
+    node: &typepython_graph::ModuleNode,
+    shape: &DataclassTransformClassShape,
+) -> Diagnostic {
+    if let Some(span) = dataclass_transform_shape_origin_span(node, shape) {
+        diagnostic.with_span(span)
+    } else {
+        diagnostic
+    }
 }
 
 pub(super) fn dataclass_transform_constructor_type_diagnostics(
@@ -1474,16 +1512,20 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
         })
         .map(|(field, arg_ty)| {
             let arg_text = diagnostic_type_text(&arg_ty);
-            Diagnostic::error(
-                "TPY4001",
-                format!(
-                    "call to `{}` in module `{}` passes `{}` where synthesized dataclass-transform field `{}` expects `{}`",
-                    call.callee,
-                    node.module_path.display(),
-                    arg_text,
-                    field.name,
-                    field.rendered_annotation()
+            with_dataclass_transform_shape_origin(
+                Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "call to `{}` in module `{}` passes `{}` where synthesized dataclass-transform field `{}` expects `{}`",
+                        call.callee,
+                        node.module_path.display(),
+                        arg_text,
+                        field.name,
+                        field.rendered_annotation()
+                    ),
                 ),
+                node,
+                shape,
             )
         })
         .collect::<Vec<_>>();
@@ -1507,17 +1549,21 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
             )
         {
             let arg_text = diagnostic_type_text(&arg_ty);
-            diagnostics.push(Diagnostic::error(
-                "TPY4001",
-                format!(
-                    "call to `{}` in module `{}` passes `{}` for synthesized keyword `{}` where field `{}` expects `{}`",
-                    call.callee,
-                    node.module_path.display(),
-                    arg_text,
-                    keyword,
-                    field.name,
-                    field.rendered_annotation()
+            diagnostics.push(with_dataclass_transform_shape_origin(
+                Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "call to `{}` in module `{}` passes `{}` for synthesized keyword `{}` where field `{}` expects `{}`",
+                        call.callee,
+                        node.module_path.display(),
+                        arg_text,
+                        keyword,
+                        field.name,
+                        field.rendered_annotation()
+                    ),
                 ),
+                node,
+                shape,
             ));
         }
     }
@@ -1542,14 +1588,18 @@ pub(super) fn dataclass_transform_constructor_keyword_diagnostics(
         .iter()
         .filter(|keyword| !valid_names.contains(keyword.as_str()))
         .map(|keyword| {
-            Diagnostic::error(
-                "TPY4001",
-                format!(
-                    "call to `{}` in module `{}` uses unknown synthesized dataclass-transform keyword `{}`",
-                    call.callee,
-                    node.module_path.display(),
-                    keyword
+            with_dataclass_transform_shape_origin(
+                Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "call to `{}` in module `{}` uses unknown synthesized dataclass-transform keyword `{}`",
+                        call.callee,
+                        node.module_path.display(),
+                        keyword
+                    ),
                 ),
+                node,
+                shape,
             )
         })
         .collect::<Vec<_>>();
@@ -1557,14 +1607,18 @@ pub(super) fn dataclass_transform_constructor_keyword_diagnostics(
     for keyword in &call.keyword_names {
         if positional_field_names.iter().take(call.arg_count).any(|name| *name == keyword.as_str())
         {
-            diagnostics.push(Diagnostic::error(
-                "TPY4001",
-                format!(
-                    "call to `{}` in module `{}` binds synthesized field `{}` both positionally and by keyword",
-                    call.callee,
-                    node.module_path.display(),
-                    keyword
+            diagnostics.push(with_dataclass_transform_shape_origin(
+                Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "call to `{}` in module `{}` binds synthesized field `{}` both positionally and by keyword",
+                        call.callee,
+                        node.module_path.display(),
+                        keyword
+                    ),
                 ),
+                node,
+                shape,
             ));
         }
     }
