@@ -911,10 +911,10 @@ Security taint tracking is valuable, but the adoption path competes with SAST to
 
 Possible later work:
 
-- [ ] Define `Tainted[T]` / `Untrusted[T]`.
-- [ ] Define sanitizer declarations.
-- [ ] Define source/sink config.
-- [ ] Integrate with web framework route/request models.
+- [x] Define `Tainted[T]` / `Untrusted[T]`.
+- [x] Define sanitizer declarations.
+- [x] Define source/sink config.
+- [x] Integrate with web framework route/request models.
 
 ## 90-Day Execution Plan
 
