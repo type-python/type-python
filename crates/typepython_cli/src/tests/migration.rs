@@ -209,6 +209,24 @@ fn build_migration_budget_baseline_records_public_any_unknown_and_untyped_import
     assert_eq!(baseline.public_unknown.len(), 1);
     assert_eq!(baseline.public_unknown[0].symbol, "PUBLIC_UNKNOWN: unknown");
     assert_eq!(baseline.untyped_imports.len(), 1);
+    assert!(
+        baseline
+            .checker_portability_issues
+            .iter()
+            .any(|issue| { issue.contains("PUBLIC_ANY") && issue.contains("Any/dynamic") })
+    );
+    assert!(
+        baseline
+            .checker_portability_issues
+            .iter()
+            .any(|issue| { issue.contains("PUBLIC_UNKNOWN") && issue.contains("Unknown") })
+    );
+    assert!(
+        baseline
+            .checker_portability_issues
+            .iter()
+            .any(|issue| { issue.contains("untyped import") })
+    );
 }
 
 #[test]

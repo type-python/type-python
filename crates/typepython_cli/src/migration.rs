@@ -535,8 +535,40 @@ pub(crate) fn build_migration_budget_baseline(
         public_unknown,
         untyped_imports: report.untyped_import_files.clone(),
         dynamic_framework_boundaries: report.framework_pattern_files.clone(),
-        checker_portability_issues: Vec::new(),
+        checker_portability_issues: migration_checker_portability_issues(report),
     }
+}
+
+fn migration_checker_portability_issues(report: &MigrationReport) -> Vec<String> {
+    let mut issues = Vec::new();
+    for entry in migration_public_type_debt_entries(report, "Any") {
+        issues.push(format!(
+            "{}: public export `{}` exposes Any/dynamic to downstream checkers",
+            entry.path, entry.symbol
+        ));
+    }
+    for entry in migration_public_type_debt_entries(report, "Unknown") {
+        issues.push(format!(
+            "{}: public export `{}` exposes Unknown to downstream checkers",
+            entry.path, entry.symbol
+        ));
+    }
+    for entry in &report.untyped_import_files {
+        issues.push(format!(
+            "{}: {} untyped import(s) reduce checker portability",
+            entry.path, entry.untyped_import_count
+        ));
+    }
+    for entry in &report.framework_pattern_files {
+        issues.push(format!(
+            "{}: framework boundary `{}` needs checker-portable adapter coverage",
+            entry.path,
+            entry.frameworks.join(",")
+        ));
+    }
+    issues.sort();
+    issues.dedup();
+    issues
 }
 
 fn migration_public_type_debt_entries(

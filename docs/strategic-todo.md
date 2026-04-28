@@ -625,7 +625,7 @@ Most real Python codebases cannot become fully typed in a single migration. A st
   - [x] public `Unknown`
   - [x] untyped imports
   - [x] dynamic framework boundaries
-  - [ ] checker portability issues
+  - [x] checker portability issues
 - [x] Add "no new public `Any`" mode.
 - [x] Add "no new `Unknown` exported from package" mode.
 - [ ] Add per-path budgets for:
