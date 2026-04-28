@@ -277,6 +277,41 @@ pub(super) fn unclosed_lifecycle_resource_diagnostics(
         .collect()
 }
 
+pub(super) fn unsupported_dual_emit_async_construct_diagnostics(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> Vec<Diagnostic> {
+    if node.module_kind != SourceKind::TypePython {
+        return Vec::new();
+    }
+
+    context
+        .load_unsupported_dual_emit_async_construct_sites(node)
+        .into_iter()
+        .map(|site| {
+            let construct = match site.kind {
+                typepython_syntax::UnsupportedDualEmitAsyncConstructKind::AsyncFor => "async for",
+                typepython_syntax::UnsupportedDualEmitAsyncConstructKind::AsyncWith => "async with",
+            };
+            Diagnostic::error(
+                "TPY4025",
+                format!(
+                    "`@dual_emit` function `{}` contains unsupported `{}` syntax",
+                    site.function_name, construct
+                ),
+            )
+            .with_span(Span::new(
+                node.module_path.display().to_string(),
+                site.line,
+                1,
+                site.line,
+                1,
+            ))
+            .with_note("split the implementation manually or avoid async context managers and async iteration until dual emit can lower them safely")
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy)]
 struct LifecycleObligation {
     marker: &'static str,

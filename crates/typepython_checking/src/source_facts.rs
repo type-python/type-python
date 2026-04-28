@@ -7,6 +7,7 @@ use typepython_syntax::{
     DirectFunctionParamSite, DirectMethodSignatureSite, FrameworkTransformModuleInfo,
     FrozenFieldMutationSite, ModuleSurfaceMetadata, SourceFile, TypedDictClassMetadata,
     TypedDictLiteralSite, TypedDictMutationSite, UnsafeOperationSite,
+    UnsupportedDualEmitAsyncConstructSite,
 };
 
 use crate::{SemanticDeclarationFacts, declaration_semantic_facts};
@@ -27,6 +28,7 @@ struct FallbackModuleSourceFacts {
     frozen_field_mutation_sites: Option<Vec<FrozenFieldMutationSite>>,
     unsafe_operation_sites: Option<Vec<UnsafeOperationSite>>,
     conditional_return_sites: Option<Vec<ConditionalReturnSite>>,
+    unsupported_dual_emit_async_construct_sites: Option<Vec<UnsupportedDualEmitAsyncConstructSite>>,
 }
 
 impl FallbackModuleSourceFacts {
@@ -144,6 +146,22 @@ impl FallbackModuleSourceFacts {
         }
 
         self.conditional_return_sites.as_deref().unwrap_or(&[])
+    }
+
+    fn unsupported_dual_emit_async_construct_sites(
+        &mut self,
+        node: &ModuleNode,
+        source_overrides: Option<&BTreeMap<String, String>>,
+    ) -> &[UnsupportedDualEmitAsyncConstructSite] {
+        if self.unsupported_dual_emit_async_construct_sites.is_none() {
+            self.unsupported_dual_emit_async_construct_sites = Some(
+                self.source_text(node, source_overrides)
+                    .map(typepython_syntax::collect_unsupported_dual_emit_async_construct_sites)
+                    .unwrap_or_default(),
+            );
+        }
+
+        self.unsupported_dual_emit_async_construct_sites.as_deref().unwrap_or(&[])
     }
 }
 
@@ -359,6 +377,15 @@ impl<'a> CheckerSourceFactsProvider<'a> {
     pub(super) fn conditional_return_sites(&self, node: &ModuleNode) -> Vec<ConditionalReturnSite> {
         self.with_module_facts(node, |facts| {
             facts.conditional_return_sites(node, self.source_overrides).to_vec()
+        })
+    }
+
+    pub(super) fn unsupported_dual_emit_async_construct_sites(
+        &self,
+        node: &ModuleNode,
+    ) -> Vec<UnsupportedDualEmitAsyncConstructSite> {
+        self.with_module_facts(node, |facts| {
+            facts.unsupported_dual_emit_async_construct_sites(node, self.source_overrides).to_vec()
         })
     }
 }

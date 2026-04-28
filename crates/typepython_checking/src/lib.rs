@@ -294,6 +294,13 @@ impl<'a> CheckerContext<'a> {
     ) -> Vec<typepython_syntax::ConditionalReturnSite> {
         self.source_facts.conditional_return_sites(node)
     }
+
+    fn load_unsupported_dual_emit_async_construct_sites(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Vec<typepython_syntax::UnsupportedDualEmitAsyncConstructSite> {
+        self.source_facts.unsupported_dual_emit_async_construct_sites(node)
+    }
 }
 
 fn binding_surface_facts_by_module(
@@ -1142,6 +1149,7 @@ fn collect_node_semantic_diagnostics(
         diagnostics,
         unclosed_lifecycle_resource_diagnostics(context, node, options.strict),
     );
+    push_diagnostics(diagnostics, unsupported_dual_emit_async_construct_diagnostics(context, node));
     push_diagnostics(
         diagnostics,
         unsafe_boundary_diagnostics(context, node, options.strict, options.warn_unsafe),

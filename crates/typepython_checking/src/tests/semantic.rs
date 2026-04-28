@@ -132,6 +132,45 @@ fn check_accepts_dual_emit_decorator_as_typepython_lowering_marker() {
 }
 
 #[test]
+fn check_reports_unsupported_dual_emit_async_constructs() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import AsyncIterator, Callable\n\n",
+            "def dual_emit[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "class Stream:\n",
+            "    async def __aenter__(self) -> Stream:\n",
+            "        return self\n",
+            "    async def __aexit__(self, exc_type, exc, tb) -> None:\n",
+            "        pass\n",
+            "    def __aiter__(self) -> AsyncIterator[int]:\n",
+            "        return self\n",
+            "    async def __anext__(self) -> int:\n",
+            "        return 1\n\n",
+            "@dual_emit\n",
+            "async def collect(stream: Stream) -> int:\n",
+            "    total = 0\n",
+            "    async with stream:\n",
+            "        async for item in stream:\n",
+            "            total = total + item\n",
+            "    return total\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4025"), "{rendered}");
+    assert!(rendered.contains("collect"), "{rendered}");
+    assert!(rendered.contains("async with"), "{rendered}");
+    assert!(rendered.contains("async for"), "{rendered}");
+}
+
+#[test]
 fn check_warns_for_unclosed_lifecycle_resource() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(
