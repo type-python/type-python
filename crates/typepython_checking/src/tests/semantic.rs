@@ -74,6 +74,35 @@ fn check_reports_unsafe_boundary_with_source_overrides_without_backing_file() {
 }
 
 #[test]
+fn check_warns_for_ignored_must_use_result() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def must_use[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@must_use\n",
+            "def make_task() -> int:\n",
+            "    return 1\n\n",
+            "def run() -> None:\n",
+            "    make_task()\n",
+            "    value: int = make_task()\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4022"), "{rendered}");
+    assert!(rendered.contains("@must_use"), "{rendered}");
+    assert!(rendered.contains("make_task"), "{rendered}");
+    assert!(!rendered.contains("TPY4001"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unsupported_framework_transform_provider_in_strict_mode() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(

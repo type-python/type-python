@@ -847,7 +847,7 @@ These are high-impact diagnostics that can be modeled with lightweight attribute
 
 ### Acceptance Criteria
 
-- [ ] TypePython can catch an ignored coroutine/task-like result in `.tpy`.
+- [x] TypePython can catch an ignored coroutine/task-like result in `.tpy`.
 - [ ] TypePython can warn when an annotated resource is created but not closed or consumed.
 - [ ] The analysis is conservative enough to avoid blocking normal Python resource patterns.
 

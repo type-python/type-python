@@ -128,6 +128,82 @@ pub(super) fn dynamic_framework_alias_diagnostics(
         .collect()
 }
 
+pub(super) fn ignored_lifecycle_result_diagnostics(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    strict: bool,
+) -> Vec<Diagnostic> {
+    if !strict || node.module_kind != SourceKind::TypePython {
+        return Vec::new();
+    }
+
+    let Some(info) = context.load_decorator_transform_module_info(node) else {
+        return Vec::new();
+    };
+    let marked_callables = info
+        .callables
+        .into_iter()
+        .filter_map(|site| {
+            let obligation = lifecycle_obligation(&site.decorators)?;
+            site.owner_type_name.is_none().then_some((site.name, obligation))
+        })
+        .collect::<Vec<_>>();
+
+    if marked_callables.is_empty() {
+        return Vec::new();
+    }
+
+    node.calls
+        .iter()
+        .filter_map(|call| {
+            let (_, obligation) = marked_callables.iter().find(|(name, _)| name == &call.callee)?;
+            Some(
+                Diagnostic::warning(
+                    "TPY4022",
+                    format!(
+                        "result of `{}` call is ignored but `{}` requires the value to be {}",
+                        call.callee, obligation.marker, obligation.action,
+                    ),
+                )
+                .with_span(Span::new(
+                    node.module_path.display().to_string(),
+                    call.line,
+                    1,
+                    call.line,
+                    1,
+                ))
+                .with_note(obligation.note),
+            )
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LifecycleObligation {
+    marker: &'static str,
+    action: &'static str,
+    note: &'static str,
+}
+
+fn lifecycle_obligation(decorators: &[String]) -> Option<LifecycleObligation> {
+    decorators.iter().find_map(|decorator| {
+        let short = decorator.rsplit('.').next().unwrap_or(decorator);
+        match short {
+            "must_use" => Some(LifecycleObligation {
+                marker: "@must_use",
+                action: "used, assigned, returned, or passed onward",
+                note: "assign the result, return it, pass it to another function, or bind it to `_` intentionally",
+            }),
+            "must_await" => Some(LifecycleObligation {
+                marker: "@must_await",
+                action: "awaited or returned from an async function",
+                note: "await the result, return it from the async function, or bind it to `_` intentionally",
+            }),
+            _ => None,
+        }
+    })
+}
+
 fn framework_transform_provider_has_supported_semantics(
     provider: &typepython_syntax::FrameworkTransformProviderSite,
 ) -> bool {
