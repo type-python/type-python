@@ -181,14 +181,14 @@ The spec already limits `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `R
 - [x] Define `Shape` as an internal semantic object.
 - [x] Define the phase-1 scope:
   - [x] `TypedDict`
-  - [ ] TypePython `data class`
-  - [ ] standard `@dataclass`
+  - [x] TypePython `data class`
+  - [x] standard `@dataclass`
   - [x] `dataclass_transform`
   - [x] transformed framework classes
 - [x] Explicitly defer public transforms over arbitrary classes, protocols, and interfaces until assignability rules are proven.
 - [x] Include field metadata:
   - [x] field name
-  - [ ] public alias
+  - [x] public alias
   - [x] type
   - [x] required/optional
   - [x] readonly/mutable
@@ -196,28 +196,28 @@ The spec already limits `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `R
   - [x] default/default factory
   - [x] descriptor behavior
   - [x] source declaration span
-- [ ] Define phase-1 shape source behavior for:
-  - [ ] `TypedDict`
-  - [ ] `data class`
-  - [ ] standard `@dataclass`
-  - [ ] `dataclass_transform`
-  - [ ] transformed framework class
-- [ ] Document future shape source candidates without enabling them by default:
-  - [ ] `interface` / `Protocol`
-  - [ ] ordinary class with annotated instance fields
-- [ ] Define shape operations:
-  - [ ] `Partial`
-  - [ ] `Required_`
-  - [ ] `Readonly`
-  - [ ] `Mutable`
-  - [ ] `Pick`
-  - [ ] `Omit`
-  - [ ] shape composition
-  - [ ] shape projection
-- [ ] Define shape assignability.
-- [ ] Define how shape aliases lower into `.pyi`.
-- [ ] Define when a shape remains nominal and when it becomes structural.
-- [ ] Document which parts of the model are compiler-internal and which are user-visible.
+- [x] Define phase-1 shape source behavior for:
+  - [x] `TypedDict`
+  - [x] `data class`
+  - [x] standard `@dataclass`
+  - [x] `dataclass_transform`
+  - [x] transformed framework class
+- [x] Document future shape source candidates without enabling them by default:
+  - [x] `interface` / `Protocol`
+  - [x] ordinary class with annotated instance fields
+- [x] Define shape operations:
+  - [x] `Partial`
+  - [x] `Required_`
+  - [x] `Readonly`
+  - [x] `Mutable`
+  - [x] `Pick`
+  - [x] `Omit`
+  - [x] shape composition
+  - [x] shape projection
+- [x] Define shape assignability.
+- [x] Define how shape aliases lower into `.pyi`.
+- [x] Define when a shape remains nominal and when it becomes structural.
+- [x] Document which parts of the model are compiler-internal and which are user-visible.
 
 ### Implementation TODO
 
@@ -235,7 +235,7 @@ The spec already limits `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `R
 - [ ] `Pick` and `Partial` can operate on at least one non-TypedDict source behind an experimental flag.
 - [x] Transformed class shapes can be reused by framework integrations.
 - [x] Generated stubs remain standard Python typing.
-- [ ] No public "arbitrary type transform" guarantee is made before assignability semantics are stable.
+- [x] No public "arbitrary type transform" guarantee is made before assignability semantics are stable.
 
 ## P0: Trustworthiness and Test Infrastructure
 
