@@ -526,7 +526,7 @@ If TypePython can model a Pydantic/FastAPI-style app through the general transfo
 ### Acceptance Criteria
 
 - [ ] A small FastAPI/Pydantic app written in `.tpy` builds to ordinary Python.
-- [ ] Generated artifacts pass mypy, pyright, and ty without Pydantic-specific checker plugins.
+- [x] Generated artifacts pass mypy, pyright, and ty without Pydantic-specific checker plugins.
 - [ ] Runtime behavior remains delegated to Pydantic/FastAPI, not a TypePython runtime.
 - [ ] The implementation path can be reused by at least one non-Pydantic framework fixture.
 
@@ -948,7 +948,7 @@ Possible later work:
 
 - [x] Build a tiny Pydantic-like fixture using the transform system.
 - [x] Generate `__init__` stub with aliases and defaults.
-- [ ] Validate generated artifacts with mypy/pyright/ty.
+- [x] Validate generated artifacts with mypy/pyright/ty.
 - [x] Document known unsupported Pydantic features.
 - [x] Add annotation runtime probes for Python 3.14-style deferred annotations.
 - [ ] Sketch the framework adapter manifest only from the toy and Pydantic-like fixtures.
