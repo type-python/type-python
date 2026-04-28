@@ -1783,7 +1783,10 @@ fn verify_emitted_text_artifact(path: &Path) -> Option<Diagnostic> {
     }
 }
 
-fn verify_emitted_declaration_surface(runtime_path: &Path, stub_path: &Path) -> Option<Diagnostic> {
+pub(crate) fn verify_emitted_declaration_surface(
+    runtime_path: &Path,
+    stub_path: &Path,
+) -> Option<Diagnostic> {
     let runtime_syntax = emitted_syntax(runtime_path)?;
     let stub_syntax = emitted_syntax(stub_path)?;
     let runtime_names = runtime_public_names(runtime_path).ok()?;
@@ -1811,29 +1814,52 @@ fn declaration_surface_drift_diagnostic(
         return None;
     }
 
-    let runtime_by_name = runtime_surface
+    let runtime_by_identity = runtime_surface
         .iter()
         .map(|entry| ((entry.owner.clone(), entry.name.clone(), entry.kind), entry))
         .collect::<BTreeMap<_, _>>();
-    let stub_by_name = stub_surface
+    let stub_by_identity = stub_surface
         .iter()
         .map(|entry| ((entry.owner.clone(), entry.name.clone(), entry.kind), entry))
         .collect::<BTreeMap<_, _>>();
 
-    let added = stub_by_name
+    let runtime_by_name = runtime_surface
         .iter()
-        .filter(|(key, _)| !runtime_by_name.contains_key(*key))
+        .map(|entry| ((entry.owner.clone(), entry.name.clone()), entry))
+        .collect::<BTreeMap<_, _>>();
+    let stub_by_name = stub_surface
+        .iter()
+        .map(|entry| ((entry.owner.clone(), entry.name.clone()), entry))
+        .collect::<BTreeMap<_, _>>();
+
+    let added = stub_by_identity
+        .iter()
+        .filter(|(key, stub_entry)| {
+            !runtime_by_identity.contains_key(*key)
+                && !runtime_by_name
+                    .get(&(stub_entry.owner.clone(), stub_entry.name.clone()))
+                    .is_some_and(|runtime_entry| {
+                        transformed_stub_surface_is_compatible(runtime_entry, stub_entry)
+                    })
+        })
         .map(|(_, entry)| display_surface_entry(entry))
         .collect::<Vec<_>>();
-    let removed = runtime_by_name
+    let removed = runtime_by_identity
         .iter()
-        .filter(|(key, _)| !stub_by_name.contains_key(*key))
+        .filter(|(key, runtime_entry)| {
+            !stub_by_identity.contains_key(*key)
+                && !stub_by_name
+                    .get(&(runtime_entry.owner.clone(), runtime_entry.name.clone()))
+                    .is_some_and(|stub_entry| {
+                        transformed_stub_surface_is_compatible(runtime_entry, stub_entry)
+                    })
+        })
         .map(|(_, entry)| display_surface_entry(entry))
         .collect::<Vec<_>>();
-    let changed = runtime_by_name
+    let changed = runtime_by_identity
         .iter()
         .filter_map(|(key, runtime_entry)| {
-            let stub_entry = stub_by_name.get(key)?;
+            let stub_entry = stub_by_identity.get(key)?;
             (runtime_entry.legacy_detail != stub_entry.legacy_detail).then(|| {
                 format!(
                     "{}: runtime=`{}` stub=`{}`",
@@ -1844,6 +1870,10 @@ fn declaration_surface_drift_diagnostic(
             })
         })
         .collect::<Vec<_>>();
+
+    if added.is_empty() && removed.is_empty() && changed.is_empty() {
+        return None;
+    }
 
     let mut diagnostic = Diagnostic::error(
         "TPY5003",
@@ -1863,6 +1893,18 @@ fn declaration_surface_drift_diagnostic(
         diagnostic = diagnostic.with_note(format!("changed members: {}", changed.join("; ")));
     }
     Some(diagnostic)
+}
+
+fn transformed_stub_surface_is_compatible(
+    runtime_entry: &SurfaceEntry,
+    stub_entry: &SurfaceEntry,
+) -> bool {
+    runtime_entry.owner.is_none()
+        && stub_entry.owner.is_none()
+        && runtime_entry.name == stub_entry.name
+        && runtime_entry.kind == "function"
+        && stub_entry.kind == "value"
+        && !stub_entry.legacy_detail.is_empty()
 }
 
 fn verify_stub_syntax_rules(

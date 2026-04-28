@@ -2814,6 +2814,33 @@ fn verify_runtime_public_name_parity_accepts_matching_all_exports() {
 }
 
 #[test]
+fn declaration_surface_accepts_function_to_object_transform_surface() {
+    let project_dir =
+        temp_project_dir("declaration_surface_accepts_function_to_object_transform_surface");
+    let diagnostic = {
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        let runtime_path = project_dir.join(".typepython/build/app/__init__.py");
+        let stub_path = project_dir.join(".typepython/build/app/__init__.pyi");
+        fs::write(
+            &runtime_path,
+            "__all__ = [\"build\"]\n\ndef task(fn):\n    return fn\n\n@task\ndef build(value: int) -> str:\n    return str(value)\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            &stub_path,
+            "__all__ = [\"build\"]\n\nclass Task[P, R]: ...\n\nbuild: Task[[int], str]\n",
+        )
+        .expect("test setup should succeed");
+
+        verify_emitted_declaration_surface(&runtime_path, &stub_path)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+}
+
+#[test]
 fn verify_runtime_public_name_parity_reports_runtime_missing_stub_export() {
     let project_dir =
         temp_project_dir("verify_runtime_public_name_parity_reports_runtime_missing_stub_export");
