@@ -245,62 +245,62 @@ Make TypePython credible as a compiler that users can place in a release pipelin
 
 ### stdlib / typeshed TODO
 
-- [ ] Add an upstream typeshed commit pin.
-- [ ] Add a `scripts/refresh_stdlib_stubs.py` or equivalent sync tool.
-- [ ] Record generated diff statistics during refresh.
-- [ ] Validate `stdlib/VERSIONS` against refreshed files.
-- [ ] Add CI that fails when `stdlib/BASELINE.toml` is stale.
-- [ ] Document the refresh process in `docs/contributing.md`.
-- [ ] Preserve local TypePython-specific patches in a reproducible patch directory if needed.
+- [x] Add an upstream typeshed commit pin.
+- [x] Add a `scripts/refresh_stdlib_stubs.py` or equivalent sync tool.
+- [x] Record generated diff statistics during refresh.
+- [x] Validate `stdlib/VERSIONS` against refreshed files.
+- [x] Add CI that fails when `stdlib/BASELINE.toml` is stale.
+- [x] Document the refresh process in `docs/contributing.md`.
+- [x] Preserve local TypePython-specific patches in a reproducible patch directory if needed.
 
 ### Coverage TODO
 
-- [ ] Add `cargo llvm-cov` or an equivalent coverage workflow.
-- [ ] Track coverage for:
-  - [ ] parser/syntax extraction
-  - [ ] binding
-  - [ ] checker semantic rules
-  - [ ] lowering
-  - [ ] emit/stub generation
-  - [ ] CLI verify
-- [ ] Publish coverage artifact in CI.
+- [x] Add `cargo llvm-cov` or an equivalent coverage workflow.
+- [x] Track coverage for:
+  - [x] parser/syntax extraction
+  - [x] binding
+  - [x] checker semantic rules
+  - [x] lowering
+  - [x] emit/stub generation
+  - [x] CLI verify
+- [x] Publish coverage artifact in CI.
 - [ ] Establish minimum coverage thresholds only after baseline stabilization.
 
 ### Fuzzing TODO
 
-- [ ] Add `cargo-fuzz`.
-- [ ] Fuzz parser entrypoints.
-- [ ] Fuzz TypeExpr parsing.
-- [ ] Fuzz lowering on syntactically valid `.tpy` snippets.
-- [ ] Fuzz stub generation from lowered Python.
-- [ ] Fuzz TypedDict/shape transform composition.
-- [ ] Add corpus seeds from examples and test fixtures.
-- [ ] Run fuzz smoke in CI with short duration.
+- [x] Add `cargo-fuzz`.
+- [x] Fuzz parser entrypoints.
+- [x] Fuzz TypeExpr parsing.
+- [x] Fuzz lowering on syntactically valid `.tpy` snippets.
+- [x] Fuzz stub generation from lowered Python.
+- [x] Fuzz TypedDict/shape transform composition.
+- [x] Add corpus seeds from examples and test fixtures.
+- [x] Run fuzz smoke in CI with short duration.
 - [ ] Run long fuzz in scheduled CI.
 
 ### Differential and External Checker TODO
 
-- [ ] Expand downstream checker smoke into a formal matrix.
-- [ ] Add fixtures where TypePython emits `.pyi`, then mypy/pyright/ty validate expected success.
-- [ ] Add negative fixtures where downstream checkers should reject intentionally bad consumer code.
-- [ ] Add differential tests for standard Python typing cases where TypePython should agree with mypy/pyright/ty.
-- [ ] Track known checker disagreements in a documented allowlist.
-- [ ] Add a `typepython verify --checker-preset all` convenience mode.
+- [x] Expand downstream checker smoke into a formal matrix.
+- [x] Add fixtures where TypePython emits `.pyi`, then mypy/pyright/ty validate expected success.
+- [x] Add negative fixtures where downstream checkers should reject intentionally bad consumer code.
+- [x] Add differential tests for standard Python typing cases where TypePython should agree with mypy/pyright/ty.
+- [x] Track known checker disagreements in a documented allowlist.
+- [x] Add a `typepython verify --checker-preset all` convenience mode.
 
 ### Conformance TODO
 
-- [ ] Build a mapping from spec `MUST` rules to test names.
-- [ ] Add a generated conformance report.
-- [ ] Ensure every diagnostic code has positive and negative tests.
+- [x] Build a mapping from spec `MUST` rules to test names.
+- [x] Add a generated conformance report.
+- [x] Ensure every diagnostic code has positive and negative tests.
 - [ ] Split giant checker fixtures into thematic files where practical.
 - [ ] Keep insta snapshots limited to emission/golden output tests.
 
 ### Acceptance Criteria
 
-- [ ] stdlib stubs can be refreshed reproducibly from a pinned source.
-- [ ] Coverage and fuzz smoke run locally with documented commands.
-- [ ] CI has at least one checker-neutral downstream compatibility gate.
-- [ ] The conformance report identifies implemented, partial, and missing rule coverage.
+- [x] stdlib stubs can be refreshed reproducibly from a pinned source.
+- [x] Coverage and fuzz smoke run locally with documented commands.
+- [x] CI has at least one checker-neutral downstream compatibility gate.
+- [x] The conformance report identifies implemented, partial, and missing rule coverage.
 
 ## P0: Checker Portability and Compatibility Audit
 
