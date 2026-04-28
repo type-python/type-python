@@ -224,7 +224,7 @@ The spec already limits `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `R
 - [x] Add semantic shape structs in `typepython_checking`.
 - [x] Move current `TypedDictShape` behavior toward shared shape primitives.
 - [x] Keep existing TypedDict diagnostics stable during refactor.
-- [ ] Extend lowering transform expansion to consume shared shapes.
+- [x] Extend lowering transform expansion to consume shared shapes.
 - [x] Emit stable names for generated shape aliases.
 - [x] Add hover rendering for projected shapes.
 - [x] Add diagnostics for unknown keys with suggestions.
@@ -232,7 +232,7 @@ The spec already limits `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `R
 ### Acceptance Criteria
 
 - [x] Existing TypedDict transform tests continue to pass.
-- [ ] `Pick` and `Partial` can operate on at least one non-TypedDict source behind an experimental flag.
+- [x] `Pick` and `Partial` can operate on at least one non-TypedDict source behind an experimental flag.
 - [x] Transformed class shapes can be reused by framework integrations.
 - [x] Generated stubs remain standard Python typing.
 - [x] No public "arbitrary type transform" guarantee is made before assignability semantics are stable.
