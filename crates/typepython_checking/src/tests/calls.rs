@@ -151,6 +151,48 @@ fn check_reports_framework_class_decorator_constructor_type_mismatch() {
 }
 
 #[test]
+fn check_accepts_framework_field_alias_kw_only_and_init_exclusion() {
+    let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\ndef field(*, default=None, default_factory=None, init=True, kw_only=False, alias=None):\n    return default\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"alias_handling\", \"required_optional_fields\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    id: int = field(alias=\"user_id\")\n    name: str = field(kw_only=True)\n    cache: str = field(init=False)\n\nuser: User = User(1, name=\"Ada\")\nuser_alias: User = User(user_id=1, name=\"Ada\")\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_reports_framework_keyword_only_field_passed_positionally() {
+    let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\ndef field(*, kw_only=False):\n    return None\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"required_optional_fields\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    id: int\n    name: str = field(kw_only=True)\n\nuser: User = User(1, \"Ada\")\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("expects at most 1 positional argument(s)"), "{rendered}");
+}
+
+#[test]
+fn check_reports_framework_readonly_field_assignment_after_init() {
+    let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"readonly_fields\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nuser: User = User(\"Ada\")\nuser.name = \"Grace\"\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("frozen dataclass-transform field `name`"), "{rendered}");
+}
+
+#[test]
+fn check_excludes_descriptor_defaults_from_framework_fields_when_advertised() {
+    let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\nclass Descriptor:\n    def __get__(self, instance, owner):\n        return 0\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"descriptor_backed_attributes\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: int = Descriptor()\n\nuser: User = User()\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
 fn check_reports_dataclass_transform_constructor_arity_mismatch() {
     let result = check_temp_typepython_source(
         "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n    age: int\n\nuser: User = User(\"Ada\")\n",

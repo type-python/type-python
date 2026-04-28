@@ -1614,7 +1614,15 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
                 node,
                 nodes,
                 &target_type_rendered,
-            )?;
+            )
+            .or_else(|| {
+                resolve_known_framework_transform_shape_from_type_with_context(
+                    context,
+                    node,
+                    nodes,
+                    &target_type_rendered,
+                )
+            })?;
             if !shape.frozen || !shape.fields.iter().any(|field| field.name == site.field_name) {
                 return None;
             }
@@ -1799,7 +1807,15 @@ pub(super) fn should_defer_attribute_assignment_to_frozen_checks(
         node,
         nodes,
         target_type,
-    ) && shape.frozen
+    )
+    .or_else(|| {
+        resolve_known_framework_transform_shape_from_type_with_context(
+            context,
+            node,
+            nodes,
+            target_type,
+        )
+    }) && shape.frozen
         && shape.fields.iter().any(|field| field.name == site.field_name)
     {
         let in_initializer = site.owner_name.as_deref() == Some("__init__")

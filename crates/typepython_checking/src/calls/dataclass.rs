@@ -340,35 +340,68 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
         }
     }
 
+    let supports_aliases = provider
+        .capabilities
+        .contains(&typepython_syntax::FrameworkTransformCapability::AliasHandling);
+    let supports_required_optional = provider
+        .capabilities
+        .contains(&typepython_syntax::FrameworkTransformCapability::RequiredOptionalFields);
+    let supports_readonly = provider
+        .capabilities
+        .contains(&typepython_syntax::FrameworkTransformCapability::ReadonlyFields);
+    let supports_descriptors = provider
+        .capabilities
+        .contains(&typepython_syntax::FrameworkTransformCapability::DescriptorBackedAttributes);
+
     for field in &class_site.fields {
         if field.is_class_var {
             continue;
         }
-        if field
-            .value_metadata
-            .as_ref()
-            .and_then(|metadata| {
-                resolve_direct_expression_semantic_type_from_metadata(
-                    class_node,
-                    nodes,
-                    None,
-                    None,
-                    Some(&class_decl.name),
-                    field.line,
-                    metadata,
-                )
-            })
-            .is_some_and(|value_type| is_descriptor_semantic_type(nodes, class_node, &value_type))
+        if supports_descriptors
+            && field
+                .value_metadata
+                .as_ref()
+                .and_then(|metadata| {
+                    resolve_direct_expression_semantic_type_from_metadata(
+                        class_node,
+                        nodes,
+                        None,
+                        None,
+                        Some(&class_decl.name),
+                        field.line,
+                        metadata,
+                    )
+                })
+                .is_some_and(|value_type| {
+                    is_descriptor_semantic_type(nodes, class_node, &value_type)
+                })
         {
+            continue;
+        }
+        if supports_required_optional && field.field_specifier_init == Some(false) {
             continue;
         }
         let synthesized = DataclassTransformFieldShape {
             name: field.name.clone(),
-            keyword_name: field.name.clone(),
+            keyword_name: if supports_aliases {
+                field.field_specifier_alias.clone().unwrap_or_else(|| field.name.clone())
+            } else {
+                field.name.clone()
+            },
             annotation: field.rendered_annotation(),
             annotation_expr: field.annotation_expr.clone(),
-            required: !field.has_default,
-            kw_only: false,
+            required: if supports_required_optional {
+                !(field.has_default
+                    || field.field_specifier_has_default
+                    || field.field_specifier_has_default_factory)
+            } else {
+                !field.has_default
+            },
+            kw_only: if supports_required_optional {
+                field.field_specifier_kw_only.unwrap_or(false)
+            } else {
+                false
+            },
         };
         if let Some(index) = fields.iter().position(|existing| existing.name == synthesized.name) {
             fields.remove(index);
@@ -376,7 +409,7 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
         fields.push(synthesized);
     }
 
-    Some(DataclassTransformClassShape { fields, frozen: false, has_explicit_init })
+    Some(DataclassTransformClassShape { fields, frozen: supports_readonly, has_explicit_init })
 }
 
 pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
