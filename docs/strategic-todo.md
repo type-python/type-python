@@ -979,8 +979,8 @@ Possible later work:
 
 - [x] TypePython can report dependency and stub health for a project.
 - [x] Library authors can diff public type surfaces across releases.
-- [ ] Teams can adopt TypePython incrementally with baselines and type coverage budgets.
-- [ ] IDE and CLI workflows explain `Any`, `Unknown`, generated stubs, and checker portability without requiring users to read compiler internals.
+- [x] Teams can adopt TypePython incrementally with baselines and type coverage budgets.
+- [x] IDE and CLI workflows explain `Any`, `Unknown`, generated stubs, and checker portability without requiring users to read compiler internals.
 
 ## Things Not To Do Yet
 
