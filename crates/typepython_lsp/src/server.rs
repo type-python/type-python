@@ -128,6 +128,13 @@ impl Server {
                         "workspaceSymbolProvider": true,
                         "renameProvider": true,
                         "codeActionProvider": true,
+                        "executeCommandProvider": {
+                            "commands": [
+                                "typepython.migrateReport",
+                                "typepython.compat",
+                                "typepython.typeHealth"
+                            ]
+                        },
                         "completionProvider": {
                             "resolveProvider": false,
                             "triggerCharacters": ["."]
@@ -200,6 +207,11 @@ impl Server {
             }
             "textDocument/codeAction" => {
                 Ok(request_ok_response(id, self.handle_code_action(params)?).into_iter().collect())
+            }
+            "workspace/executeCommand" => {
+                Ok(request_ok_response(id, self.handle_execute_command(params)?)
+                    .into_iter()
+                    .collect())
             }
             "textDocument/completion" => {
                 Ok(request_ok_response(id, self.handle_completion(params)?).into_iter().collect())
@@ -362,10 +374,73 @@ impl Server {
         self.analysis.code_action(&uri, range, &params)
     }
 
+    pub(super) fn handle_execute_command(&mut self, params: Value) -> Result<Value, LspError> {
+        let command = params.get("command").and_then(Value::as_str).ok_or_else(|| {
+            LspError::invalid_params(String::from(
+                "workspace/executeCommand request missing `params.command`",
+            ))
+        })?;
+        let args = workflow_command_args(command, &self.analysis.config.config_dir)?;
+        let executable = env::current_exe().unwrap_or_else(|_| PathBuf::from("typepython"));
+        let output = ProcessCommand::new(&executable)
+            .args(&args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|error| {
+                LspError::request_failed(format!(
+                    "TPY6004: unable to run workflow command `{command}`: {error}"
+                ))
+                .with_tpy_code("TPY6004")
+            })?;
+        if !output.status.success() {
+            return Err(LspError::request_failed(format!(
+                "TPY6004: workflow command `{command}` exited with status {}{}",
+                output.status,
+                workflow_stderr_suffix(&output.stderr)
+            ))
+            .with_tpy_code("TPY6004"));
+        }
+        Ok(json!({
+            "command": command,
+            "argv": args,
+            "stdout": String::from_utf8_lossy(&output.stdout),
+            "stderr": String::from_utf8_lossy(&output.stderr),
+        }))
+    }
+
     pub(super) fn handle_completion(&mut self, params: Value) -> Result<Value, LspError> {
         let (uri, position) = text_document_position(&params)?;
         self.analysis.completion(&uri, position)
     }
+}
+
+pub(super) fn workflow_command_args(
+    command: &str,
+    project_dir: &Path,
+) -> Result<Vec<String>, LspError> {
+    let project = project_dir.display().to_string();
+    match command {
+        "typepython.migrateReport" => Ok(vec![
+            String::from("migrate"),
+            String::from("--project"),
+            project,
+            String::from("--report"),
+        ]),
+        "typepython.compat" => Ok(vec![String::from("compat"), String::from("--project"), project]),
+        "typepython.typeHealth" => {
+            Ok(vec![String::from("type-health"), String::from("--project"), project])
+        }
+        _ => Err(LspError::invalid_params(format!(
+            "workspace/executeCommand received unsupported TypePython command `{command}`"
+        ))),
+    }
+}
+
+fn workflow_stderr_suffix(stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
+    let stderr = stderr.trim();
+    if stderr.is_empty() { String::new() } else { format!(": {stderr}") }
 }
 
 fn request_ok_response(id: Option<Value>, result: Value) -> Option<Value> {

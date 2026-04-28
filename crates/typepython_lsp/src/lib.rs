@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
+    env,
     io::{self, BufRead, Write},
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, Stdio},
@@ -354,6 +355,7 @@ use analysis::*;
 use formatting::*;
 use requests::*;
 use scheduler::*;
+use server::*;
 use workspace::*;
 
 #[cfg(test)]

@@ -31,6 +31,10 @@ fn handle_initialize_returns_required_capabilities() {
     assert_eq!(capabilities["workspaceSymbolProvider"], json!(true));
     assert_eq!(capabilities["renameProvider"], json!(true));
     assert_eq!(capabilities["codeActionProvider"], json!(true));
+    assert_eq!(
+        capabilities["executeCommandProvider"]["commands"],
+        json!(["typepython.migrateReport", "typepython.compat", "typepython.typeHealth"])
+    );
 }
 
 #[test]
@@ -966,6 +970,47 @@ fn code_actions_offer_project_workflow_commands() {
     assert!(commands.contains(&"typepython.migrateReport"));
     assert!(commands.contains(&"typepython.compat"));
     assert!(commands.contains(&"typepython.typeHealth"));
+}
+
+#[test]
+fn workflow_command_args_map_to_cli_invocations() {
+    let project_dir = Path::new("/tmp/typepython-project");
+
+    assert_eq!(
+        workflow_command_args("typepython.migrateReport", project_dir)
+            .expect("migrate report command should map"),
+        vec!["migrate", "--project", "/tmp/typepython-project", "--report"]
+    );
+    assert_eq!(
+        workflow_command_args("typepython.compat", project_dir).expect("compat command should map"),
+        vec!["compat", "--project", "/tmp/typepython-project"]
+    );
+    assert_eq!(
+        workflow_command_args("typepython.typeHealth", project_dir)
+            .expect("type-health command should map"),
+        vec!["type-health", "--project", "/tmp/typepython-project"]
+    );
+}
+
+#[test]
+fn execute_command_rejects_unknown_typepython_command() {
+    let config = temp_workspace(
+        "execute_command_rejects_unknown_typepython_command",
+        &[("src/app/__init__.tpy", "x: int = 1\n")],
+    );
+    let mut server = Server::new(config);
+    let responses = server
+        .handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "workspace/executeCommand",
+            "params": {"command": "typepython.unknown"}
+        }))
+        .expect("executeCommand should return a JSON-RPC error response");
+
+    let error = single_error_response(&responses);
+    assert_eq!(error["code"], json!(-32602));
+    assert!(error["message"].as_str().unwrap_or_default().contains("unsupported"));
 }
 
 #[test]
