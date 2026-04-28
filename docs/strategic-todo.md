@@ -430,7 +430,7 @@ The first version should be a conservative surface diff, not a complete semantic
 - [x] Defer full semantic compatibility checks until checker-backed diffing is designed.
 - [x] Generate release-note snippets.
 - [x] Add SemVer policy gates.
-- [ ] Integrate with `typepython verify` and publication workflow.
+- [x] Integrate with `typepython verify` and publication workflow.
 
 ### Acceptance Criteria
 

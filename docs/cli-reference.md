@@ -267,6 +267,7 @@ typepython verify [OPTIONS]
 | `--format FORMAT`           | Output format: `text` or `json`                                                                  |
 | `--wheel PATH`              | Path to a `.whl` file to verify (repeatable)                                                     |
 | `--sdist PATH`              | Path to a `.tar.gz` sdist to verify (repeatable)                                                 |
+| `--api-diff OLD_SURFACE`    | Compare an old public typing surface against the current verified build output                   |
 | `--checker COMMAND`         | Run an external type checker against the emitted build output (repeatable)                       |
 | `--checker-preset PRESET`   | Run a named checker preset; `all` expands to `mypy`, `pyright`, and `ty`                         |
 | `--checker-allowlist PATH`  | TOML allowlist of known checker disagreements that should remain visible but non-blocking        |
@@ -278,6 +279,7 @@ typepython verify [OPTIONS]
 - Public API completeness: all exported names have known types (when `typing.require_known_public_types = true`)
 - Runtime/type surface consistency: names in `.py` match names in `.pyi`
 - Wheel/sdist structure validation
+- Optional API surface diff gate: `--api-diff OLD_SURFACE` compares a previous source, stub, wheel, or sdist surface against the current build output
 - `py.typed` marker presence
 - Packaging metadata consistency: `Requires-Python` and `typing_extensions` declarations keep pace with emitted native/backport requirements
 - Runtime-annotation compatibility audit: warns when emitted `.py` contains Python 3.14+ annotation consumers or nested local-scope annotations that make runtime introspection fragile
@@ -294,6 +296,9 @@ typepython verify --project .
 
 # Verify a built wheel
 typepython verify --project . --wheel dist/my_package-1.0.0-py3-none-any.whl
+
+# Compare a previous release surface against the current verified build output
+typepython verify --project . --api-diff dist/my_package-0.9.0-py3-none-any.whl
 
 # Also import emitted runtime modules for public-name parity checks
 typepython verify --project . --unsafe-runtime-imports
