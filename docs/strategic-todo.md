@@ -754,19 +754,19 @@ Explore safer error modeling using TypePython's existing sealed-class and exhaus
 
 ### TODO
 
-- [ ] Define a standard `Result[T, E]` pattern using sealed classes.
-- [ ] Add examples for `Ok[T]` and `Err[E]`.
-- [ ] Add exhaustiveness examples using `match`.
-- [ ] Explore optional `raises` syntax behind an experimental flag.
-- [ ] Decide whether `raises` lowers to metadata, `Result`, or ordinary exceptions.
-- [ ] Avoid requiring throws annotations for arbitrary Python imports.
-- [ ] Avoid Java-style checked exceptions in Core v1.
+- [x] Define a standard `Result[T, E]` pattern using sealed classes.
+- [x] Add examples for `Ok[T]` and `Err[E]`.
+- [x] Add exhaustiveness examples using `match`.
+- [x] Explore optional `raises` syntax behind an experimental flag.
+- [x] Decide whether `raises` lowers to metadata, `Result`, or ordinary exceptions.
+- [x] Avoid requiring throws annotations for arbitrary Python imports.
+- [x] Avoid Java-style checked exceptions in Core v1.
 
 ### Acceptance Criteria
 
-- [ ] Users can opt into a Rust-like error style in `.tpy`.
-- [ ] Existing Python exception behavior is preserved by default.
-- [ ] The feature remains optional and does not burden ordinary interop.
+- [x] Users can opt into a Rust-like error style in `.tpy`.
+- [x] Existing Python exception behavior is preserved by default.
+- [x] The feature remains optional and does not burden ordinary interop.
 
 ## P2: Boundary Validator Generation
 

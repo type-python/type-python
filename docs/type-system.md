@@ -509,6 +509,32 @@ def eval(e: Expr) -> int:
 
 Sealed classes restrict subclassing to the same module. The compiler statically verifies exhaustiveness when `typing.enable_sealed_exhaustiveness = true`.
 
+### Opt-in `Result[T, E]` pattern
+
+Error-as-value APIs can use sealed classes without adding a checked-exception system:
+
+```python
+sealed class Result[T, E]:
+    pass
+
+class Ok[T, E](Result[T, E]):
+    value: T
+
+class Err[T, E](Result[T, E]):
+    error: E
+
+def render(result: Result[User, ParseError]) -> str:
+    match result:
+        case Ok(value=user):
+            return user.name
+        case Err(error=err):
+            return err.message
+```
+
+This is a convention, not a mandatory runtime dependency. Existing Python exceptions remain the
+default, and TypePython does not require throws annotations for imported Python APIs. See
+[the Result/ADT experiment RFC](rfcs/result-adt-effect.md) for the optional `raises` design boundary.
+
 ## Decorators
 
 | Decorator              | Effect                                              |
