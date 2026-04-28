@@ -733,17 +733,17 @@ Initial unsupported cases:
 
 ### Implementation TODO
 
-- [ ] Extend parser metadata for dual functions.
-- [ ] Extend lowering to emit two function bodies.
-- [ ] Extend source maps for dual emitted bodies.
-- [ ] Extend stub generation for both functions.
+- [x] Extend parser metadata for dual functions.
+- [x] Extend lowering to emit two function bodies.
+- [x] Extend source maps for dual emitted bodies.
+- [x] Extend stub generation for both functions.
 - [x] Add examples for HTTP client and database access.
-- [ ] Add downstream checker fixtures.
+- [x] Add downstream checker fixtures.
 
 ### Acceptance Criteria
 
-- [ ] A simple async client API can generate a sync and async pair.
-- [ ] Both emitted functions type-check externally.
+- [x] A simple async client API can generate a sync and async pair.
+- [x] Both emitted functions type-check externally.
 - [ ] Unsupported async constructs fail with clear diagnostics.
 
 ## P2: Result, ADT, and Effect Experiment
