@@ -92,7 +92,10 @@ fn check_reports_unsupported_framework_transform_provider_in_strict_mode() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4020"), "{rendered}");
     assert!(rendered.contains("celery_task"), "{rendered}");
-    assert!(rendered.contains("semantic application is not implemented yet"), "{rendered}");
+    assert!(
+        rendered.contains("does not advertise a supported static capability set"),
+        "{rendered}"
+    );
 }
 
 #[test]

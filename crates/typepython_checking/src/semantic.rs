@@ -72,7 +72,7 @@ pub(super) fn unsupported_framework_transform_diagnostics(
             Diagnostic::error(
                 "TPY4020",
                 format!(
-                    "framework transform provider `{}` in module `{}` is declared but framework transform semantic application is not implemented yet",
+                    "framework transform provider `{}` in module `{}` does not advertise a supported static capability set",
                     provider.name,
                     node.module_path.display(),
                 ),
