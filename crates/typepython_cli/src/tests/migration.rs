@@ -179,6 +179,142 @@ fn build_migration_report_tracks_public_api_annotation_completeness() {
 }
 
 #[test]
+fn build_migration_budget_baseline_records_public_any_unknown_and_untyped_imports() {
+    let project_dir = temp_project_dir("build_migration_budget_baseline_records_type_debt");
+    let baseline = {
+        fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app/__init__.tpy"),
+            "import thirdparty.api\n\nPUBLIC_ANY: Any = None\nPUBLIC_UNKNOWN: unknown = None\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let discovery = collect_source_paths(&config).expect("test setup should succeed");
+        let syntax_trees = load_syntax_trees(
+            &discovery.sources,
+            false,
+            &config.config.project.target_python.to_string(),
+        )
+        .expect("test setup should succeed");
+        let report = build_migration_report(&config, &syntax_trees);
+        build_migration_budget_baseline(&DiagnosticReport::default(), &report)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(baseline.version, 1);
+    assert_eq!(baseline.public_any.len(), 1);
+    assert_eq!(baseline.public_any[0].symbol, "PUBLIC_ANY: Any");
+    assert_eq!(baseline.public_unknown.len(), 1);
+    assert_eq!(baseline.public_unknown[0].symbol, "PUBLIC_UNKNOWN: unknown");
+    assert_eq!(baseline.untyped_imports.len(), 1);
+}
+
+#[test]
+fn compare_migration_budget_baseline_reports_new_public_any_and_unknown() {
+    let baseline = MigrationBudgetBaseline {
+        version: 1,
+        diagnostics: Vec::new(),
+        public_any: vec![MigrationPublicTypeDebtEntry {
+            path: String::from("src/app/old.tpy"),
+            symbol: String::from("OLD: Any"),
+            kind: String::from("public-export"),
+        }],
+        public_unknown: Vec::new(),
+        untyped_imports: Vec::new(),
+        dynamic_framework_boundaries: Vec::new(),
+        checker_portability_issues: Vec::new(),
+    };
+    let current = MigrationBudgetBaseline {
+        public_any: vec![
+            MigrationPublicTypeDebtEntry {
+                path: String::from("src/app/old.tpy"),
+                symbol: String::from("OLD: Any"),
+                kind: String::from("public-export"),
+            },
+            MigrationPublicTypeDebtEntry {
+                path: String::from("src/app/new.tpy"),
+                symbol: String::from("NEW: Any"),
+                kind: String::from("public-export"),
+            },
+        ],
+        public_unknown: vec![MigrationPublicTypeDebtEntry {
+            path: String::from("src/app/new.tpy"),
+            symbol: String::from("MISSING: unknown"),
+            kind: String::from("public-export"),
+        }],
+        ..baseline.clone()
+    };
+
+    let comparison = compare_migration_budget_baseline(
+        String::from(".typepython/type-budget.json"),
+        &baseline,
+        &current,
+    );
+
+    assert_eq!(comparison.baseline_public_any, 1);
+    assert_eq!(comparison.current_public_any, 2);
+    assert_eq!(comparison.new_public_any.len(), 1);
+    assert_eq!(comparison.new_public_unknown.len(), 1);
+}
+
+#[test]
+fn run_migrate_writes_budget_baseline_and_gates_new_public_any() {
+    let project_dir = temp_project_dir("run_migrate_writes_budget_baseline_and_gates_any");
+    let (write_result, gate_result, baseline_text) = {
+        fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app/__init__.tpy"), "PUBLIC_ANY: Any = None\n")
+            .expect("test setup should succeed");
+        let baseline_path = PathBuf::from(".typepython/type-budget.json");
+        let write_result = run_migrate(MigrateArgs {
+            run: RunArgs { project: Some(project_dir.clone()), format: OutputFormat::Json },
+            report: true,
+            baseline: None,
+            write_baseline: None,
+            no_new_diagnostics: false,
+            budget_baseline: None,
+            write_budget_baseline: Some(baseline_path.clone()),
+            no_new_public_any: false,
+            no_new_public_unknown: false,
+            emit_stubs: Vec::new(),
+            stub_out_dir: None,
+        })
+        .expect("migrate should write budget baseline");
+        fs::write(
+            project_dir.join("src/app/__init__.tpy"),
+            "PUBLIC_ANY: Any = None\nNEW_ANY: Any = None\n",
+        )
+        .expect("test setup should update source");
+        let gate_result = run_migrate(MigrateArgs {
+            run: RunArgs { project: Some(project_dir.clone()), format: OutputFormat::Json },
+            report: true,
+            baseline: None,
+            write_baseline: None,
+            no_new_diagnostics: false,
+            budget_baseline: Some(baseline_path.clone()),
+            write_budget_baseline: None,
+            no_new_public_any: true,
+            no_new_public_unknown: false,
+            emit_stubs: Vec::new(),
+            stub_out_dir: None,
+        })
+        .expect("migrate should compare budget baseline");
+        let baseline_text = fs::read_to_string(project_dir.join(baseline_path))
+            .expect("budget baseline should be written");
+        (write_result, gate_result, baseline_text)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(write_result, ExitCode::SUCCESS);
+    assert_eq!(gate_result, ExitCode::FAILURE);
+    assert!(baseline_text.contains("public_any"));
+    assert!(baseline_text.contains("PUBLIC_ANY: Any"));
+}
+
+#[test]
 fn build_migration_report_tracks_untyped_import_candidates() {
     let project_dir = temp_project_dir("build_migration_report_tracks_untyped_import_candidates");
     let report = {
@@ -308,6 +444,31 @@ fn migrate_command_parses_diagnostic_baseline_flags() {
     assert_eq!(args.baseline, Some(PathBuf::from(".typepython/migration-baseline.json")));
     assert_eq!(args.write_baseline, Some(PathBuf::from(".typepython/new-baseline.json")));
     assert!(args.no_new_diagnostics);
+}
+
+#[test]
+fn migrate_command_parses_budget_baseline_flags() {
+    let cli = Cli::parse_from([
+        "typepython",
+        "migrate",
+        "--project",
+        "examples/hello-world",
+        "--budget-baseline",
+        ".typepython/type-budget.json",
+        "--write-budget-baseline",
+        ".typepython/type-budget-new.json",
+        "--no-new-public-any",
+        "--no-new-public-unknown",
+    ]);
+
+    let super::Command::Migrate(args) = cli.command else {
+        panic!("expected migrate command");
+    };
+
+    assert_eq!(args.budget_baseline, Some(PathBuf::from(".typepython/type-budget.json")));
+    assert_eq!(args.write_budget_baseline, Some(PathBuf::from(".typepython/type-budget-new.json")));
+    assert!(args.no_new_public_any);
+    assert!(args.no_new_public_unknown);
 }
 
 #[test]

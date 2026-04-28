@@ -6,8 +6,9 @@ pub(super) use super::discovery::{
     python_type_roots_from_interpreter,
 };
 pub(super) use super::migration::{
-    build_migration_diagnostic_baseline, build_migration_report,
-    compare_migration_diagnostic_baseline, emit_migration_stubs,
+    MigrationBudgetBaseline, MigrationPublicTypeDebtEntry, build_migration_budget_baseline,
+    build_migration_diagnostic_baseline, build_migration_report, compare_migration_budget_baseline,
+    compare_migration_diagnostic_baseline, emit_migration_stubs, run_migrate,
 };
 pub(super) use super::pipeline::{
     PipelineSnapshot, build_diagnostics, clean_project, compile_runtime_bytecode,
@@ -30,7 +31,9 @@ pub(super) use super::{
     Cli, Command, InitArgs, OutputFormat, RunArgs, bytecode_path_for, embedded_config_template,
     exit_code_for_error, init_project,
 };
-pub(super) use crate::cli::{ApiDiffArgs, CleanArgs, CompatArgs, TypeHealthArgs, VerifyArgs};
+pub(super) use crate::cli::{
+    ApiDiffArgs, CleanArgs, CompatArgs, MigrateArgs, TypeHealthArgs, VerifyArgs,
+};
 pub(super) use clap::Parser;
 pub(super) use flate2::{Compression, write::GzEncoder};
 pub(super) use notify::RecursiveMode;

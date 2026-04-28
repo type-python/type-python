@@ -195,6 +195,18 @@ pub(crate) struct MigrateArgs {
     /// Fail when diagnostics appear that are not present in the baseline.
     #[arg(long = "no-new-diagnostics")]
     pub(crate) no_new_diagnostics: bool,
+    /// Read an existing migration type budget baseline for comparison.
+    #[arg(long = "budget-baseline", value_name = "PATH")]
+    pub(crate) budget_baseline: Option<PathBuf>,
+    /// Write the current migration type budget baseline to the given JSON file.
+    #[arg(long = "write-budget-baseline", value_name = "PATH")]
+    pub(crate) write_budget_baseline: Option<PathBuf>,
+    /// Fail when public Any exports appear that are not present in the budget baseline.
+    #[arg(long = "no-new-public-any")]
+    pub(crate) no_new_public_any: bool,
+    /// Fail when public Unknown exports appear that are not present in the budget baseline.
+    #[arg(long = "no-new-public-unknown")]
+    pub(crate) no_new_public_unknown: bool,
     /// Generate inferred `.pyi` stubs for the selected `.py` files or directories.
     #[arg(long = "emit-stubs", value_name = "PATH")]
     pub(crate) emit_stubs: Vec<PathBuf>,

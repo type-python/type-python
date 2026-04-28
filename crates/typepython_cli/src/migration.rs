@@ -35,6 +35,7 @@ pub(crate) struct MigrationReport {
     pub(crate) high_impact_untyped_files: Vec<MigrationImpactEntry>,
     pub(crate) framework_pattern_files: Vec<MigrationFrameworkPatternEntry>,
     pub(crate) diagnostic_baseline: Option<MigrationDiagnosticBaselineComparison>,
+    pub(crate) budget_baseline: Option<MigrationBudgetBaselineComparison>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
@@ -65,6 +66,35 @@ pub(crate) struct MigrationDiagnosticBaselineComparison {
     pub(crate) resolved_diagnostics: Vec<MigrationDiagnosticBaselineEntry>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+pub(crate) struct MigrationBudgetBaseline {
+    pub(crate) version: u8,
+    pub(crate) diagnostics: Vec<MigrationDiagnosticBaselineEntry>,
+    pub(crate) public_any: Vec<MigrationPublicTypeDebtEntry>,
+    pub(crate) public_unknown: Vec<MigrationPublicTypeDebtEntry>,
+    pub(crate) untyped_imports: Vec<MigrationUntypedImportEntry>,
+    pub(crate) dynamic_framework_boundaries: Vec<MigrationFrameworkPatternEntry>,
+    pub(crate) checker_portability_issues: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) struct MigrationPublicTypeDebtEntry {
+    pub(crate) path: String,
+    pub(crate) symbol: String,
+    pub(crate) kind: String,
+}
+
+#[derive(Debug, Serialize, Clone, Eq, PartialEq)]
+pub(crate) struct MigrationBudgetBaselineComparison {
+    pub(crate) baseline_path: String,
+    pub(crate) baseline_public_any: usize,
+    pub(crate) current_public_any: usize,
+    pub(crate) new_public_any: Vec<MigrationPublicTypeDebtEntry>,
+    pub(crate) baseline_public_unknown: usize,
+    pub(crate) current_public_unknown: usize,
+    pub(crate) new_public_unknown: Vec<MigrationPublicTypeDebtEntry>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub(crate) struct MigrationCoverageEntry {
     pub(crate) path: String,
@@ -87,7 +117,7 @@ pub(crate) struct MigrationImpactEntry {
     pub(crate) impact_score: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub(crate) struct MigrationFrameworkPatternEntry {
     pub(crate) path: String,
     pub(crate) frameworks: Vec<String>,
@@ -103,7 +133,7 @@ pub(crate) struct MigrationPublicApiEntry {
     pub(crate) incomplete_exports: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub(crate) struct MigrationUntypedImportEntry {
     pub(crate) path: String,
     pub(crate) untyped_import_count: usize,
@@ -162,6 +192,13 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
         args.baseline.as_deref(),
         &current_baseline,
     )?;
+    let mut report = build_migration_report(&config, &syntax_trees);
+    let current_budget_baseline = build_migration_budget_baseline(&diagnostics, &report);
+    let budget_comparison = migration_budget_baseline_comparison(
+        &config,
+        args.budget_baseline.as_deref(),
+        &current_budget_baseline,
+    )?;
     if args.no_new_diagnostics {
         match &baseline_comparison {
             Some(comparison) if comparison.new_diagnostics.is_empty() => {}
@@ -204,9 +241,56 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
     if let Some(path) = args.write_baseline.as_deref() {
         write_migration_diagnostic_baseline(&config, path, &current_baseline)?;
     }
+    if args.no_new_public_any {
+        match &budget_comparison {
+            Some(comparison) if comparison.new_public_any.is_empty() => {}
+            Some(comparison) => diagnostics.push(
+                Diagnostic::error(
+                    "TPY6001",
+                    format!(
+                        "migration budget gate found {} new public Any export(s)",
+                        comparison.new_public_any.len()
+                    ),
+                )
+                .with_note(format!("compare against budget baseline {}", comparison.baseline_path)),
+            ),
+            None => diagnostics.push(
+                Diagnostic::error(
+                    "TPY6002",
+                    "--no-new-public-any requires --budget-baseline PATH",
+                )
+                .with_note("write the initial budget with `typepython migrate --write-budget-baseline PATH`"),
+            ),
+        }
+    }
+    if args.no_new_public_unknown {
+        match &budget_comparison {
+            Some(comparison) if comparison.new_public_unknown.is_empty() => {}
+            Some(comparison) => diagnostics.push(
+                Diagnostic::error(
+                    "TPY6001",
+                    format!(
+                        "migration budget gate found {} new public Unknown export(s)",
+                        comparison.new_public_unknown.len()
+                    ),
+                )
+                .with_note(format!("compare against budget baseline {}", comparison.baseline_path)),
+            ),
+            None => diagnostics.push(
+                Diagnostic::error(
+                    "TPY6002",
+                    "--no-new-public-unknown requires --budget-baseline PATH",
+                )
+                .with_note("write the initial budget with `typepython migrate --write-budget-baseline PATH`"),
+            ),
+        }
+    }
+    if let Some(path) = args.write_budget_baseline.as_deref() {
+        write_migration_budget_baseline(&config, path, &current_budget_baseline)?;
+    }
 
-    let mut report = build_migration_report(&config, &syntax_trees);
     report.diagnostic_baseline = baseline_comparison;
+    report.budget_baseline = budget_comparison;
     let emitted_stubs = emit_migration_stubs(
         &config,
         &discovery.sources,
@@ -222,6 +306,12 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
     if let Some(path) = args.write_baseline.as_deref() {
         notes.push(format!(
             "wrote migration diagnostic baseline to {}",
+            resolve_migration_report_path(&config, path).display()
+        ));
+    }
+    if let Some(path) = args.write_budget_baseline.as_deref() {
+        notes.push(format!(
+            "wrote migration type budget baseline to {}",
             resolve_migration_report_path(&config, path).display()
         ));
     }
@@ -423,7 +513,63 @@ pub(crate) fn build_migration_report(
         high_impact_untyped_files,
         framework_pattern_files: framework_pattern_entries(config, syntax_trees),
         diagnostic_baseline: None,
+        budget_baseline: None,
     }
+}
+
+pub(crate) fn build_migration_budget_baseline(
+    diagnostics: &DiagnosticReport,
+    report: &MigrationReport,
+) -> MigrationBudgetBaseline {
+    let mut public_any = migration_public_type_debt_entries(report, "Any");
+    let mut public_unknown = migration_public_type_debt_entries(report, "Unknown");
+    public_any.sort();
+    public_any.dedup();
+    public_unknown.sort();
+    public_unknown.dedup();
+
+    MigrationBudgetBaseline {
+        version: 1,
+        diagnostics: build_migration_diagnostic_baseline(diagnostics).diagnostics,
+        public_any,
+        public_unknown,
+        untyped_imports: report.untyped_import_files.clone(),
+        dynamic_framework_boundaries: report.framework_pattern_files.clone(),
+        checker_portability_issues: Vec::new(),
+    }
+}
+
+fn migration_public_type_debt_entries(
+    report: &MigrationReport,
+    token: &str,
+) -> Vec<MigrationPublicTypeDebtEntry> {
+    report
+        .public_api_files
+        .iter()
+        .flat_map(|entry| {
+            entry.incomplete_exports.iter().filter_map(|symbol| {
+                symbol_contains_type_debt_token(symbol, token).then(|| {
+                    MigrationPublicTypeDebtEntry {
+                        path: entry.path.clone(),
+                        symbol: symbol.clone(),
+                        kind: String::from("public-export"),
+                    }
+                })
+            })
+        })
+        .collect()
+}
+
+fn symbol_contains_type_debt_token(symbol: &str, token: &str) -> bool {
+    symbol.split(':').nth(1).is_some_and(|annotation| {
+        annotation.split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric())).any(|part| {
+            match token {
+                "Any" => part == "Any" || part == "dynamic",
+                "Unknown" => part == "Unknown" || part == "unknown",
+                _ => false,
+            }
+        })
+    })
 }
 
 fn migration_public_api_entry(
@@ -470,7 +616,8 @@ fn migration_public_api_entry_inner(
                 if !statement.value.is_empty() && dynamic_count == 0 && unknown_count == 0 {
                     known_public_exports += 1;
                 } else {
-                    incomplete_exports.push(statement.name.clone());
+                    incomplete_exports
+                        .push(incomplete_export_label(&statement.name, &statement.value));
                 }
             }
             typepython_syntax::SyntaxStatement::Interface(statement)
@@ -487,7 +634,10 @@ fn migration_public_api_entry_inner(
                 if class_known {
                     known_public_exports += 1;
                 } else {
-                    incomplete_exports.push(statement.name.clone());
+                    incomplete_exports.push(incomplete_export_label(
+                        &statement.name,
+                        &statement.bases.join(", "),
+                    ));
                 }
             }
             typepython_syntax::SyntaxStatement::OverloadDef(statement)
@@ -502,7 +652,10 @@ fn migration_public_api_entry_inner(
                 if known {
                     known_public_exports += 1;
                 } else {
-                    incomplete_exports.push(statement.name.clone());
+                    incomplete_exports.push(incomplete_export_label(
+                        &statement.name,
+                        statement.returns.as_deref().unwrap_or(""),
+                    ));
                 }
             }
             typepython_syntax::SyntaxStatement::FunctionDef(statement)
@@ -517,7 +670,10 @@ fn migration_public_api_entry_inner(
                 if known {
                     known_public_exports += 1;
                 } else {
-                    incomplete_exports.push(statement.name.clone());
+                    incomplete_exports.push(incomplete_export_label(
+                        &statement.name,
+                        statement.returns.as_deref().unwrap_or(""),
+                    ));
                 }
             }
             typepython_syntax::SyntaxStatement::Value(statement) => {
@@ -532,7 +688,10 @@ fn migration_public_api_entry_inner(
                     if annotation_known {
                         known_public_exports += 1;
                     } else {
-                        incomplete_exports.push(name.clone());
+                        incomplete_exports.push(incomplete_export_label(
+                            name,
+                            statement.annotation.as_deref().unwrap_or(""),
+                        ));
                     }
                 }
             }
@@ -547,6 +706,15 @@ fn migration_public_api_entry_inner(
         known_public_exports,
         completeness_percent: coverage_percent(known_public_exports, public_exports),
         incomplete_exports,
+    }
+}
+
+fn incomplete_export_label(name: &str, annotation: &str) -> String {
+    let (dynamic_count, unknown_count) = count_boundary_tokens(annotation);
+    if annotation.is_empty() || (dynamic_count == 0 && unknown_count == 0) {
+        name.to_owned()
+    } else {
+        format!("{name}: {annotation}")
     }
 }
 
@@ -727,6 +895,27 @@ pub(crate) fn compare_migration_diagnostic_baseline(
     }
 }
 
+pub(crate) fn compare_migration_budget_baseline(
+    baseline_path: String,
+    baseline: &MigrationBudgetBaseline,
+    current: &MigrationBudgetBaseline,
+) -> MigrationBudgetBaselineComparison {
+    let baseline_any = baseline.public_any.iter().cloned().collect::<BTreeSet<_>>();
+    let current_any = current.public_any.iter().cloned().collect::<BTreeSet<_>>();
+    let baseline_unknown = baseline.public_unknown.iter().cloned().collect::<BTreeSet<_>>();
+    let current_unknown = current.public_unknown.iter().cloned().collect::<BTreeSet<_>>();
+
+    MigrationBudgetBaselineComparison {
+        baseline_path,
+        baseline_public_any: baseline_any.len(),
+        current_public_any: current_any.len(),
+        new_public_any: current_any.difference(&baseline_any).cloned().collect(),
+        baseline_public_unknown: baseline_unknown.len(),
+        current_public_unknown: current_unknown.len(),
+        new_public_unknown: current_unknown.difference(&baseline_unknown).cloned().collect(),
+    }
+}
+
 fn apply_baseline_severity_override(
     mut entry: MigrationDiagnosticBaselineEntry,
     severity_overrides: &BTreeMap<String, String>,
@@ -784,6 +973,28 @@ fn migration_diagnostic_baseline_comparison(
     )))
 }
 
+fn migration_budget_baseline_comparison(
+    config: &ConfigHandle,
+    baseline_path: Option<&Path>,
+    current: &MigrationBudgetBaseline,
+) -> Result<Option<MigrationBudgetBaselineComparison>> {
+    let Some(path) = baseline_path else {
+        return Ok(None);
+    };
+    let resolved_path = resolve_migration_report_path(config, path);
+    let contents = fs::read_to_string(&resolved_path).with_context(|| {
+        format!("unable to read migration budget baseline {}", resolved_path.display())
+    })?;
+    let baseline: MigrationBudgetBaseline = serde_json::from_str(&contents).with_context(|| {
+        format!("unable to parse migration budget baseline {}", resolved_path.display())
+    })?;
+    Ok(Some(compare_migration_budget_baseline(
+        resolved_path.display().to_string(),
+        &baseline,
+        current,
+    )))
+}
+
 fn write_migration_diagnostic_baseline(
     config: &ConfigHandle,
     path: &Path,
@@ -799,6 +1010,24 @@ fn write_migration_diagnostic_baseline(
         .context("unable to serialize migration diagnostic baseline")?;
     fs::write(&resolved_path, format!("{json}\n"))
         .with_context(|| format!("unable to write migration baseline {}", resolved_path.display()))
+}
+
+fn write_migration_budget_baseline(
+    config: &ConfigHandle,
+    path: &Path,
+    baseline: &MigrationBudgetBaseline,
+) -> Result<()> {
+    let resolved_path = resolve_migration_report_path(config, path);
+    if let Some(parent) = resolved_path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!("unable to create migration budget baseline directory {}", parent.display())
+        })?;
+    }
+    let json = serde_json::to_string_pretty(baseline)
+        .context("unable to serialize migration budget baseline")?;
+    fs::write(&resolved_path, format!("{json}\n")).with_context(|| {
+        format!("unable to write migration budget baseline {}", resolved_path.display())
+    })
 }
 
 fn resolve_migration_report_path(config: &ConfigHandle, path: &Path) -> PathBuf {
@@ -995,16 +1224,16 @@ fn count_boundary_tokens(text: &str) -> (usize, usize) {
         }
 
         match token.as_str() {
-            "dynamic" => dynamic_count += 1,
-            "unknown" => unknown_count += 1,
+            "Any" | "dynamic" => dynamic_count += 1,
+            "Unknown" | "unknown" => unknown_count += 1,
             _ => {}
         }
         token.clear();
     }
 
     match token.as_str() {
-        "dynamic" => dynamic_count += 1,
-        "unknown" => unknown_count += 1,
+        "Any" | "dynamic" => dynamic_count += 1,
+        "Unknown" | "unknown" => unknown_count += 1,
         _ => {}
     }
 
@@ -1242,6 +1471,16 @@ fn print_migration_report(
                 println!("    baseline diagnostics: {}", comparison.baseline_diagnostics);
                 println!("    new diagnostics: {}", comparison.new_diagnostics.len());
                 println!("    resolved diagnostics: {}", comparison.resolved_diagnostics.len());
+            }
+            if let Some(comparison) = &report.budget_baseline {
+                println!("  type budget baseline:");
+                println!("    baseline: {}", comparison.baseline_path);
+                println!("    current public Any: {}", comparison.current_public_any);
+                println!("    baseline public Any: {}", comparison.baseline_public_any);
+                println!("    new public Any: {}", comparison.new_public_any.len());
+                println!("    current public Unknown: {}", comparison.current_public_unknown);
+                println!("    baseline public Unknown: {}", comparison.baseline_public_unknown);
+                println!("    new public Unknown: {}", comparison.new_public_unknown.len());
             }
         }
         OutputFormat::Json => {
