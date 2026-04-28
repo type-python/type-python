@@ -1,5 +1,8 @@
 # TypePython Strategic TODO
 
+Implementation/commit traceability for this roadmap is tracked in
+[`strategic-todo-implementation-ledger.md`](strategic-todo-implementation-ledger.md).
+
 This document tracks the highest-leverage work for making TypePython useful enough that strict Python teams have a concrete reason to adopt it.
 
 The priority model is:
