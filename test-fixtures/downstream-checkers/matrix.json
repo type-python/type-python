@@ -60,6 +60,16 @@
       }
     },
     {
+      "name": "pydantic-like-package",
+      "targets": ["3.12"],
+      "expected_stub_fragments": {
+        "3.12": [
+          "class User(BaseModel):",
+          "def __init__(self, user_id: int, name: str = ..., tags: object = ...) -> None: ..."
+        ]
+      }
+    },
+    {
       "name": "negative-consumer-package",
       "targets": ["3.10"],
       "expect_checker_failure": true

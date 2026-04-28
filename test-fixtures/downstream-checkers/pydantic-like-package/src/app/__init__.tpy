@@ -1,0 +1,22 @@
+from typing import Any
+
+
+def framework_transform(*args, **kwargs):
+    def wrap(obj):
+        return obj
+    return wrap
+
+
+def Field(default=None, default_factory=None, alias=None, frozen=False) -> Any:
+    return default
+
+
+@framework_transform(kind="base_class", capabilities=("field_collection", "constructor_generation", "alias_handling", "required_optional_fields", "readonly_fields"))
+class BaseModel:
+    pass
+
+
+class User(BaseModel):
+    id: int = Field(alias="user_id", frozen=True)
+    name: str = Field(default="Ada")
+    tags: object = Field(default_factory=list)
