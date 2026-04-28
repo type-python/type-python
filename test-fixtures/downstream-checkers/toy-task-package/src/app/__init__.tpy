@@ -1,9 +1,12 @@
-from typing import Callable, cast
+from typing import Callable
 
 
 class Task[**P, R]:
+    def __init__(self, fn: Callable[P, R]) -> None:
+        self._fn = fn
+
     def delay(self, *args: P.args, **kwargs: P.kwargs) -> R:
-        ...
+        return self._fn(*args, **kwargs)
 
 
 def framework_transform(*args, **kwargs):
@@ -17,7 +20,7 @@ def framework_transform(*args, **kwargs):
     capabilities=("function_to_object_replacement", "generic_preservation"),
 )
 def task[**P, R](fn: Callable[P, R]) -> Task[P, R]:
-    return cast(Task[P, R], Task())
+    return Task[P, R](fn)
 
 
 @task
