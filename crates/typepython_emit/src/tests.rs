@@ -309,6 +309,59 @@ fn write_runtime_outputs_honors_selected_validation_boundaries() {
 }
 
 #[test]
+fn write_runtime_outputs_honors_named_validation_boundary_kinds() {
+    let temp_dir = temp_dir("write_runtime_outputs_honors_named_validation_boundary_kinds");
+    let modules = vec![LoweredModule {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(concat!(
+            "from dataclasses import dataclass\n\n",
+            "@dataclass\nclass Internal:\n    name: str\n\n",
+            "# tpy:validate-boundary:http_request\n@dataclass\nclass RequestPayload:\n    name: str\n\n",
+            "# tpy:validate-boundary:http_response\n@dataclass\nclass ResponsePayload:\n    name: str\n\n",
+            "# tpy:validate-boundary:cli_param\n@dataclass\nclass CliPayload:\n    name: str\n\n",
+            "# tpy:validate-boundary:config_file\n@dataclass\nclass ConfigPayload:\n    name: str\n\n",
+            "# tpy:validate-boundary:message_payload\n@dataclass\nclass MessagePayload:\n    name: str\n\n",
+            "# tpy:validate-boundary:plugin_entrypoint\n@dataclass\nclass PluginPayload:\n    name: str\n\n",
+            "# tpy:validate-boundary:serialized_payload\n@dataclass\nclass SerializedPayload:\n    name: str\n\n",
+            "@dataclass\nclass ExplicitBoundary:\n    __tpy_validation_boundary__ = \"config_file\"\n    name: str\n",
+        )),
+        source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    }];
+    let artifacts = vec![EmitArtifact {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+        stub_path: None,
+    }];
+    write_runtime_outputs(&artifacts, &modules, true, true, None)
+        .expect("named boundary runtime output should be written");
+    let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
+        .expect("runtime file should be readable");
+    remove_temp_dir(&temp_dir);
+
+    assert!(!runtime.contains("def __tpy_validate__(cls, __data: dict) -> \"Internal\""));
+    for class_name in [
+        "RequestPayload",
+        "ResponsePayload",
+        "CliPayload",
+        "ConfigPayload",
+        "MessagePayload",
+        "PluginPayload",
+        "SerializedPayload",
+        "ExplicitBoundary",
+    ] {
+        assert!(
+            runtime
+                .contains(&format!("def __tpy_validate__(cls, __data: dict) -> \"{class_name}\"")),
+            "missing validator for {class_name}:\n{runtime}"
+        );
+    }
+}
+
+#[test]
 fn write_runtime_outputs_delegates_to_selected_validation_adapter() {
     let temp_dir = temp_dir("write_runtime_outputs_delegates_to_selected_validation_adapter");
     let modules = vec![LoweredModule {

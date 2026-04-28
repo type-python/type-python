@@ -56,6 +56,32 @@ pub enum RuntimeValidationAdapter {
     Cattrs,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum RuntimeValidationBoundaryKind {
+    HttpRequest,
+    HttpResponse,
+    CliParam,
+    ConfigFile,
+    MessagePayload,
+    PluginEntrypoint,
+    SerializedPayload,
+}
+
+impl RuntimeValidationBoundaryKind {
+    fn from_marker(marker: &str) -> Option<Self> {
+        match marker {
+            "http_request" => Some(Self::HttpRequest),
+            "http_response" => Some(Self::HttpResponse),
+            "cli_param" => Some(Self::CliParam),
+            "config_file" => Some(Self::ConfigFile),
+            "message_payload" => Some(Self::MessagePayload),
+            "plugin_entrypoint" => Some(Self::PluginEntrypoint),
+            "serialized_payload" => Some(Self::SerializedPayload),
+            _ => None,
+        }
+    }
+}
+
 impl RuntimeValidationAdapter {
     fn marker(self) -> &'static str {
         match self {
@@ -235,7 +261,9 @@ fn collect_runtime_validator_edits(
     let mut edits = Vec::new();
     let selected_boundaries_present = lines.iter().any(|line| {
         let trimmed = line.trim();
-        trimmed == "__tpy_validate_boundary__ = True" || trimmed == "# tpy:validate-boundary"
+        trimmed == "__tpy_validate_boundary__ = True"
+            || parse_boundary_kind_marker(trimmed).is_some()
+            || parse_boundary_comment(trimmed).is_some()
     });
     let mut index = 0usize;
 
@@ -280,6 +308,9 @@ fn collect_runtime_validator_edits(
                 if trimmed == "__tpy_validate_boundary__ = True" {
                     explicit_boundary = true;
                 }
+                if parse_boundary_kind_marker(trimmed).is_some() {
+                    explicit_boundary = true;
+                }
                 if let Some(marker) = parse_adapter_marker(trimmed) {
                     adapter = marker;
                 }
@@ -288,6 +319,7 @@ fn collect_runtime_validator_edits(
                     && !trimmed.starts_with("def ")
                     && !trimmed.starts_with("class ")
                     && !trimmed.starts_with("__tpy_validate_boundary__")
+                    && !trimmed.starts_with("__tpy_validation_boundary__")
                     && !trimmed.starts_with("__tpy_validation_adapter__")
                     && trimmed.contains(':')
                     && let Some(field) = parse_validator_field(trimmed)
@@ -298,7 +330,8 @@ fn collect_runtime_validator_edits(
             cursor += 1;
         }
 
-        let boundary_comment = index > 0 && lines[index - 1].trim() == "# tpy:validate-boundary";
+        let boundary_comment =
+            index > 0 && parse_boundary_comment(lines[index - 1].trim()).is_some();
         if !fields.is_empty()
             && (!selected_boundaries_present || explicit_boundary || boundary_comment)
         {
@@ -340,6 +373,22 @@ fn parse_adapter_marker(trimmed: &str) -> Option<RuntimeValidationAdapter> {
     let value = value.strip_prefix('=')?.trim();
     let value = value.trim_matches(['\'', '"']);
     RuntimeValidationAdapter::from_marker(value)
+}
+
+fn parse_boundary_kind_marker(trimmed: &str) -> Option<RuntimeValidationBoundaryKind> {
+    let value = trimmed.strip_prefix("__tpy_validation_boundary__")?.trim_start();
+    let value = value.strip_prefix('=')?.trim();
+    let value = value.trim_matches(['\'', '"']);
+    RuntimeValidationBoundaryKind::from_marker(value)
+}
+
+fn parse_boundary_comment(trimmed: &str) -> Option<Option<RuntimeValidationBoundaryKind>> {
+    let value = trimmed.strip_prefix("# tpy:validate-boundary")?;
+    if value.is_empty() {
+        return Some(None);
+    }
+    let marker = value.strip_prefix(':')?.trim();
+    RuntimeValidationBoundaryKind::from_marker(marker).map(Some)
 }
 
 fn build_validator_lines(
