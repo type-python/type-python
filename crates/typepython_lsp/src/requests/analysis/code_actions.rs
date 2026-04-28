@@ -34,6 +34,171 @@ pub(crate) fn collect_missing_annotation_code_actions(
         .collect()
 }
 
+pub(crate) fn collect_common_migration_code_actions(
+    document: &DocumentState,
+    range: LspRange,
+) -> Vec<Value> {
+    let line = range.start.line as usize + 1;
+    let mut actions = Vec::new();
+    actions.extend(collect_class_migration_actions(document, line));
+    actions.extend(collect_dict_shape_migration_actions(document, line));
+    actions.extend(collect_unknown_annotation_actions(document, line));
+    actions.extend(collect_selected_symbol_stub_preview_action(document, range));
+    actions
+}
+
+fn collect_class_migration_actions(document: &DocumentState, line: usize) -> Vec<Value> {
+    let mut actions = Vec::new();
+    for statement in &document.syntax.statements {
+        let SyntaxStatement::ClassDef(class) = statement else {
+            continue;
+        };
+        if class.line != line {
+            continue;
+        }
+        let Some(class_range) = find_name_range(&document.text, class.line, "class") else {
+            continue;
+        };
+        actions.push(code_action(
+            format!("Convert `{}` to TypePython data class", class.name),
+            &document.uri,
+            vec![LspTextEdit { range: class_range, new_text: String::from("data class") }],
+        ));
+        actions.push(code_action(
+            format!("Extract interface from `{}`", class.name),
+            &document.uri,
+            vec![LspTextEdit {
+                range: LspRange {
+                    start: LspPosition { line: class.line.saturating_sub(1) as u32, character: 0 },
+                    end: LspPosition { line: class.line.saturating_sub(1) as u32, character: 0 },
+                },
+                new_text: interface_stub_for_class(class),
+            }],
+        ));
+        actions.push(code_action(
+            format!("Convert `{}` DTO to shape-backed model", class.name),
+            &document.uri,
+            vec![LspTextEdit {
+                range: LspRange {
+                    start: LspPosition { line: class.line.saturating_sub(1) as u32, character: 0 },
+                    end: LspPosition { line: class.line.saturating_sub(1) as u32, character: 0 },
+                },
+                new_text: format!("# tpy:shape-backed DTO candidate for `{}`\n", class.name),
+            }],
+        ));
+        actions.push(symbol_stub_preview_action(document, &class.name));
+    }
+    actions
+}
+
+fn collect_dict_shape_migration_actions(document: &DocumentState, line: usize) -> Vec<Value> {
+    let Some(line_text) = document.text.lines().nth(line.saturating_sub(1)) else {
+        return Vec::new();
+    };
+    if !line_text.contains("= {") {
+        return Vec::new();
+    }
+    let name = line_text.split_once('=').map(|(left, _)| left.trim()).unwrap_or("Shape");
+    if name.is_empty() {
+        return Vec::new();
+    }
+    let shape_name = format!("{}Shape", to_pascal_case(name));
+    vec![code_action(
+        format!("Extract TypedDict `{shape_name}` from dict literal"),
+        &document.uri,
+        vec![LspTextEdit {
+            range: LspRange {
+                start: LspPosition { line: line.saturating_sub(1) as u32, character: 0 },
+                end: LspPosition { line: line.saturating_sub(1) as u32, character: 0 },
+            },
+            new_text: format!("class {shape_name}(TypedDict):\n    ...\n\n"),
+        }],
+    )]
+}
+
+fn collect_unknown_annotation_actions(document: &DocumentState, line: usize) -> Vec<Value> {
+    document
+        .syntax
+        .statements
+        .iter()
+        .filter_map(|statement| {
+            let SyntaxStatement::Value(value) = statement else {
+                return None;
+            };
+            if value.line != line || value.annotation.is_some() || value.names.len() != 1 {
+                return None;
+            }
+            let name = value.names.first()?;
+            let name_range = find_name_range(&document.text, value.line, name)?;
+            Some(code_action(
+                format!("Insert minimal annotation for `{name}`"),
+                &document.uri,
+                vec![LspTextEdit {
+                    range: LspRange { start: name_range.end, end: name_range.end },
+                    new_text: String::from(": object"),
+                }],
+            ))
+        })
+        .collect()
+}
+
+fn collect_selected_symbol_stub_preview_action(document: &DocumentState, range: LspRange) -> Vec<Value> {
+    let Some(token) = token_at_position(&document.text, range.start) else {
+        return Vec::new();
+    };
+    if !document.local_symbols.contains_key(&token.name) {
+        return Vec::new();
+    }
+    vec![symbol_stub_preview_action(document, &token.name)]
+}
+
+fn symbol_stub_preview_action(document: &DocumentState, name: &str) -> Value {
+    let title = format!("Generate public `.pyi` preview for `{name}`");
+    json!({
+        "title": title,
+        "kind": "source",
+        "command": {
+            "title": title,
+            "command": "typepython.previewEmit",
+            "arguments": [document.uri]
+        }
+    })
+}
+
+fn interface_stub_for_class(class: &NamedBlockStatement) -> String {
+    let mut text = format!("interface {}Interface:\n", class.name);
+    let mut emitted_member = false;
+    for member in &class.members {
+        if matches!(member.kind, typepython_syntax::ClassMemberKind::Method) {
+            text.push_str(&format!("    def {}(...): ...\n", member.name));
+            emitted_member = true;
+        }
+    }
+    if !emitted_member {
+        text.push_str("    ...\n");
+    }
+    text.push('\n');
+    text
+}
+
+fn to_pascal_case(name: &str) -> String {
+    let mut output = String::new();
+    let mut capitalize = true;
+    for ch in name.chars().filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_') {
+        if ch == '_' {
+            capitalize = true;
+            continue;
+        }
+        if capitalize {
+            output.extend(ch.to_uppercase());
+            capitalize = false;
+        } else {
+            output.push(ch);
+        }
+    }
+    if output.is_empty() { String::from("Generated") } else { output }
+}
+
 pub(crate) fn collect_diagnostic_suggestion_code_actions(
     document: &DocumentState,
     range: LspRange,

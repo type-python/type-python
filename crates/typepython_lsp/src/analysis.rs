@@ -715,6 +715,7 @@ impl AnalysisHost {
         };
 
         let mut actions = Vec::new();
+        actions.extend(collect_common_migration_code_actions(document, range));
         actions.extend(collect_diagnostic_suggestion_code_actions(document, range, params));
         actions.extend(collect_missing_annotation_code_actions(workspace, document, range));
         actions.extend(collect_unsafe_code_actions(document, range, params));

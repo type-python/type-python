@@ -899,6 +899,83 @@ fn code_actions_offer_missing_type_annotation() {
 }
 
 #[test]
+fn code_actions_offer_common_migration_actions() {
+    let config = temp_workspace(
+        "code_actions_offer_common_migration_actions",
+        &[(
+            "src/app/__init__.tpy",
+            "class User:\n    name: str\n    def greet(self) -> str:\n        return self.name\n\npayload = {\"name\": \"Ada\"}\nvalue = payload\n",
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let class_actions = server
+        .handle_code_action(json!({
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 0, "character": 0},
+                "end": {"line": 0, "character": 10}
+            },
+            "context": {"diagnostics": []}
+        }))
+        .expect("class migration actions should succeed");
+    let class_actions = class_actions.as_array().expect("actions should be an array");
+    assert!(
+        class_actions
+            .iter()
+            .any(|action| { action["title"] == json!("Convert `User` to TypePython data class") })
+    );
+    assert!(
+        class_actions
+            .iter()
+            .any(|action| action["title"] == json!("Extract interface from `User`"))
+    );
+    assert!(
+        class_actions
+            .iter()
+            .any(|action| { action["title"] == json!("Convert `User` DTO to shape-backed model") })
+    );
+    assert!(
+        class_actions.iter().any(|action| {
+            action["title"] == json!("Generate public `.pyi` preview for `User`")
+        })
+    );
+
+    let dict_actions = server
+        .handle_code_action(json!({
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 5, "character": 0},
+                "end": {"line": 5, "character": 7}
+            },
+            "context": {"diagnostics": []}
+        }))
+        .expect("dict migration action should succeed");
+    assert!(dict_actions.as_array().unwrap().iter().any(|action| {
+        action["title"] == json!("Extract TypedDict `PayloadShape` from dict literal")
+    }));
+
+    let annotation_actions = server
+        .handle_code_action(json!({
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 6, "character": 0},
+                "end": {"line": 6, "character": 5}
+            },
+            "context": {"diagnostics": []}
+        }))
+        .expect("minimal annotation action should succeed");
+    assert!(
+        annotation_actions
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|action| { action["title"] == json!("Insert minimal annotation for `value`") })
+    );
+}
+
+#[test]
 fn code_actions_offer_unsafe_wrapper_fix() {
     let config = temp_workspace(
         "code_actions_offer_unsafe_wrapper_fix",
