@@ -65,6 +65,16 @@ impl RuntimeValidationAdapter {
             Self::Cattrs => "cattrs",
         }
     }
+
+    fn from_marker(marker: &str) -> Option<Self> {
+        match marker {
+            "builtin" => Some(Self::Builtin),
+            "pydantic" => Some(Self::Pydantic),
+            "msgspec" => Some(Self::Msgspec),
+            "cattrs" => Some(Self::Cattrs),
+            _ => None,
+        }
+    }
 }
 
 impl From<io::Error> for RuntimeWriteError {
@@ -169,6 +179,9 @@ fn inject_runtime_validators(module: &LoweredModule) -> Result<String, RuntimeWr
         return Ok(python.to_owned());
     }
     for edit in &edits {
+        if edit.adapter != RuntimeValidationAdapter::Builtin {
+            continue;
+        }
         for field in &edit.fields {
             if !annotation_is_faithfully_validated(&field.annotation, &typed_dicts) {
                 return Err(RuntimeWriteError::UnsupportedValidation {
@@ -204,6 +217,7 @@ struct RuntimeValidatorEdit {
     insertion: Vec<String>,
     class_name: String,
     fields: Vec<ValidatorField>,
+    adapter: RuntimeValidationAdapter,
 }
 
 #[derive(Debug, Clone)]
@@ -219,6 +233,10 @@ fn collect_runtime_validator_edits(
 ) -> Vec<RuntimeValidatorEdit> {
     let lines: Vec<&str> = python.lines().collect();
     let mut edits = Vec::new();
+    let selected_boundaries_present = lines.iter().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "__tpy_validate_boundary__ = True" || trimmed == "# tpy:validate-boundary"
+    });
     let mut index = 0usize;
 
     while index + 1 < lines.len() {
@@ -246,6 +264,8 @@ fn collect_runtime_validator_edits(
 
         let body_indent = class_indent + 4;
         let mut fields = Vec::new();
+        let mut explicit_boundary = false;
+        let mut adapter = RuntimeValidationAdapter::Builtin;
         let mut body_end = index + 1;
         let mut cursor = index + 2;
         while cursor < lines.len() {
@@ -257,10 +277,18 @@ fn collect_runtime_validator_edits(
                     break;
                 }
                 body_end = cursor;
+                if trimmed == "__tpy_validate_boundary__ = True" {
+                    explicit_boundary = true;
+                }
+                if let Some(marker) = parse_adapter_marker(trimmed) {
+                    adapter = marker;
+                }
                 if indent == body_indent
                     && !trimmed.starts_with('@')
                     && !trimmed.starts_with("def ")
                     && !trimmed.starts_with("class ")
+                    && !trimmed.starts_with("__tpy_validate_boundary__")
+                    && !trimmed.starts_with("__tpy_validation_adapter__")
                     && trimmed.contains(':')
                     && let Some(field) = parse_validator_field(trimmed)
                 {
@@ -270,12 +298,22 @@ fn collect_runtime_validator_edits(
             cursor += 1;
         }
 
-        if !fields.is_empty() {
+        let boundary_comment = index > 0 && lines[index - 1].trim() == "# tpy:validate-boundary";
+        if !fields.is_empty()
+            && (!selected_boundaries_present || explicit_boundary || boundary_comment)
+        {
             edits.push(RuntimeValidatorEdit {
                 after_line: body_end + 1,
-                insertion: build_validator_lines(class_indent, class_name, &fields, typed_dicts),
+                insertion: build_validator_lines(
+                    class_indent,
+                    class_name,
+                    &fields,
+                    typed_dicts,
+                    adapter,
+                ),
                 class_name: class_name.to_owned(),
                 fields,
+                adapter,
             });
         }
         index = cursor;
@@ -297,28 +335,52 @@ fn parse_validator_field(trimmed: &str) -> Option<ValidatorField> {
     Some(ValidatorField { name: name.to_owned(), annotation: annotation.to_owned(), has_default })
 }
 
+fn parse_adapter_marker(trimmed: &str) -> Option<RuntimeValidationAdapter> {
+    let value = trimmed.strip_prefix("__tpy_validation_adapter__")?.trim_start();
+    let value = value.strip_prefix('=')?.trim();
+    let value = value.trim_matches(['\'', '"']);
+    RuntimeValidationAdapter::from_marker(value)
+}
+
 fn build_validator_lines(
     class_indent: usize,
     class_name: &str,
     fields: &[ValidatorField],
     typed_dicts: &BTreeMap<String, Vec<ValidatorField>>,
+    adapter: RuntimeValidationAdapter,
 ) -> Vec<String> {
     let method_indent = " ".repeat(class_indent + 4);
     let body_indent = " ".repeat(class_indent + 8);
     let nested_indent = " ".repeat(class_indent + 12);
     let mut lines = vec![
         String::new(),
-        format!(
-            "{method_indent}__tpy_validation_adapter__ = \"{}\"",
-            RuntimeValidationAdapter::Builtin.marker()
-        ),
+        format!("{method_indent}__tpy_validation_adapter__ = \"{}\"", adapter.marker()),
         format!("{method_indent}@classmethod"),
         format!("{method_indent}def __tpy_validate__(cls, __data: dict) -> \"{class_name}\":"),
+    ];
+    match adapter {
+        RuntimeValidationAdapter::Builtin => {}
+        RuntimeValidationAdapter::Pydantic => {
+            lines.push(format!("{body_indent}return cls.model_validate(__data)"));
+            return lines;
+        }
+        RuntimeValidationAdapter::Msgspec => {
+            lines.push(format!("{body_indent}import msgspec"));
+            lines.push(format!("{body_indent}return msgspec.convert(__data, type=cls)"));
+            return lines;
+        }
+        RuntimeValidationAdapter::Cattrs => {
+            lines.push(format!("{body_indent}import cattrs"));
+            lines.push(format!("{body_indent}return cattrs.structure(__data, cls)"));
+            return lines;
+        }
+    }
+    lines.extend([
         format!("{body_indent}if not isinstance(__data, dict):"),
         format!(
             "{nested_indent}raise TypeError(\"field `<root>` expected dict but got \" + type(__data).__name__)"
         ),
-    ];
+    ]);
 
     for field in fields {
         let variable = format!("__tpy_{}", field.name);

@@ -280,6 +280,67 @@ fn write_runtime_outputs_rejects_unfaithful_runtime_validator_annotation() {
 }
 
 #[test]
+fn write_runtime_outputs_honors_selected_validation_boundaries() {
+    let temp_dir = temp_dir("write_runtime_outputs_honors_selected_validation_boundaries");
+    let modules = vec![LoweredModule {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(
+            "from dataclasses import dataclass\n\n@dataclass\nclass Internal:\n    name: str\n\n# tpy:validate-boundary\n@dataclass\nclass PublicInput:\n    __tpy_validate_boundary__ = True\n    name: str\n",
+        ),
+        source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    }];
+    let artifacts = vec![EmitArtifact {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+        stub_path: None,
+    }];
+    write_runtime_outputs(&artifacts, &modules, true, true, None)
+        .expect("selected boundary runtime output should be written");
+    let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
+        .expect("runtime file should be readable");
+    remove_temp_dir(&temp_dir);
+
+    assert!(!runtime.contains("def __tpy_validate__(cls, __data: dict) -> \"Internal\""));
+    assert!(runtime.contains("def __tpy_validate__(cls, __data: dict) -> \"PublicInput\""));
+}
+
+#[test]
+fn write_runtime_outputs_delegates_to_selected_validation_adapter() {
+    let temp_dir = temp_dir("write_runtime_outputs_delegates_to_selected_validation_adapter");
+    let modules = vec![LoweredModule {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(
+            "from dataclasses import dataclass\n\n# tpy:validate-boundary\n@dataclass\nclass UserModel:\n    __tpy_validate_boundary__ = True\n    __tpy_validation_adapter__ = \"pydantic\"\n    name: str\n",
+        ),
+        source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    }];
+    let artifacts = vec![EmitArtifact {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+        stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
+    }];
+    write_runtime_outputs(&artifacts, &modules, true, true, None)
+        .expect("delegating adapter runtime output should be written");
+    let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
+        .expect("runtime file should be readable");
+    let stub = fs::read_to_string(temp_dir.join("build/app/__init__.pyi"))
+        .expect("stub file should be readable");
+    remove_temp_dir(&temp_dir);
+
+    assert!(runtime.contains("__tpy_validation_adapter__ = \"pydantic\""));
+    assert!(runtime.contains("return cls.model_validate(__data)"));
+    assert!(!stub.contains("__tpy_validate__"));
+}
+
+#[test]
 fn write_runtime_outputs_skips_runtime_validators_when_disabled() {
     let temp_dir = temp_dir("write_runtime_outputs_skips_runtime_validators_when_disabled");
     let modules = vec![LoweredModule {
