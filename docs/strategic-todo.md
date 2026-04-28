@@ -365,26 +365,26 @@ Static correctness is not enough for TypePython's target users. Generated `.py` 
 
 ### TODO
 
-- [ ] Add an `annotations` compatibility audit pass.
-- [ ] Detect annotations that are safe statically but fragile at runtime.
-- [ ] Detect annotation consumers such as:
-  - [ ] `typing.get_type_hints`
-  - [ ] `inspect.get_annotations`
-  - [ ] `annotationlib.get_annotations`
-  - [ ] framework-specific model/route/command registration
-- [ ] Define target-version emit rules for annotations in generated `.py`.
-- [ ] Preserve enough runtime metadata for frameworks without forcing eager imports.
-- [ ] Add diagnostics for annotations that rely on local-scope names unavailable to runtime consumers.
+- [x] Add an `annotations` compatibility audit pass.
+- [x] Detect annotations that are safe statically but fragile at runtime.
+- [x] Detect annotation consumers such as:
+  - [x] `typing.get_type_hints`
+  - [x] `inspect.get_annotations`
+  - [x] `annotationlib.get_annotations`
+  - [x] framework-specific model/route/command registration
+- [x] Define target-version emit rules for annotations in generated `.py`.
+- [x] Preserve enough runtime metadata for frameworks without forcing eager imports.
+- [x] Add diagnostics for annotations that rely on local-scope names unavailable to runtime consumers.
 - [ ] Add diagnostics for circular imports caused only by runtime annotation evaluation.
-- [ ] Add guidance for when to emit string annotations, native annotations, or sidecar metadata.
-- [ ] Add test fixtures for Python 3.10 through 3.14 behavior.
-- [ ] Add runtime probes for representative Pydantic/FastAPI-like consumers.
+- [x] Add guidance for when to emit string annotations, native annotations, or sidecar metadata.
+- [x] Add test fixtures for Python 3.10 through 3.14 behavior.
+- [x] Add runtime probes for representative Pydantic/FastAPI-like consumers.
 
 ### Acceptance Criteria
 
-- [ ] Generated `.py` behaves predictably under Python 3.14 deferred annotation semantics.
-- [ ] Runtime frameworks can consume TypePython-generated annotations without hidden import failures.
-- [ ] The compiler warns when a statically valid annotation would be unsafe for a configured runtime target.
+- [x] Generated `.py` behaves predictably under Python 3.14 deferred annotation semantics.
+- [x] Runtime frameworks can consume TypePython-generated annotations without hidden import failures.
+- [x] The compiler warns when a statically valid annotation would be unsafe for a configured runtime target.
 
 ## P1: Public API Surface Diff
 
