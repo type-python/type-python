@@ -742,6 +742,28 @@ pub(super) fn find_owned_readable_member_declaration<'a>(
     })
 }
 
+pub(super) fn framework_generated_member_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    type_name: &str,
+    member_name: &str,
+) -> Option<SemanticType> {
+    if !framework_transform_class_supports_generated_members(node, nodes, type_name) {
+        return None;
+    }
+    match member_name {
+        "objects" => Some(SemanticType::Name(String::from("object"))),
+        "metadata" | "validators" => Some(SemanticType::Generic {
+            head: String::from("dict"),
+            args: vec![
+                SemanticType::Name(String::from("str")),
+                SemanticType::Name(String::from("object")),
+            ],
+        }),
+        _ => None,
+    }
+}
+
 pub(super) fn resolve_readable_member_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],

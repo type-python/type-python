@@ -206,6 +206,31 @@ pub(super) fn resolve_known_framework_transform_shape_from_type_with_context(
     resolve_framework_transform_class_shape_with_context(context, node, nodes, &type_name)
 }
 
+pub(super) fn framework_transform_class_supports_generated_members(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    type_name: &str,
+) -> bool {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    let type_name = annotated_inner(type_name).unwrap_or_else(|| normalize_type_text(type_name));
+    let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &type_name) else {
+        return false;
+    };
+    let Some(info) = load_dataclass_transform_module_info_with_context(&context, class_node) else {
+        return false;
+    };
+    let Some(class_site) = info.classes.iter().find(|class_site| class_site.name == class_decl.name)
+    else {
+        return false;
+    };
+    resolve_framework_class_shape_provider_with_context(&context, nodes, class_node, class_site)
+        .is_some_and(|provider| {
+            provider
+                .capabilities
+                .contains(&typepython_syntax::FrameworkTransformCapability::MethodSynthesis)
+        })
+}
+
 pub(super) fn resolve_dataclass_transform_metadata_from_decl_with_context(
     context: &CheckerContext<'_>,
     nodes: &[typepython_graph::ModuleNode],

@@ -1,8 +1,8 @@
 use super::{
     EmitArtifact, InferredStubMode, PlannedModuleSource, RuntimeWriteError, RuntimeWriteSummary,
-    StubCallableOverride, StubSealedClass, StubSyntheticMethod, StubValueOverride,
-    TypePythonStubContext, generate_inferred_stub_source, generate_typepython_stub_source,
-    plan_emits_for_sources, write_runtime_outputs,
+    StubCallableOverride, StubSealedClass, StubSyntheticMethod, StubSyntheticValue,
+    StubValueOverride, TypePythonStubContext, generate_inferred_stub_source,
+    generate_typepython_stub_source, plan_emits_for_sources, write_runtime_outputs,
 };
 use std::{
     collections::BTreeSet,
@@ -503,6 +503,7 @@ fn generate_typepython_stub_source_materializes_semantic_callable_and_synthetic_
             ],
             returns: Some(String::from("None")),
         }],
+        synthetic_values: Vec::new(),
         sealed_classes: Vec::new(),
         guarded_declaration_lines: BTreeSet::new(),
     };
@@ -514,6 +515,39 @@ fn generate_typepython_stub_source_materializes_semantic_callable_and_synthetic_
     assert!(stub.contains("def build(name: str) -> str: ..."));
     assert!(!stub.contains("@model"));
     assert!(stub.contains("def __init__(self, name: str) -> None: ..."));
+}
+
+#[test]
+fn generate_typepython_stub_source_materializes_synthetic_class_values() {
+    let module = LoweredModule {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from("class User:\n    name: str\n"),
+        source_map: vec![
+            SourceMapEntry { original_line: 1, lowered_line: 1 },
+            SourceMapEntry { original_line: 2, lowered_line: 2 },
+        ],
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    };
+    let context = TypePythonStubContext {
+        value_overrides: Vec::new(),
+        callable_overrides: Vec::new(),
+        synthetic_methods: Vec::new(),
+        synthetic_values: vec![StubSyntheticValue {
+            class_line: 1,
+            name: String::from("objects"),
+            annotation: String::from("object"),
+        }],
+        sealed_classes: Vec::new(),
+        guarded_declaration_lines: BTreeSet::new(),
+    };
+
+    let stub = generate_typepython_stub_source(&module, &context)
+        .expect("synthetic value stub should generate");
+
+    assert!(stub.contains("    objects: object"));
 }
 
 #[test]
@@ -540,6 +574,7 @@ fn generate_typepython_stub_source_preserves_detailed_sealed_metadata_comments()
         value_overrides: Vec::new(),
         callable_overrides: Vec::new(),
         synthetic_methods: Vec::new(),
+        synthetic_values: Vec::new(),
         sealed_classes: vec![StubSealedClass {
             line: 1,
             name: String::from("Expr"),
@@ -920,6 +955,7 @@ fn generate_typepython_stub_source_with_value_override() {
         }],
         callable_overrides: Vec::new(),
         synthetic_methods: Vec::new(),
+        synthetic_values: Vec::new(),
         sealed_classes: Vec::new(),
         guarded_declaration_lines: BTreeSet::new(),
     };
@@ -953,6 +989,7 @@ fn generate_typepython_stub_source_can_replace_decorated_function_with_value_sur
         }],
         callable_overrides: Vec::new(),
         synthetic_methods: Vec::new(),
+        synthetic_values: Vec::new(),
         sealed_classes: Vec::new(),
         guarded_declaration_lines: BTreeSet::new(),
     };
@@ -985,6 +1022,7 @@ fn generate_typepython_stub_source_can_replace_decorated_method_with_value_surfa
         }],
         callable_overrides: Vec::new(),
         synthetic_methods: Vec::new(),
+        synthetic_values: Vec::new(),
         sealed_classes: Vec::new(),
         guarded_declaration_lines: BTreeSet::new(),
     };
@@ -1021,6 +1059,7 @@ fn generate_typepython_stub_source_can_replace_decorated_async_function_with_val
         }],
         callable_overrides: Vec::new(),
         synthetic_methods: Vec::new(),
+        synthetic_values: Vec::new(),
         sealed_classes: Vec::new(),
         guarded_declaration_lines: BTreeSet::new(),
     };
@@ -1053,6 +1092,7 @@ fn generate_typepython_stub_source_value_override_replaces_overload_group_surfac
         }],
         callable_overrides: Vec::new(),
         synthetic_methods: Vec::new(),
+        synthetic_values: Vec::new(),
         sealed_classes: Vec::new(),
         guarded_declaration_lines: BTreeSet::new(),
     };

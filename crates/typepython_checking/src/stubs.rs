@@ -6,7 +6,7 @@ use typepython_syntax::{FunctionParam, MethodKind, SourceKind};
 
 use crate::{
     CheckerContext, EffectiveCallableStubOverride, EffectiveValueStubOverride, SyntheticMethodStub,
-    decorated_function_return_type_from_callable_annotation,
+    SyntheticValueStub, decorated_function_return_type_from_callable_annotation,
     direct_function_signature_sites_from_callable_annotation,
     resolve_dataclass_transform_class_shape_from_decl_with_context,
     resolve_decorated_callable_annotation_for_declaration_with_context,
@@ -113,6 +113,68 @@ pub fn collect_effective_value_stub_overrides(
         left.module_key.cmp(&right.module_key).then(left.line.cmp(&right.line))
     });
     overrides
+}
+
+#[must_use]
+pub fn collect_synthetic_value_stubs(graph: &ModuleGraph) -> Vec<SyntheticValueStub> {
+    let context = CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
+    let mut values = graph
+        .nodes
+        .iter()
+        .filter(|node| node.module_kind == SourceKind::TypePython)
+        .flat_map(|node| {
+            let module_info =
+                context.load_dataclass_transform_module_info(node).unwrap_or_default();
+            node.declarations
+                .iter()
+                .filter(|declaration| {
+                    declaration.owner.is_none()
+                        && declaration.kind == typepython_binding::DeclarationKind::Class
+                        && crate::framework_transform_class_supports_generated_members(
+                            node,
+                            &graph.nodes,
+                            &declaration.name,
+                        )
+                })
+                .flat_map(|declaration| {
+                    let class_line = module_info
+                        .classes
+                        .iter()
+                        .find(|class_site| class_site.name == declaration.name)
+                        .map(|class_site| class_site.line);
+                    generated_class_value_stubs(node, declaration, class_line)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    values.sort_by(|left, right| {
+        left.module_key
+            .cmp(&right.module_key)
+            .then(left.owner_type_name.cmp(&right.owner_type_name))
+            .then(left.class_line.cmp(&right.class_line))
+            .then(left.name.cmp(&right.name))
+    });
+    values
+}
+
+fn generated_class_value_stubs(
+    node: &typepython_graph::ModuleNode,
+    declaration: &typepython_binding::Declaration,
+    class_line: Option<usize>,
+) -> Vec<SyntheticValueStub> {
+    let Some(class_line) = class_line else {
+        return Vec::new();
+    };
+    [("objects", "object"), ("metadata", "dict[str, object]"), ("validators", "dict[str, object]")]
+        .into_iter()
+        .map(|(name, annotation)| SyntheticValueStub {
+            module_key: node.module_key.clone(),
+            owner_type_name: declaration.name.clone(),
+            class_line,
+            name: name.to_owned(),
+            annotation: annotation.to_owned(),
+        })
+        .collect()
 }
 
 #[must_use]

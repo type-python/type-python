@@ -19,8 +19,9 @@ use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{
     EmitArtifact, InferredStubMode, PlannedModuleSource, RuntimeWriteError, StubCallableOverride,
-    StubSealedClass, StubSyntheticMethod, StubValueOverride, TypePythonStubContext,
-    generate_inferred_stub_source, plan_emits_for_sources, write_runtime_outputs,
+    StubSealedClass, StubSyntheticMethod, StubSyntheticValue, StubValueOverride,
+    TypePythonStubContext, generate_inferred_stub_source, plan_emits_for_sources,
+    write_runtime_outputs,
 };
 use typepython_graph::build;
 use typepython_incremental::{

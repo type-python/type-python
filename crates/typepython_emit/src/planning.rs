@@ -29,6 +29,7 @@ pub struct TypePythonStubContext {
     pub value_overrides: Vec<StubValueOverride>,
     pub callable_overrides: Vec<StubCallableOverride>,
     pub synthetic_methods: Vec<StubSyntheticMethod>,
+    pub synthetic_values: Vec<StubSyntheticValue>,
     pub sealed_classes: Vec<StubSealedClass>,
     pub guarded_declaration_lines: BTreeSet<usize>,
 }
@@ -55,6 +56,13 @@ pub struct StubSyntheticMethod {
     pub method_kind: MethodKind,
     pub params: Vec<FunctionParam>,
     pub returns: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StubSyntheticValue {
+    pub class_line: usize,
+    pub name: String,
+    pub annotation: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

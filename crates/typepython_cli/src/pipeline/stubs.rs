@@ -66,6 +66,20 @@ pub(super) fn build_typepython_stub_contexts(
         });
     }
 
+    for synthetic_value in typepython_checking::collect_synthetic_value_stubs(graph) {
+        let Some(path) = module_paths.get(&synthetic_value.module_key) else {
+            continue;
+        };
+        let Some(context) = contexts.get_mut(path) else {
+            continue;
+        };
+        context.synthetic_values.push(StubSyntheticValue {
+            class_line: synthetic_value.class_line,
+            name: synthetic_value.name,
+            annotation: synthetic_value.annotation,
+        });
+    }
+
     contexts
 }
 

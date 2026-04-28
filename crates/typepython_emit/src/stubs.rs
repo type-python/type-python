@@ -1326,6 +1326,7 @@ struct LoweredStubContext {
     value_overrides: BTreeMap<usize, String>,
     callable_overrides: BTreeMap<usize, LoweredCallableOverride>,
     synthetic_methods: BTreeMap<usize, Vec<StubSyntheticMethod>>,
+    synthetic_values: BTreeMap<usize, Vec<StubSyntheticValue>>,
     sealed_classes: BTreeMap<usize, StubSealedClass>,
     guarded_declaration_lines: BTreeSet<usize>,
 }
@@ -1364,6 +1365,13 @@ impl LoweredStubContext {
                 .entry(original_to_lowered_line(module, method.class_line))
                 .or_default()
                 .push(method.clone());
+        }
+        for value in &context.synthetic_values {
+            lowered
+                .synthetic_values
+                .entry(original_to_lowered_line(module, value.class_line))
+                .or_default()
+                .push(value.clone());
         }
         for sealed_class in &context.sealed_classes {
             lowered
@@ -1579,6 +1587,11 @@ fn render_authoritative_class_stub(
     if let Some(extra_methods) = context.synthetic_methods.get(&class_line) {
         for method in extra_methods {
             body_lines.push(render_synthetic_method_stub(method, &indent));
+        }
+    }
+    if let Some(extra_values) = context.synthetic_values.get(&class_line) {
+        for value in extra_values {
+            body_lines.push(format!("{indent}{}: {}", value.name, value.annotation));
         }
     }
 

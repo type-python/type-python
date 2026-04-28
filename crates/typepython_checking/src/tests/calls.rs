@@ -193,6 +193,38 @@ fn check_excludes_descriptor_defaults_from_framework_fields_when_advertised() {
 }
 
 #[test]
+fn check_accepts_framework_generated_class_attributes_when_advertised() {
+    let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"method_synthesis\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nmanager: object = User.objects\nmetadata: dict[str, object] = User.metadata\nvalidators: dict[str, object] = User.validators\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_reports_framework_generated_class_attribute_type_mismatch() {
+    let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"method_synthesis\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nmetadata: int = User.metadata\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("dict[str, object]"), "{rendered}");
+}
+
+#[test]
+fn check_reports_framework_generated_class_attribute_without_capability() {
+    let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nmanager = User.objects\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `objects`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_dataclass_transform_constructor_arity_mismatch() {
     let result = check_temp_typepython_source(
         "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n    age: int\n\nuser: User = User(\"Ada\")\n",

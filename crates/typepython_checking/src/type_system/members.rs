@@ -44,12 +44,23 @@ pub(super) fn resolve_direct_member_reference_semantic_type(
 
     let owner_type_name = semantic_nominal_owner_name(&owner_type)?;
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let member =
-        find_owned_readable_member_declaration(nodes, class_node, class_decl, member_name)?;
+    let Some(member) = find_owned_readable_member_declaration(
+        nodes,
+        class_node,
+        class_decl,
+        member_name,
+    ) else {
+        return framework_generated_member_semantic_type(
+            node,
+            nodes,
+            &owner_type_name,
+            member_name,
+        );
+    };
     if is_enum_like_class(nodes, class_node, class_decl) {
         return Some(lower_type_text_or_name(&format!("Literal[{}.{}]", class_decl.name, member_name)));
     }
-            resolve_readable_member_semantic_type(node, nodes, member, &owner_type)
+    resolve_readable_member_semantic_type(node, nodes, member, &owner_type)
 }
 
 pub(super) fn is_enum_like_class(

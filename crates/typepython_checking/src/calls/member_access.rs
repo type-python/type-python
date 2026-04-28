@@ -70,7 +70,14 @@ pub(super) fn direct_member_access_diagnostics(
                 class_decl,
                 &access.member,
             )
-            .is_some();
+            .is_some()
+                || framework_generated_member_semantic_type(
+                    node,
+                    nodes,
+                    &owner_type_name,
+                    &access.member,
+                )
+                .is_some();
 
             (!has_member).then(|| {
                 Diagnostic::error(
@@ -97,6 +104,7 @@ pub(super) fn type_has_readable_member(
         return false;
     };
     find_owned_readable_member_declaration(nodes, class_node, class_decl, member).is_some()
+        || framework_generated_member_semantic_type(node, nodes, type_name, member).is_some()
 }
 
 pub(super) fn union_member_guard_suggestion(

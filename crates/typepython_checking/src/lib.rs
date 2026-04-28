@@ -51,7 +51,7 @@ pub(crate) use self::semantic::*;
 pub(crate) use self::source_facts::*;
 pub use self::stubs::{
     collect_effective_callable_stub_overrides, collect_effective_value_stub_overrides,
-    collect_synthetic_method_stubs,
+    collect_synthetic_method_stubs, collect_synthetic_value_stubs,
 };
 pub(crate) use self::type_core::*;
 pub(crate) use self::type_system::*;
@@ -148,6 +148,16 @@ pub struct SyntheticMethodStub {
     pub method_kind: typepython_syntax::MethodKind,
     pub params: Vec<typepython_syntax::FunctionParam>,
     pub returns: Option<String>,
+}
+
+/// Synthetic class value emitted into authoritative stubs for checker-synthesized behavior.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SyntheticValueStub {
+    pub module_key: String,
+    pub owner_type_name: String,
+    pub class_line: usize,
+    pub name: String,
+    pub annotation: String,
 }
 
 #[derive(Debug)]
