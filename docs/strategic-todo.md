@@ -582,13 +582,13 @@ TypePython already has LSP infrastructure. It should use that position to make m
 
 ### TODO
 
-- [ ] Add LSP code actions for common migrations:
-  - [ ] convert class to TypePython `data class`
-  - [ ] extract `interface` from implementation
-  - [ ] extract `TypedDict` or shape from dict literal usage
-  - [ ] convert hand-written DTO class to shape-backed model
-  - [ ] generate public `.pyi` preview for a selected symbol
-  - [ ] insert minimal annotation to remove a downstream `unknown`
+- [x] Add LSP code actions for common migrations:
+  - [x] convert class to TypePython `data class`
+  - [x] extract `interface` from implementation
+  - [x] extract `TypedDict` or shape from dict literal usage
+  - [x] convert hand-written DTO class to shape-backed model
+  - [x] generate public `.pyi` preview for a selected symbol
+  - [x] insert minimal annotation to remove a downstream `unknown`
 - [x] Add "Explain this type" hover support.
 - [x] Add "Find source of `Any`" and "Find source of `Unknown`" navigation.
 - [ ] Add quick fixes for portable typing rewrites:
@@ -602,7 +602,7 @@ TypePython already has LSP infrastructure. It should use that position to make m
 
 ### Acceptance Criteria
 
-- [ ] A user can migrate a small module from the editor without reading the full CLI docs.
+- [x] A user can migrate a small module from the editor without reading the full CLI docs.
 - [x] LSP explains why a public type is unknown and which upstream file caused it.
 - [ ] Quick fixes do not introduce TypePython-only constructs when a standard Python rewrite is enough.
 
