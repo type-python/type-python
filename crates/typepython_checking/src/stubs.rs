@@ -90,6 +90,15 @@ pub fn collect_effective_value_stub_overrides(
                 .filter_map(|declaration| {
                     let site =
                         resolve_decorated_callable_site_with_context(&context, node, declaration)?;
+                    if let Some(annotation) =
+                        computed_field_value_stub_annotation(graph, node, declaration, &site)
+                    {
+                        return Some(EffectiveValueStubOverride {
+                            module_key: node.module_key.clone(),
+                            line: site.line,
+                            annotation,
+                        });
+                    }
                     let transformed =
                         resolve_decorated_callable_semantic_type_for_declaration_with_context(
                             &context,
@@ -113,6 +122,30 @@ pub fn collect_effective_value_stub_overrides(
         left.module_key.cmp(&right.module_key).then(left.line.cmp(&right.line))
     });
     overrides
+}
+
+fn computed_field_value_stub_annotation(
+    graph: &ModuleGraph,
+    node: &typepython_graph::ModuleNode,
+    declaration: &typepython_binding::Declaration,
+    site: &typepython_syntax::DecoratedCallableSite,
+) -> Option<String> {
+    let owner = declaration.owner.as_ref()?;
+    if !site.decorators.iter().any(|decorator| is_computed_field_decorator_name(decorator)) {
+        return None;
+    }
+    if !crate::framework_transform_class_supports_generated_members(node, &graph.nodes, &owner.name)
+    {
+        return None;
+    }
+    declaration
+        .callable_signature()
+        .and_then(|signature| signature.returns.as_ref())
+        .map(typepython_binding::BoundTypeExpr::render)
+}
+
+fn is_computed_field_decorator_name(name: &str) -> bool {
+    name == "computed_field" || name.ends_with(".computed_field")
 }
 
 #[must_use]

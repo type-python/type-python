@@ -179,11 +179,14 @@ fields use `Field(default=...)`, `Field(default_factory=...)`, and `Field(alias=
 The generated constructor treats aliased fields without defaults as required, while defaults and
 default factories make fields optional. When a provider advertises `readonly_fields`, statically
 known `frozen_default=True` model metadata and `Field(frozen=True)` field metadata feed the same
-frozen-field mutation diagnostics as dataclass-transform shapes.
+frozen-field mutation diagnostics as dataclass-transform shapes. A provider with generated-member
+support also recognizes `computed_field`-decorated methods with explicit return annotations and
+emits them as value attributes in authoritative stubs.
 
 Known unsupported Pydantic features remain explicit future work:
 
-- `computed_field` is not synthesized into emitted stubs yet.
+- `computed_field` support is limited to statically named decorators and explicitly annotated
+  return types; dynamic decorators or inferred return types are not synthesized.
 - Validators and serializers such as `field_validator`, `model_validator`, and serializer
   decorators are not checked as framework-owned decorators yet.
 - `model_construct` signatures are not generated yet.

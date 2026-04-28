@@ -218,6 +218,60 @@ fn pydantic_like_base_model_provider_emits_field_alias_and_default_init_stub() {
 }
 
 #[test]
+fn pydantic_like_computed_field_emits_value_stub_override() {
+    let source_text = concat!(
+        "def framework_transform(*args, **kwargs):\n",
+        "    def wrap(obj):\n",
+        "        return obj\n",
+        "    return wrap\n\n",
+        "def computed_field(fn):\n",
+        "    return fn\n\n",
+        "@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\", \"method_synthesis\"))\n",
+        "class BaseModel:\n",
+        "    pass\n\n",
+        "class User(BaseModel):\n",
+        "    name: str\n\n",
+        "    @computed_field\n",
+        "    def display_name(self) -> str:\n",
+        "        return self.name\n",
+    );
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let overrides = crate::collect_effective_value_stub_overrides(&graph);
+    let display_name = overrides
+        .iter()
+        .find(|override_value| override_value.annotation == "str")
+        .expect("computed_field should be emitted as a value stub override");
+
+    assert_eq!(display_name.module_key, "app");
+
+    let result = check_temp_typepython_source_with_check_options(
+        source_text,
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4001"), "{rendered}");
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
 fn check_reports_pydantic_like_dynamic_field_alias() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(

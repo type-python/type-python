@@ -476,6 +476,9 @@ pub(super) fn undecidable_decorator_diagnostics(
             if decorated.decorators.is_empty() {
                 return None;
             }
+            if decorated_callable_is_supported_framework_value_transform(node, nodes, declaration, &decorated) {
+                return None;
+            }
             match resolve_decorated_callable_semantic_type_for_declaration_with_context(
                 context,
                 node,
@@ -503,6 +506,22 @@ pub(super) fn undecidable_decorator_diagnostics(
             }
         })
         .collect()
+}
+
+fn decorated_callable_is_supported_framework_value_transform(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    declaration: &Declaration,
+    decorated: &typepython_syntax::DecoratedCallableSite,
+) -> bool {
+    let Some(owner) = declaration.owner.as_ref() else {
+        return false;
+    };
+    decorated
+        .decorators
+        .iter()
+        .any(|decorator| decorator == "computed_field" || decorator.ends_with(".computed_field"))
+        && framework_transform_class_supports_generated_members(node, nodes, &owner.name)
 }
 
 pub(super) fn rewrite_imported_typing_semantic_callable_params(
