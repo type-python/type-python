@@ -861,20 +861,20 @@ Do not start until TypePython has a credible story for ordinary package/module m
 
 Possible later work:
 
-- [ ] Add a notebook ingestion prototype for `.ipynb`.
-- [ ] Extract code cells into an ordered module graph.
-- [ ] Detect cross-cell variable dependencies.
-- [ ] Identify symbols that should become module-level public API.
-- [ ] Generate a migration report for:
-  - [ ] implicit globals
-  - [ ] untyped function boundaries
-  - [ ] dict-like records
-  - [ ] DataFrame-like schema boundaries
-  - [ ] side-effectful cells
-- [ ] Generate candidate `.tpy` modules from selected cells.
-- [ ] Generate `.pyi` previews for extracted modules.
+- [x] Add a notebook ingestion prototype for `.ipynb`.
+- [x] Extract code cells into an ordered module graph.
+- [x] Detect cross-cell variable dependencies.
+- [x] Identify symbols that should become module-level public API.
+- [x] Generate a migration report for:
+  - [x] implicit globals
+  - [x] untyped function boundaries
+  - [x] dict-like records
+  - [x] DataFrame-like schema boundaries
+  - [x] side-effectful cells
+- [x] Generate candidate `.tpy` modules from selected cells.
+- [x] Generate `.pyi` previews for extracted modules.
 - [ ] Add lightweight schema annotations for pandas/polars-like tabular boundaries.
-- [ ] Avoid committing to full tensor shape algebra in this workflow.
+- [x] Avoid committing to full tensor shape algebra in this workflow.
 
 ## Deferred: Typestate
 
