@@ -744,7 +744,7 @@ Initial unsupported cases:
 
 - [x] A simple async client API can generate a sync and async pair.
 - [x] Both emitted functions type-check externally.
-- [ ] Unsupported async constructs fail with clear diagnostics.
+- [x] Unsupported async constructs fail with clear diagnostics.
 
 ## P2: Result, ADT, and Effect Experiment
 

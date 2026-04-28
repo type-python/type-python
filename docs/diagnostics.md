@@ -124,6 +124,7 @@ This is the largest category, covering all type checking rules.
 | `TPY4022` | warning       | Lifecycle-marked call result is ignored                                                                            |
 | `TPY4023` | warning       | Lifecycle-marked resource is not closed or consumed                                                                |
 | `TPY4024` | warning       | Framework-transformed field is missing a type annotation                                                           |
+| `TPY4025` | error         | Unsupported async construct appears inside a `@dual_emit` function                                                |
 | `TPY4101` | warning/error | Use of deprecated declaration                                                                                      |
 | `TPY7003` | error         | Framework adapter manifest is invalid                                                                             |
 
