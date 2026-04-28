@@ -40,12 +40,22 @@ Completions are triggered by the `.` character and include:
 
 ### Code Actions
 
-Code actions are generated from diagnostic suggestions. For example:
+Code actions include quick fixes generated from diagnostic suggestions. For example:
 
 - Add `| None` to return type
 - Add `@override` decorator
 - Add missing `match` cases
 - Fix TypedDict key typos
+
+The server also exposes source actions for project-level workflows so editor integrations can bind them to tasks or command palettes:
+
+| Title                                | Command ID                   | Intended CLI workflow                  |
+| ------------------------------------ | ---------------------------- | -------------------------------------- |
+| `Run typepython migrate --report`    | `typepython.migrateReport`   | `typepython migrate --project . --report` |
+| `Run typepython compat`              | `typepython.compat`          | `typepython compat --project .`        |
+| `Run typepython type-health`         | `typepython.typeHealth`      | `typepython type-health --project .`   |
+
+The command argument is the current document URI. Editors should resolve the workspace root from the active LSP session and invoke the corresponding CLI command themselves; TypePython does not execute these workflows inside the language server process.
 
 ### Formatting
 
