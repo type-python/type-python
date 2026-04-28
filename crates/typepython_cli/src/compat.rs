@@ -18,6 +18,7 @@ pub(crate) fn run_compat(args: CompatArgs) -> Result<ExitCode> {
         run: args.run,
         wheels: Vec::new(),
         sdists: Vec::new(),
+        api_diff_old: None,
         checkers,
         checker_preset: None,
         checker_allowlist,

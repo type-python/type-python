@@ -89,6 +89,12 @@ pub(crate) struct VerifyArgs {
     )]
     pub(crate) sdists: Vec<PathBuf>,
     #[arg(
+        long = "api-diff",
+        value_name = "OLD_SURFACE",
+        help = "Compare an old public typing surface against the current verified build output"
+    )]
+    pub(crate) api_diff_old: Option<PathBuf>,
+    #[arg(
         long = "checker",
         value_name = "COMMAND",
         help = "Run an external type checker against the emitted build output (repeatable)"

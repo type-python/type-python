@@ -461,6 +461,7 @@ fn run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed() {
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            api_diff_old: None,
             checkers: Vec::new(),
             checker_preset: None,
             checker_allowlist: None,

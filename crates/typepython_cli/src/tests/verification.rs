@@ -58,6 +58,7 @@ fn run_verify_bootstraps_outputs_after_clean_project() {
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            api_diff_old: None,
             checkers: Vec::new(),
             checker_preset: None,
             checker_allowlist: None,
@@ -119,6 +120,7 @@ fn run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled() {
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            api_diff_old: None,
             checkers: Vec::new(),
             checker_preset: None,
             checker_allowlist: None,
@@ -163,6 +165,7 @@ fn run_verify_invokes_external_checker_on_emitted_output() {
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            api_diff_old: None,
             checkers: vec![checker_path.display().to_string()],
             checker_preset: None,
             checker_allowlist: None,
@@ -202,6 +205,7 @@ fn run_verify_reports_external_checker_failure() {
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            api_diff_old: None,
             checkers: vec![checker_path.display().to_string()],
             checker_preset: None,
             checker_allowlist: None,
@@ -235,6 +239,7 @@ fn run_verify_reports_python_companion_stub_signature_mismatch() {
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            api_diff_old: None,
             checkers: Vec::new(),
             checker_preset: None,
             checker_allowlist: None,
@@ -277,6 +282,7 @@ fn run_verify_reports_python_companion_stub_signature_mismatch_in_wheel() {
             },
             wheels: vec![wheel_path],
             sdists: Vec::new(),
+            api_diff_old: None,
             checkers: Vec::new(),
             checker_preset: None,
             checker_allowlist: None,
@@ -315,6 +321,7 @@ fn run_verify_skips_runtime_import_probes_by_default() {
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            api_diff_old: None,
             checkers: Vec::new(),
             checker_preset: None,
             checker_allowlist: None,
@@ -355,6 +362,7 @@ fn run_verify_reports_runtime_import_failure_when_unsafe_runtime_imports_enabled
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            api_diff_old: None,
             checkers: Vec::new(),
             checker_preset: None,
             checker_allowlist: None,
@@ -406,6 +414,7 @@ fn run_verify_ignores_project_python_executable_by_default() {
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            api_diff_old: None,
             checkers: Vec::new(),
             checker_preset: None,
             checker_allowlist: None,
@@ -3392,6 +3401,8 @@ fn verify_command_parses_supplied_artifact_flags() {
         "dist/pkg.whl",
         "--sdist",
         "dist/pkg.tar.gz",
+        "--api-diff",
+        "dist/old-stubs",
         "--checker",
         "pyright",
         "--checker-preset",
@@ -3408,6 +3419,7 @@ fn verify_command_parses_supplied_artifact_flags() {
     assert_eq!(args.checkers, vec![String::from("pyright")]);
     assert_eq!(args.checker_preset, Some(String::from("all")));
     assert_eq!(args.checker_allowlist, Some(PathBuf::from("checker-allowlist.toml")));
+    assert_eq!(args.api_diff_old, Some(PathBuf::from("dist/old-stubs")));
     assert!(args.unsafe_runtime_imports);
     assert!(args.publication_type_health);
     assert_eq!(supplied.len(), 2);
@@ -3419,6 +3431,44 @@ fn verify_command_parses_supplied_artifact_flags() {
         matches!(artifact.kind, SuppliedArtifactKind::Sdist)
             && artifact.path == Path::new("dist/pkg.tar.gz")
     }));
+}
+
+#[test]
+fn run_verify_api_diff_fails_on_public_surface_regression() {
+    let project_dir = temp_project_dir("run_verify_api_diff_fails_on_public_surface_regression");
+    let verify_result = {
+        let old_surface = project_dir.join("old");
+        fs::create_dir_all(old_surface.join("app")).expect("old surface should exist");
+        fs::write(old_surface.join("app/__init__.pyi"), "def parse(value: str) -> int: ...\n")
+            .expect("old stub should be written");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("config should be written");
+        fs::create_dir_all(project_dir.join("src/app")).expect("source package should exist");
+        fs::write(
+            project_dir.join("src/app/__init__.tpy"),
+            "def parse(value: str) -> str:\n    return value\n",
+        )
+        .expect("source file should be written");
+
+        run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+            api_diff_old: Some(old_surface),
+            checkers: Vec::new(),
+            checker_preset: None,
+            checker_allowlist: None,
+            unsafe_runtime_imports: false,
+            publication_type_health: false,
+        })
+        .expect("verify should run")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(verify_result, ExitCode::from(1));
 }
 
 #[test]
@@ -3463,6 +3513,7 @@ fn run_verify_publication_type_health_fails_on_untyped_package_metadata() {
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            api_diff_old: None,
             checkers: Vec::new(),
             checker_preset: None,
             checker_allowlist: None,
@@ -3583,6 +3634,7 @@ fn verify_checker_preset_expands_and_deduplicates_with_explicit_checkers() {
         run: RunArgs { project: None, format: OutputFormat::Json },
         wheels: Vec::new(),
         sdists: Vec::new(),
+        api_diff_old: None,
         checkers: vec![String::from("pyright")],
         checker_preset: Some(String::from("all")),
         checker_allowlist: None,

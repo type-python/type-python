@@ -51,33 +51,7 @@ const PY_TYPED_SYMBOL: &str = "py.typed";
 
 pub(crate) fn run_api_diff(args: ApiDiffArgs) -> Result<ExitCode> {
     let report = diff_api_surfaces(&args.old, &args.new)?;
-    let mut diagnostics = DiagnosticReport::default();
-    for change in report.removed.iter().chain(report.changed.iter()) {
-        diagnostics.push(Diagnostic {
-            code: String::from("TPY7001"),
-            severity: Severity::Error,
-            message: format!(
-                "public API surface {}: {}.{} ({})",
-                change.classification, change.module, change.symbol, change.kind
-            ),
-            span: None,
-            notes: Vec::new(),
-            suggestions: Vec::new(),
-        });
-    }
-    for change in &report.added {
-        diagnostics.push(Diagnostic {
-            code: String::from("TPY7001"),
-            severity: Severity::Note,
-            message: format!(
-                "public API surface added: {}.{} ({})",
-                change.module, change.symbol, change.kind
-            ),
-            span: None,
-            notes: Vec::new(),
-            suggestions: Vec::new(),
-        });
-    }
+    let diagnostics = api_surface_diff_diagnostics(&report);
 
     if args.format == OutputFormat::Json {
         let payload = serde_json::json!({
@@ -104,6 +78,41 @@ pub(crate) fn run_api_diff(args: ApiDiffArgs) -> Result<ExitCode> {
         print_summary(args.format, &summary, &diagnostics)?;
     }
     Ok(exit_code(&diagnostics))
+}
+
+pub(crate) fn api_surface_diff_diagnostics(report: &ApiSurfaceDiffReport) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+    for change in report.removed.iter().chain(report.changed.iter()) {
+        diagnostics.push(Diagnostic {
+            code: String::from("TPY7001"),
+            severity: if change.classification == "likely type-compatible" {
+                Severity::Warning
+            } else {
+                Severity::Error
+            },
+            message: format!(
+                "public API surface {}: {}.{} ({})",
+                change.classification, change.module, change.symbol, change.kind
+            ),
+            span: None,
+            notes: Vec::new(),
+            suggestions: Vec::new(),
+        });
+    }
+    for change in &report.added {
+        diagnostics.push(Diagnostic {
+            code: String::from("TPY7001"),
+            severity: Severity::Note,
+            message: format!(
+                "public API surface added: {}.{} ({})",
+                change.module, change.symbol, change.kind
+            ),
+            span: None,
+            notes: Vec::new(),
+            suggestions: Vec::new(),
+        });
+    }
+    diagnostics
 }
 
 pub(crate) fn diff_api_surfaces(old: &Path, new: &Path) -> Result<ApiSurfaceDiffReport> {

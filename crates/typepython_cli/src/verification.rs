@@ -22,6 +22,7 @@ use typepython_syntax::{SourceFile, SourceKind};
 use typepython_target::{PythonTarget, RuntimeFeature};
 use zip::ZipArchive;
 
+use crate::api_diff::{ApiSurfaceDiffReport, api_surface_diff_diagnostics, diff_api_surfaces};
 use crate::cli::{OutputFormat, VerifyArgs};
 use crate::discovery::normalize_glob_path;
 use crate::pipeline::{
@@ -253,6 +254,20 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
             .diagnostics,
         );
     }
+    let mut api_diff_report = None;
+    if !snapshot.diagnostics.has_errors()
+        && !diagnostics.has_errors()
+        && let Some(old_surface) = args.api_diff_old.as_deref()
+    {
+        let current_surface = config.resolve_relative_path(&config.config.project.out_dir);
+        let report = diff_api_surfaces(old_surface, &current_surface)?;
+        diagnostics.diagnostics.extend(api_surface_diff_diagnostics(&report).diagnostics);
+        notes.push(format!(
+            "compared previous public API surface `{}` against current build output",
+            old_surface.display()
+        ));
+        api_diff_report = Some(report);
+    }
     let mut type_health_report = None;
     if !snapshot.diagnostics.has_errors()
         && !diagnostics.has_errors()
@@ -320,6 +335,7 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
         &diagnostics,
         portability_report.as_ref(),
         Some(&pep561_report),
+        api_diff_report.as_ref(),
         type_health_report.as_ref(),
     )?;
     Ok(exit_code(&diagnostics))
@@ -331,6 +347,7 @@ fn print_verify_summary(
     diagnostics: &DiagnosticReport,
     portability: Option<&TypePortabilityReport>,
     pep561: Option<&Pep561ReadinessReport>,
+    api_diff: Option<&ApiSurfaceDiffReport>,
     type_health: Option<&TypeHealthReport>,
 ) -> Result<()> {
     match format {
@@ -351,6 +368,9 @@ fn print_verify_summary(
             if let Some(type_health) = type_health {
                 println!("  publication type-health score: {}/100", type_health.score);
             }
+            if let Some(api_diff) = api_diff {
+                println!("  api diff semver recommendation: {}", api_diff.semver_recommendation);
+            }
             Ok(())
         }
         OutputFormat::Json => {
@@ -359,6 +379,7 @@ fn print_verify_summary(
                 "diagnostics": diagnostics,
                 "portability": portability,
                 "pep561": pep561,
+                "api_diff": api_diff,
                 "type_health": type_health,
             });
             println!(
