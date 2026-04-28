@@ -737,7 +737,7 @@ Initial unsupported cases:
 - [ ] Extend lowering to emit two function bodies.
 - [ ] Extend source maps for dual emitted bodies.
 - [ ] Extend stub generation for both functions.
-- [ ] Add examples for HTTP client and database access.
+- [x] Add examples for HTTP client and database access.
 - [ ] Add downstream checker fixtures.
 
 ### Acceptance Criteria

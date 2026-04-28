@@ -92,6 +92,80 @@ async def afetch_user(client: AsyncClient, user_id: str) -> User: ...
 Source maps must point diagnostics in either emitted body back to the single `dual async def` source
 range and, when possible, to the exact mapped expression.
 
+## Examples
+
+### HTTP client wrapper
+
+```python
+from httpx import AsyncClient, Client
+
+
+class User:
+    id: str
+    name: str
+
+
+def decode_user(payload: bytes) -> User:
+    ...
+
+
+dual async def fetch_user(client: AsyncClient, user_id: str) -> User:
+    response = await client.get(f"/users/{user_id}")
+    return decode_user(response.content)
+```
+
+Given a mapping from `httpx.AsyncClient` to `httpx.Client`, the pair lowers to a sync wrapper for
+ordinary applications plus an async wrapper for event-loop-native callers:
+
+```python
+def fetch_user(client: Client, user_id: str) -> User:
+    response = client.get(f"/users/{user_id}")
+    return decode_user(response.content)
+
+
+async def afetch_user(client: AsyncClient, user_id: str) -> User:
+    response = await client.get(f"/users/{user_id}")
+    return decode_user(response.content)
+```
+
+### Database access helper
+
+```python
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
+
+
+class Row:
+    id: int
+
+
+def decode_row(value: object) -> Row:
+    ...
+
+
+dual async def load_row(session: AsyncSession, row_id: int) -> Row:
+    result = await session.execute("select * from rows where id = :id", {"id": row_id})
+    return decode_row(result.one())
+```
+
+The corresponding mapping substitutes `AsyncSession` with `Session` and removes `await` from the
+declared sync equivalent of `execute`:
+
+```python
+def load_row(session: Session, row_id: int) -> Row:
+    result = session.execute("select * from rows where id = :id", {"id": row_id})
+    return decode_row(result.one())
+
+
+async def aload_row(session: AsyncSession, row_id: int) -> Row:
+    result = await session.execute("select * from rows where id = :id", {"id": row_id})
+    return decode_row(result.one())
+```
+
+Both examples intentionally rely on declared mappings. If the HTTP client or database session lacks a
+sync equivalent for a called method, TypePython must reject the `dual async def` instead of silently
+emitting a partial or event-loop-driving sync body.
+
 ## Implementation boundary
 
 Design completion does not imply parser, lowering, source-map, stub, examples, or downstream-checker
