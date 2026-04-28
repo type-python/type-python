@@ -791,17 +791,17 @@ Full runtime type checking would be too invasive and too slow. Boundary-only gen
   - [x] plugin entrypoints
   - [x] JSON/YAML/TOML serialization boundaries
 - [x] Decide whether TypePython generates validators directly or delegates to existing libraries.
-- [x] Add an adapter interface for Pydantic/msgspec/cattrs-style validators.
-- [x] Generate validation code only when explicitly requested.
-- [x] Keep generated validators out of public `.pyi` unless intentionally exported.
-- [x] Add diagnostics when a type cannot be faithfully validated at runtime.
+- [ ] Add an adapter interface for Pydantic/msgspec/cattrs-style validators.
+- [ ] Generate validation code only when explicitly requested.
+- [ ] Keep generated validators out of public `.pyi` unless intentionally exported.
+- [ ] Add diagnostics when a type cannot be faithfully validated at runtime.
 - [x] Add examples for API payloads and config loading.
 
 ### Acceptance Criteria
 
-- [x] A project can opt into runtime validation at selected boundaries.
+- [ ] A project can opt into runtime validation at selected boundaries.
 - [x] The default TypePython workflow still has no mandatory runtime dependency.
-- [x] Generated validation behavior is explicit and reviewable.
+- [ ] Generated validation behavior is explicit and reviewable.
 
 ## P2: Must-Use, Must-Await, and Must-Close Diagnostics
 
