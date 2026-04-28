@@ -128,6 +128,47 @@ pub(super) fn dynamic_framework_alias_diagnostics(
         .collect()
 }
 
+pub(super) fn untyped_framework_field_diagnostics(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    strict: bool,
+) -> Vec<Diagnostic> {
+    if !strict || node.module_kind != SourceKind::TypePython {
+        return Vec::new();
+    }
+
+    context
+        .load_dataclass_transform_module_info(node)
+        .unwrap_or_default()
+        .classes
+        .into_iter()
+        .filter(|class_site| {
+            resolve_framework_transform_class_shape_with_context(context, node, nodes, &class_site.name)
+                .is_some()
+        })
+        .flat_map(|class_site| {
+            class_site.untyped_fields.into_iter().map(move |field| {
+                Diagnostic::warning(
+                    "TPY4024",
+                    format!(
+                        "field `{}` on framework-transformed class `{}` is missing a type annotation",
+                        field.name, class_site.name
+                    ),
+                )
+                .with_span(Span::new(
+                    node.module_path.display().to_string(),
+                    field.line,
+                    1,
+                    field.line,
+                    1,
+                ))
+                .with_note("add an explicit field annotation so TypePython can synthesize checker-portable constructors and stubs")
+            })
+        })
+        .collect()
+}
+
 pub(super) fn ignored_lifecycle_result_diagnostics(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,

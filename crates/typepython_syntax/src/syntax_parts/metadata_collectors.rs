@@ -756,6 +756,11 @@ pub(super) fn collect_dataclass_transform_class_site(
             .iter()
             .filter_map(|stmt| extract_dataclass_transform_field(source, stmt, import_bindings))
             .collect(),
+        untyped_fields: class_def
+            .body
+            .iter()
+            .filter_map(|stmt| extract_dataclass_transform_untyped_field(source, stmt))
+            .collect(),
         line: offset_to_line_column(source, class_def.range.start().to_usize()).0,
     }
 }
@@ -989,6 +994,25 @@ pub(super) fn extract_dataclass_transform_field(
             .as_ref()
             .is_some_and(|site| site.has_dynamic_alias),
         field_specifier_frozen: field_specifier.as_ref().and_then(|site| site.frozen),
+        line: offset_to_line_column(source, assign.range.start().to_usize()).0,
+    })
+}
+
+pub(super) fn extract_dataclass_transform_untyped_field(
+    source: &str,
+    stmt: &Stmt,
+) -> Option<DataclassTransformUntypedFieldSite> {
+    let Stmt::Assign(assign) = stmt else {
+        return None;
+    };
+    if assign.targets.len() != 1 {
+        return None;
+    }
+    let Expr::Name(name) = &assign.targets[0] else {
+        return None;
+    };
+    Some(DataclassTransformUntypedFieldSite {
+        name: name.id.as_str().to_owned(),
         line: offset_to_line_column(source, assign.range.start().to_usize()).0,
     })
 }

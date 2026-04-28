@@ -501,6 +501,35 @@ fn check_reports_pydantic_like_dynamic_field_alias() {
 }
 
 #[test]
+fn check_warns_for_untyped_framework_model_field() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "def framework_transform(*args, **kwargs):\n",
+            "    def wrap(obj):\n",
+            "        return obj\n",
+            "    return wrap\n\n",
+            "@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\"))\n",
+            "class BaseModel:\n",
+            "    pass\n\n",
+            "class User(BaseModel):\n",
+            "    name = \"Ada\"\n",
+            "    age: int = 1\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4024"), "{rendered}");
+    assert!(rendered.contains("name"), "{rendered}");
+    assert!(rendered.contains("missing a type annotation"), "{rendered}");
+}
+
+#[test]
 fn framework_method_synthesis_provider_emits_synthetic_value_stubs() {
     let source_text = concat!(
         "def framework_transform(*args, **kwargs):\n",

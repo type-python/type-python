@@ -1235,6 +1235,10 @@ fn collect_node_declaration_diagnostics(
         diagnostics,
         dynamic_framework_alias_diagnostics(context, node, options.strict),
     );
+    push_diagnostics(
+        diagnostics,
+        untyped_framework_field_diagnostics(context, node, context.nodes, options.strict),
+    );
     if options.require_explicit_overrides && node.module_kind == SourceKind::TypePython {
         push_diagnostics(diagnostics, missing_override_diagnostics(node, context.nodes));
     }

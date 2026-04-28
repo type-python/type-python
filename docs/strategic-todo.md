@@ -508,10 +508,10 @@ If TypePython can model a Pydantic/FastAPI-style app through the general transfo
 - [x] Support validators and serializers as checked decorators where feasible.
 - [x] Emit accurate `__init__` and `model_construct` signatures.
 - [x] Diagnose dynamic aliases that prevent accurate static constructor typing.
-- [ ] Add fixture parity with common Pydantic mypy plugin strictness settings:
+- [x] Add fixture parity with common Pydantic mypy plugin strictness settings:
   - [x] typed init
   - [x] forbid extra
-  - [ ] warn untyped fields
+  - [x] warn untyped fields
   - [x] warn required dynamic aliases
 
 ### FastAPI TODO

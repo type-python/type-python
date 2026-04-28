@@ -1018,6 +1018,13 @@ pub struct DataclassTransformFieldSite {
     pub line: usize,
 }
 
+/// Untyped class assignment collected from a dataclass-transform target.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DataclassTransformUntypedFieldSite {
+    pub name: String,
+    pub line: usize,
+}
+
 impl DataclassTransformFieldSite {
     #[must_use]
     pub fn rendered_annotation(&self) -> String {
@@ -1045,6 +1052,7 @@ pub struct DataclassTransformClassSite {
     pub metaclass: Option<String>,
     pub methods: Vec<String>,
     pub fields: Vec<DataclassTransformFieldSite>,
+    pub untyped_fields: Vec<DataclassTransformUntypedFieldSite>,
     pub line: usize,
 }
 
