@@ -618,31 +618,31 @@ Most real Python codebases cannot become fully typed in a single migration. A st
 
 ### TODO
 
-- [ ] Extend `typepython migrate --report` into a type coverage budget system.
-- [ ] Add baseline files that record current:
-  - [ ] diagnostics
-  - [ ] public `Any`
-  - [ ] public `Unknown`
-  - [ ] untyped imports
-  - [ ] dynamic framework boundaries
+- [x] Extend `typepython migrate --report` into a type coverage budget system.
+- [x] Add baseline files that record current:
+  - [x] diagnostics
+  - [x] public `Any`
+  - [x] public `Unknown`
+  - [x] untyped imports
+  - [x] dynamic framework boundaries
   - [ ] checker portability issues
-- [ ] Add "no new public `Any`" mode.
-- [ ] Add "no new `Unknown` exported from package" mode.
+- [x] Add "no new public `Any`" mode.
+- [x] Add "no new `Unknown` exported from package" mode.
 - [ ] Add per-path budgets for:
   - [ ] library public surface
   - [ ] application code
   - [ ] generated code
   - [ ] tests
   - [ ] migrations/scripts
-- [ ] Rank untyped modules by downstream blast radius.
+- [x] Rank untyped modules by downstream blast radius.
 - [ ] Add CI annotations for only the lines changed in a PR.
 - [ ] Add JSON and SARIF output for dashboards.
 - [ ] Add trend output so teams can track type coverage over time.
 
 ### Acceptance Criteria
 
-- [ ] A partially typed project can enforce "no new type debt" in CI.
-- [ ] Reports identify the smallest set of files that would unlock the largest downstream precision gain.
+- [x] A partially typed project can enforce "no new type debt" in CI.
+- [x] Reports identify the smallest set of files that would unlock the largest downstream precision gain.
 - [ ] Teams can ratchet strictness without mass suppressions.
 
 ## P1: Framework Adapter SDK Prototype

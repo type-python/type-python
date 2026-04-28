@@ -438,6 +438,10 @@ typepython migrate [OPTIONS]
 | `--baseline PATH`        | Compare diagnostics against a saved migration baseline |
 | `--write-baseline PATH`  | Write the current diagnostic baseline as JSON          |
 | `--no-new-diagnostics`   | Fail when diagnostics appear outside the baseline      |
+| `--budget-baseline PATH` | Compare public type debt against a saved budget baseline |
+| `--write-budget-baseline PATH` | Write the current type budget baseline as JSON   |
+| `--no-new-public-any`    | Fail when public `Any` exports appear outside the budget baseline |
+| `--no-new-public-unknown` | Fail when public `Unknown` exports appear outside the budget baseline |
 | `--emit-stubs PATH`      | Generate `.pyi` stubs from inferred `.py` types       |
 | `--stub-out-dir PATH`    | Output directory for generated stubs                  |
 
@@ -457,6 +461,12 @@ typepython migrate [OPTIONS]
 - baseline files support `severity_overrides` per diagnostic code (`error`, `warning`, `ignore`)
 - `typepython migrate --report` also lists inline `# type: ignore[...]` suppressions so strict migration reviews can spot blanket suppressions quickly
 
+**Type budget baselines** (`--budget-baseline`, `--write-budget-baseline`, `--no-new-public-any`, `--no-new-public-unknown`):
+
+- `--write-budget-baseline .typepython/type-budget.json` records diagnostics, public `Any`, public `Unknown`, untyped imports, and dynamic framework boundary candidates
+- `--budget-baseline .typepython/type-budget.json` reports new public `Any` and `Unknown` exports relative to the saved budget
+- `--budget-baseline ... --no-new-public-any --no-new-public-unknown` exits with a diagnostic error if new public type debt appears
+
 **Stub emission** (`--emit-stubs`):
 
 - Generates `.pyi` files with inferred types from `.py` sources
@@ -472,6 +482,10 @@ typepython migrate --project . --report
 # Establish and enforce a diagnostic baseline
 typepython migrate --project . --write-baseline .typepython/migration-baseline.json
 typepython migrate --project . --baseline .typepython/migration-baseline.json --no-new-diagnostics
+
+# Establish and enforce a public type debt budget
+typepython migrate --project . --write-budget-baseline .typepython/type-budget.json
+typepython migrate --project . --budget-baseline .typepython/type-budget.json --no-new-public-any --no-new-public-unknown
 
 # Generate starter stubs
 typepython migrate --project . --emit-stubs src/ --stub-out-dir stubs/
