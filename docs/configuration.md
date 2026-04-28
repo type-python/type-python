@@ -133,6 +133,10 @@ preserve_comments = true
 no_emit_on_error = true
 
 # [Experimental] Emit runtime __tpy_validate__() methods on data classes.
+# Validators are emitted only when this flag is true, record the selected
+# adapter marker in generated code, and stay out of public .pyi files.
+# Unsupported annotations fail with TPY5003 instead of silently weakening the
+# boundary check.
 # Default: false
 runtime_validators = false
 
