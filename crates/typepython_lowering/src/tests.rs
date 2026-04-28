@@ -32,6 +32,29 @@ fn experimental_shape_options() -> LoweringOptions {
 }
 
 #[test]
+fn lower_dual_emit_decorator_generates_sync_and_async_pair() {
+    let source = concat!(
+        "@dual_emit\n",
+        "async def fetch_user(client: AsyncClient, user_id: str) -> User:\n",
+        "    response = await client.get(user_id)\n",
+        "    return decode_user(response)\n",
+    );
+    let lowered = lower(&parse(SourceFile {
+        path: PathBuf::from("dual.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("dual"),
+        text: source.to_owned(),
+    }));
+
+    let rendered = lowered.module.python_source;
+    assert!(rendered.contains("def fetch_user(client: Client, user_id: str) -> User:"));
+    assert!(rendered.contains("response = client.get(user_id)"));
+    assert!(rendered.contains("async def afetch_user(client: AsyncClient, user_id: str) -> User:"));
+    assert!(rendered.contains("response = await client.get(user_id)"));
+    assert!(!rendered.contains("@dual_emit"));
+}
+
+#[test]
 fn lower_rewrites_top_level_unsafe_blocks() {
     let lowered = lower(&SyntaxTree {
         source: SourceFile {

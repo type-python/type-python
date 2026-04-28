@@ -476,6 +476,11 @@ pub(super) fn undecidable_decorator_diagnostics(
             if decorated.decorators.is_empty() {
                 return None;
             }
+            if decorated.decorators.iter().any(|decorator| {
+                decorator.rsplit('.').next().unwrap_or(decorator) == "dual_emit"
+            }) {
+                return None;
+            }
             if let Some(result) = framework_owned_decorator_diagnostic(
                 node,
                 nodes,

@@ -591,7 +591,8 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         lowered_lines.extend(replacement_lines);
     }
 
-    let mut lowered = normalize_runtime_intrinsic_types(&lowered_lines.join("\n"));
+    let lowered_text = apply_dual_emit_decorator_lowering(&lowered_lines.join("\n"));
+    let mut lowered = normalize_runtime_intrinsic_types(&lowered_text);
     if normalized_source.ends_with('\n') {
         lowered.push('\n');
     }
@@ -633,6 +634,92 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             export_runtime_semantics,
         },
     }
+}
+
+fn apply_dual_emit_decorator_lowering(source: &str) -> String {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut output = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index];
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("@dual_emit") || index + 1 >= lines.len() {
+            output.push(line.to_owned());
+            index += 1;
+            continue;
+        }
+        let function_line = lines[index + 1];
+        let function_trimmed = function_line.trim_start();
+        if !function_trimmed.starts_with("async def ") {
+            output.push(line.to_owned());
+            index += 1;
+            continue;
+        }
+        let indentation_width = function_line.len() - function_trimmed.len();
+        let indentation = &function_line[..indentation_width];
+        let Some(name_end) = function_trimmed["async def ".len()..]
+            .find('(')
+            .map(|offset| "async def ".len() + offset)
+        else {
+            output.push(line.to_owned());
+            index += 1;
+            continue;
+        };
+        let original_name = &function_trimmed["async def ".len()..name_end];
+        let sync_name = explicit_dual_emit_name(trimmed, "sync_name")
+            .unwrap_or_else(|| default_sync_dual_name(original_name));
+        let async_name = explicit_dual_emit_name(trimmed, "async_name")
+            .unwrap_or_else(|| default_async_dual_name(original_name));
+        let signature_tail = &function_trimmed[name_end..];
+        let sync_header = sync_dual_line(&format!("{indentation}def {sync_name}{signature_tail}"));
+        let async_header = format!("{indentation}async def {async_name}{signature_tail}");
+        let mut body = Vec::new();
+        index += 2;
+        while index < lines.len() {
+            let candidate = lines[index];
+            let candidate_trimmed = candidate.trim_start();
+            let candidate_indent = candidate.len() - candidate_trimmed.len();
+            if !candidate_trimmed.is_empty() && candidate_indent <= indentation_width {
+                break;
+            }
+            body.push(candidate.to_owned());
+            index += 1;
+        }
+        output.push(sync_header);
+        output.extend(body.iter().map(|body_line| sync_dual_line(body_line)));
+        output.push(String::new());
+        output.push(async_header);
+        output.extend(body);
+    }
+    output.join("\n")
+}
+
+fn sync_dual_line(line: &str) -> String {
+    line.replacen("await ", "", 1).replace("AsyncClient", "Client")
+}
+
+fn explicit_dual_emit_name(decorator: &str, key: &str) -> Option<String> {
+    let search = format!("{key}=");
+    let start = decorator.find(&search)? + search.len();
+    let value = decorator[start..].trim_start();
+    let quote = value.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let rest = &value[quote.len_utf8()..];
+    let end = rest.find(quote)?;
+    Some(rest[..end].to_owned())
+}
+
+fn default_sync_dual_name(name: &str) -> String {
+    name.strip_prefix('a')
+        .filter(|rest| rest.chars().next().is_some_and(|ch| ch.is_ascii_lowercase()))
+        .unwrap_or(name)
+        .to_owned()
+}
+
+fn default_async_dual_name(name: &str) -> String {
+    if name.starts_with('a') { name.to_owned() } else { format!("a{name}") }
 }
 
 fn push_required_import(

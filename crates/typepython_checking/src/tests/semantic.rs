@@ -103,6 +103,35 @@ fn check_warns_for_ignored_must_use_result() {
 }
 
 #[test]
+fn check_accepts_dual_emit_decorator_as_typepython_lowering_marker() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "class User:\n",
+            "    name: str\n\n",
+            "class AsyncClient:\n",
+            "    async def get(self, path: str) -> bytes:\n",
+            "        return b\"\"\n\n",
+            "from typing import Callable\n\n",
+            "def dual_emit[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@dual_emit\n",
+            "async def fetch_user(client: AsyncClient, user_id: str) -> User:\n",
+            "    payload = await client.get(user_id)\n",
+            "    return User()\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4001"), "{rendered}");
+}
+
+#[test]
 fn check_warns_for_unclosed_lifecycle_resource() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(
