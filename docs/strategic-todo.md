@@ -404,7 +404,7 @@ The first version should be a conservative surface diff, not a complete semantic
 
 - [x] Add `typepython api-diff <old> <new>`.
 - [x] Support inputs:
-  - [ ] source directories
+  - [x] source directories
   - [x] generated build directories
   - [x] wheels
   - [x] sdists
