@@ -1,5 +1,6 @@
 //! `typepython` command-line entrypoint.
 
+mod adapter;
 mod api_diff;
 mod cli;
 mod compat;
@@ -28,6 +29,7 @@ use typepython_config::{
 };
 use typepython_diagnostics::DiagnosticReport;
 
+use crate::adapter::run_adapter;
 use crate::api_diff::run_api_diff;
 use crate::cli::{Cli, Command, InitArgs, OutputFormat, RunArgs};
 use crate::compat::run_compat;
@@ -114,6 +116,7 @@ fn run() -> Result<ExitCode> {
         Command::ApiDiff(args) => run_api_diff(args),
         Command::TypeHealth(args) => run_type_health(args),
         Command::Migrate(args) => run_migrate(args),
+        Command::Adapter(args) => run_adapter(args),
     }
 }
 

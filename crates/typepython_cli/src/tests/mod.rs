@@ -1,3 +1,4 @@
+pub(super) use super::adapter::run_adapter_validate;
 pub(super) use super::api_diff::{diff_api_surfaces, run_api_diff};
 pub(super) use super::compat::{compat_checker_allowlist, expand_compat_profile, run_compat};
 pub(super) use super::discovery::{
@@ -32,7 +33,8 @@ pub(super) use super::{
     exit_code_for_error, init_project,
 };
 pub(super) use crate::cli::{
-    ApiDiffArgs, CleanArgs, CompatArgs, MigrateArgs, TypeHealthArgs, VerifyArgs,
+    AdapterValidateArgs, ApiDiffArgs, CleanArgs, CompatArgs, MigrateArgs, TypeHealthArgs,
+    VerifyArgs,
 };
 pub(super) use clap::Parser;
 pub(super) use flate2::{Compression, write::GzEncoder};
@@ -673,6 +675,7 @@ fn collect_source_paths_reports_cross_root_collisions() {
     assert!(discovery.diagnostics.as_text().contains("TPY3002"));
 }
 
+mod adapter;
 mod api_diff;
 mod compat;
 mod consistency;

@@ -33,6 +33,30 @@ pub(crate) enum Command {
     TypeHealth(TypeHealthArgs),
     /// Analyze migration coverage and dynamic boundaries.
     Migrate(MigrateArgs),
+    /// Validate framework adapter manifests.
+    Adapter(AdapterArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AdapterArgs {
+    #[command(subcommand)]
+    pub(crate) command: AdapterCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AdapterCommand {
+    /// Validate a `typepython-framework.toml` adapter manifest.
+    Validate(AdapterValidateArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AdapterValidateArgs {
+    /// Adapter manifest to validate.
+    #[arg(value_name = "PATH")]
+    pub(crate) manifest: PathBuf,
+    /// Output format.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub(crate) format: OutputFormat,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, ValueEnum)]
