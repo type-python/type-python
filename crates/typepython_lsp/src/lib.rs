@@ -355,8 +355,10 @@ use analysis::*;
 use formatting::*;
 use requests::*;
 use scheduler::*;
-use server::*;
 use workspace::*;
+
+#[cfg(test)]
+pub(crate) use server::workflow_command_args;
 
 #[cfg(test)]
 mod tests;
