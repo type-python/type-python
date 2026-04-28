@@ -143,6 +143,32 @@ fn hover_definition_references_and_rename_work() {
 }
 
 #[test]
+fn hover_renders_projected_typeddict_shape_aliases() {
+    let config = temp_workspace(
+        "hover_renders_projected_typeddict_shape_aliases",
+        &[(
+            "src/app/__init__.tpy",
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n    email: str\n\ntypealias UserUpdate = Partial[Omit[User, \"id\"]]\n",
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let hover = server
+        .handle_hover(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 7, "character": 12}
+        }))
+        .expect("hover should succeed");
+    let contents = hover["contents"]["value"].as_str().expect("hover contents should be text");
+
+    assert!(contents.contains("Shape UserUpdate"), "{contents}");
+    assert!(contents.contains("name: str | optional"), "{contents}");
+    assert!(contents.contains("email: str | optional"), "{contents}");
+    assert!(!contents.contains("id: int"), "{contents}");
+}
+
+#[test]
 fn signature_help_returns_function_signature() {
     let config = temp_config(
         "signature_help_returns_function_signature",

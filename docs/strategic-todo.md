@@ -226,7 +226,7 @@ The spec already limits `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `R
 - [x] Keep existing TypedDict diagnostics stable during refactor.
 - [ ] Extend lowering transform expansion to consume shared shapes.
 - [x] Emit stable names for generated shape aliases.
-- [ ] Add hover rendering for projected shapes.
+- [x] Add hover rendering for projected shapes.
 - [x] Add diagnostics for unknown keys with suggestions.
 
 ### Acceptance Criteria
