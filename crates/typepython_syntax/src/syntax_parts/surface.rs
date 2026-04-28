@@ -979,6 +979,21 @@ pub struct ConditionalReturnSite {
     pub line: usize,
 }
 
+/// Async construct inside a `@dual_emit` function that cannot be lowered yet.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum UnsupportedDualEmitAsyncConstructKind {
+    AsyncFor,
+    AsyncWith,
+}
+
+/// Source site for unsupported async syntax under a `@dual_emit` function.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct UnsupportedDualEmitAsyncConstructSite {
+    pub function_name: String,
+    pub kind: UnsupportedDualEmitAsyncConstructKind,
+    pub line: usize,
+}
+
 /// Parsed `@dataclass_transform` metadata for a provider.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct DataclassTransformMetadata {

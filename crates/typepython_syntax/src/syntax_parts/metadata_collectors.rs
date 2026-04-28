@@ -341,6 +341,30 @@ pub fn collect_conditional_return_sites(source: &str) -> Vec<ConditionalReturnSi
 }
 
 #[must_use]
+pub fn collect_unsupported_dual_emit_async_construct_sites(
+    source: &str,
+) -> Vec<UnsupportedDualEmitAsyncConstructSite> {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return Vec::new();
+        };
+
+        let import_bindings = collect_import_bindings(parsed.suite());
+        let mut sites = Vec::new();
+        for stmt in parsed.suite() {
+            collect_dual_emit_async_construct_sites(
+                &normalized,
+                stmt,
+                &import_bindings,
+                &mut sites,
+            );
+        }
+        sites
+    })
+}
+
+#[must_use]
 pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransformModuleInfo {
     collect_module_surface_metadata(source).dataclass_transform
 }
@@ -803,6 +827,79 @@ pub(super) fn collect_decorated_callable_sites(
             }
             _ => {}
         }
+    }
+}
+
+pub(super) fn collect_dual_emit_async_construct_sites(
+    source: &str,
+    stmt: &Stmt,
+    import_bindings: &BTreeMap<String, String>,
+    sites: &mut Vec<UnsupportedDualEmitAsyncConstructSite>,
+) {
+    match stmt {
+        Stmt::FunctionDef(function) => {
+            let has_dual_emit = function.decorator_list.iter().any(|decorator| {
+                decorator_target_name(&decorator.expression)
+                    .map(|name| normalize_imported_name(&name, import_bindings))
+                    .is_some_and(|name| name.rsplit('.').next() == Some("dual_emit"))
+            });
+            if !has_dual_emit {
+                return;
+            }
+            let mut collector = DualEmitAsyncConstructCollector {
+                source,
+                function_name: function.name.as_str().to_owned(),
+                sites,
+            };
+            for body_stmt in &function.body {
+                visitor::Visitor::visit_stmt(&mut collector, body_stmt);
+            }
+        }
+        Stmt::ClassDef(class_def) => {
+            for member in &class_def.body {
+                collect_dual_emit_async_construct_sites(source, member, import_bindings, sites);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub(super) struct DualEmitAsyncConstructCollector<'source, 'sites> {
+    source: &'source str,
+    function_name: String,
+    sites: &'sites mut Vec<UnsupportedDualEmitAsyncConstructSite>,
+}
+
+impl<'source, 'sites, 'ast> visitor::Visitor<'ast>
+    for DualEmitAsyncConstructCollector<'source, 'sites>
+{
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        match stmt {
+            Stmt::FunctionDef(_) | Stmt::ClassDef(_) => return,
+            Stmt::For(for_stmt) if for_stmt.is_async => {
+                self.push_site(for_stmt.range(), UnsupportedDualEmitAsyncConstructKind::AsyncFor)
+            }
+            Stmt::With(with_stmt) if with_stmt.is_async => {
+                self.push_site(with_stmt.range(), UnsupportedDualEmitAsyncConstructKind::AsyncWith)
+            }
+            _ => {}
+        }
+        visitor::walk_stmt(self, stmt);
+    }
+}
+
+impl DualEmitAsyncConstructCollector<'_, '_> {
+    fn push_site(
+        &mut self,
+        range: ruff_text_size::TextRange,
+        kind: UnsupportedDualEmitAsyncConstructKind,
+    ) {
+        let line = offset_to_line_column(self.source, range.start().to_usize()).0;
+        self.sites.push(UnsupportedDualEmitAsyncConstructSite {
+            function_name: self.function_name.clone(),
+            kind,
+            line,
+        });
     }
 }
 
