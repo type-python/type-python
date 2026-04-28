@@ -635,9 +635,9 @@ Most real Python codebases cannot become fully typed in a single migration. A st
   - [x] tests
   - [x] migrations/scripts
 - [x] Rank untyped modules by downstream blast radius.
-- [ ] Add CI annotations for only the lines changed in a PR.
-- [ ] Add JSON and SARIF output for dashboards.
-- [ ] Add trend output so teams can track type coverage over time.
+- [x] Add CI annotations for only the lines changed in a PR.
+- [x] Add JSON and SARIF output for dashboards.
+- [x] Add trend output so teams can track type coverage over time.
 
 ### Acceptance Criteria
 

@@ -34,8 +34,27 @@ pub(crate) struct MigrationReport {
     pub(crate) inline_suppression_files: Vec<MigrationInlineSuppressionEntry>,
     pub(crate) high_impact_untyped_files: Vec<MigrationImpactEntry>,
     pub(crate) framework_pattern_files: Vec<MigrationFrameworkPatternEntry>,
+    pub(crate) ci_annotations: Vec<MigrationCiAnnotation>,
+    pub(crate) sarif: serde_json::Value,
+    pub(crate) trend: MigrationTrendEntry,
     pub(crate) diagnostic_baseline: Option<MigrationDiagnosticBaselineComparison>,
     pub(crate) budget_baseline: Option<MigrationBudgetBaselineComparison>,
+}
+
+#[derive(Debug, Serialize, Clone, Eq, PartialEq)]
+pub(crate) struct MigrationCiAnnotation {
+    pub(crate) path: String,
+    pub(crate) line: usize,
+    pub(crate) level: String,
+    pub(crate) message: String,
+    pub(crate) code: String,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub(crate) struct MigrationTrendEntry {
+    pub(crate) coverage_percent: f64,
+    pub(crate) public_api_completeness_percent: f64,
+    pub(crate) type_debt_total: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
@@ -204,6 +223,9 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
         &current_baseline,
     )?;
     let mut report = build_migration_report(&config, &syntax_trees);
+    report.ci_annotations = migration_ci_annotations(&diagnostics);
+    report.sarif = migration_sarif(&diagnostics);
+    report.trend = migration_trend_entry(&report);
     let current_budget_baseline = build_migration_budget_baseline(&diagnostics, &report);
     let budget_comparison = migration_budget_baseline_comparison(
         &config,
@@ -523,8 +545,84 @@ pub(crate) fn build_migration_report(
         inline_suppression_files,
         high_impact_untyped_files,
         framework_pattern_files: framework_pattern_entries(config, syntax_trees),
+        ci_annotations: Vec::new(),
+        sarif: serde_json::json!({"version": "2.1.0", "runs": []}),
+        trend: MigrationTrendEntry {
+            coverage_percent: coverage_percent(total.known_declarations, total.declarations),
+            public_api_completeness_percent: coverage_percent(
+                known_public_api_exports,
+                public_api_exports,
+            ),
+            type_debt_total: 0,
+        },
         diagnostic_baseline: None,
         budget_baseline: None,
+    }
+}
+
+pub(crate) fn migration_ci_annotations(
+    diagnostics: &DiagnosticReport,
+) -> Vec<MigrationCiAnnotation> {
+    diagnostics
+        .diagnostics
+        .iter()
+        .filter_map(|diagnostic| {
+            let span = diagnostic.span.as_ref()?;
+            Some(MigrationCiAnnotation {
+                path: span.path.clone(),
+                line: span.line,
+                level: diagnostic.severity.to_string(),
+                message: diagnostic.message.clone(),
+                code: diagnostic.code.clone(),
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn migration_sarif(diagnostics: &DiagnosticReport) -> serde_json::Value {
+    let results = diagnostics
+        .diagnostics
+        .iter()
+        .filter_map(|diagnostic| {
+            let span = diagnostic.span.as_ref()?;
+            Some(serde_json::json!({
+                "ruleId": diagnostic.code,
+                "level": match diagnostic.severity {
+                    Severity::Error => "error",
+                    Severity::Warning => "warning",
+                    Severity::Note => "note",
+                },
+                "message": {"text": diagnostic.message},
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": span.path},
+                        "region": {"startLine": span.line, "startColumn": span.column}
+                    }
+                }]
+            }))
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "version": "2.1.0",
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "runs": [{"tool": {"driver": {"name": "TypePython migrate"}}, "results": results}]
+    })
+}
+
+pub(crate) fn migration_trend_entry(report: &MigrationReport) -> MigrationTrendEntry {
+    MigrationTrendEntry {
+        coverage_percent: coverage_percent(report.known_declarations, report.total_declarations),
+        public_api_completeness_percent: coverage_percent(
+            report.known_public_api_exports,
+            report.public_api_exports,
+        ),
+        type_debt_total: report.total_dynamic_boundaries
+            + report.total_unknown_boundaries
+            + report
+                .untyped_import_files
+                .iter()
+                .map(|entry| entry.untyped_import_count)
+                .sum::<usize>(),
     }
 }
 

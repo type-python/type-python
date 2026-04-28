@@ -9,7 +9,8 @@ pub(super) use super::discovery::{
 pub(super) use super::migration::{
     MigrationBudgetBaseline, MigrationPublicTypeDebtEntry, build_migration_budget_baseline,
     build_migration_diagnostic_baseline, build_migration_report, compare_migration_budget_baseline,
-    compare_migration_diagnostic_baseline, emit_migration_stubs, run_migrate,
+    compare_migration_diagnostic_baseline, emit_migration_stubs, migration_ci_annotations,
+    migration_sarif, migration_trend_entry, run_migrate,
 };
 pub(super) use super::pipeline::{
     PipelineSnapshot, build_diagnostics, clean_project, compile_runtime_bytecode,

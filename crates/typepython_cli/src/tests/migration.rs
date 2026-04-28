@@ -286,6 +286,51 @@ fn compare_migration_budget_baseline_reports_new_public_any_and_unknown() {
 }
 
 #[test]
+fn migration_dashboard_outputs_include_annotations_sarif_and_trends() {
+    let mut diagnostics = DiagnosticReport::default();
+    diagnostics.push(
+        Diagnostic::warning("TPY9999", "sample warning")
+            .with_span(typepython_diagnostics::Span::new("src/app.py", 3, 5, 3, 12)),
+    );
+
+    let annotations = migration_ci_annotations(&diagnostics);
+    let sarif = migration_sarif(&diagnostics);
+
+    assert_eq!(annotations.len(), 1);
+    assert_eq!(annotations[0].path, "src/app.py");
+    assert_eq!(annotations[0].line, 3);
+    assert_eq!(annotations[0].code, "TPY9999");
+    assert_eq!(sarif["version"], "2.1.0");
+    assert_eq!(sarif["runs"][0]["results"][0]["ruleId"], "TPY9999");
+
+    let project_dir = temp_project_dir("migration_dashboard_outputs_include_trends");
+    let trend = {
+        fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app/__init__.tpy"),
+            "def typed(value: int) -> int:\n    return value\n\ndef untyped(value):\n    return value\n\nPUBLIC_UNKNOWN: unknown = None\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let discovery = collect_source_paths(&config).expect("test setup should succeed");
+        let syntax_trees = load_syntax_trees(
+            &discovery.sources,
+            false,
+            &config.config.project.target_python.to_string(),
+        )
+        .expect("test setup should succeed");
+        let report = build_migration_report(&config, &syntax_trees);
+        migration_trend_entry(&report)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(trend.coverage_percent < 100.0);
+    assert!(trend.type_debt_total > 0);
+}
+
+#[test]
 fn run_migrate_writes_budget_baseline_and_gates_new_public_any() {
     let project_dir = temp_project_dir("run_migrate_writes_budget_baseline_and_gates_any");
     let (write_result, gate_result, baseline_text) = {
