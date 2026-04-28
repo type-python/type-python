@@ -109,6 +109,9 @@ typepython adapter validate typepython-framework.toml
 typepython adapter validate typepython-framework.toml --format json
 ```
 
+See [framework adapter examples](examples/framework-adapters.md) for validation-model, task queue,
+and toy ORM manifest sketches that use the same constrained metadata model.
+
 ## Safety checklist
 
 - The manifest is TOML data only.
