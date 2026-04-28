@@ -14,6 +14,7 @@ pub(super) fn resolve_synthesized_dataclass_class_shape_with_context(
     callee: &str,
 ) -> Option<DataclassTransformClassShape> {
     resolve_dataclass_transform_class_shape_with_context(context, node, nodes, callee)
+        .or_else(|| resolve_framework_transform_class_shape_with_context(context, node, nodes, callee))
         .or_else(|| resolve_plain_dataclass_class_shape_with_context(context, node, nodes, callee))
 }
 
@@ -179,6 +180,32 @@ pub(super) fn resolve_known_dataclass_transform_shape_from_type_with_context(
     resolve_dataclass_transform_class_shape_with_context(context, node, nodes, &type_name)
 }
 
+pub(super) fn resolve_framework_transform_class_shape_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<DataclassTransformClassShape> {
+    let (class_node, class_decl) = resolve_direct_base(nodes, node, callee)?;
+    resolve_framework_transform_class_shape_from_decl_with_context(
+        context,
+        nodes,
+        class_node,
+        class_decl,
+        &mut BTreeSet::new(),
+    )
+}
+
+pub(super) fn resolve_known_framework_transform_shape_from_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    type_name: &str,
+) -> Option<DataclassTransformClassShape> {
+    let type_name = annotated_inner(type_name).unwrap_or_else(|| normalize_type_text(type_name));
+    resolve_framework_transform_class_shape_with_context(context, node, nodes, &type_name)
+}
+
 pub(super) fn resolve_dataclass_transform_metadata_from_decl_with_context(
     context: &CheckerContext<'_>,
     nodes: &[typepython_graph::ModuleNode],
@@ -235,6 +262,121 @@ pub(super) fn resolve_dataclass_transform_metadata_from_decl_with_context(
             &mut branch_visiting,
         )
     })
+}
+
+pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
+    context: &CheckerContext<'_>,
+    nodes: &[typepython_graph::ModuleNode],
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    visiting: &mut BTreeSet<(String, String)>,
+) -> Option<DataclassTransformClassShape> {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visiting.insert(key) {
+        return None;
+    }
+
+    let has_explicit_init = class_node.declarations.iter().any(|declaration| {
+        declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+            && declaration.name == "__init__"
+            && declaration.kind == DeclarationKind::Function
+    });
+
+    let info = load_dataclass_transform_module_info_with_context(context, class_node)?;
+    let class_site = info.classes.iter().find(|class_site| class_site.name == class_decl.name)?;
+
+    let provider = resolve_framework_class_shape_provider_with_context(
+        context,
+        nodes,
+        class_node,
+        class_site,
+    )?;
+    if !framework_provider_supports_constructor_shape(&provider) {
+        return None;
+    }
+
+    let mut fields = Vec::new();
+    for base in &class_site.bases {
+        let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) else {
+            continue;
+        };
+        let mut branch_visiting = visiting.clone();
+        let inherited = resolve_framework_transform_class_shape_from_decl_with_context(
+            context,
+            nodes,
+            base_node,
+            base_decl,
+            &mut branch_visiting,
+        )
+        .or_else(|| {
+            resolve_dataclass_transform_class_shape_from_decl_with_context(
+                context,
+                nodes,
+                base_node,
+                base_decl,
+                &mut branch_visiting,
+            )
+        })
+        .or_else(|| {
+            resolve_plain_dataclass_class_shape_from_decl_with_context(
+                context,
+                nodes,
+                base_node,
+                base_decl,
+                &mut branch_visiting,
+            )
+        });
+        let Some(inherited) = inherited else {
+            continue;
+        };
+        for field in inherited.fields {
+            if let Some(index) = fields
+                .iter()
+                .position(|existing: &DataclassTransformFieldShape| existing.name == field.name)
+            {
+                fields.remove(index);
+            }
+            fields.push(field);
+        }
+    }
+
+    for field in &class_site.fields {
+        if field.is_class_var {
+            continue;
+        }
+        if field
+            .value_metadata
+            .as_ref()
+            .and_then(|metadata| {
+                resolve_direct_expression_semantic_type_from_metadata(
+                    class_node,
+                    nodes,
+                    None,
+                    None,
+                    Some(&class_decl.name),
+                    field.line,
+                    metadata,
+                )
+            })
+            .is_some_and(|value_type| is_descriptor_semantic_type(nodes, class_node, &value_type))
+        {
+            continue;
+        }
+        let synthesized = DataclassTransformFieldShape {
+            name: field.name.clone(),
+            keyword_name: field.name.clone(),
+            annotation: field.rendered_annotation(),
+            annotation_expr: field.annotation_expr.clone(),
+            required: !field.has_default,
+            kw_only: false,
+        };
+        if let Some(index) = fields.iter().position(|existing| existing.name == synthesized.name) {
+            fields.remove(index);
+        }
+        fields.push(synthesized);
+    }
+
+    Some(DataclassTransformClassShape { fields, frozen: false, has_explicit_init })
 }
 
 pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
@@ -468,6 +610,87 @@ pub(super) fn resolve_dataclass_transform_provider_with_context<'a>(
     let import_target = resolve_imported_symbol_semantic_target(node, nodes, name)?;
     let target_node = import_target.provider_node;
     load_dataclass_transform_module_info_with_context(context, target_node)?
+        .providers
+        .into_iter()
+        .find(|provider| {
+            import_target
+                .declaration_target()
+                .is_some_and(|declaration| provider.name == declaration.name)
+        })
+}
+
+fn resolve_framework_class_shape_provider_with_context(
+    context: &CheckerContext<'_>,
+    nodes: &[typepython_graph::ModuleNode],
+    node: &typepython_graph::ModuleNode,
+    class_site: &typepython_syntax::DataclassTransformClassSite,
+) -> Option<typepython_syntax::FrameworkTransformProviderSite> {
+    for decorator in &class_site.decorators {
+        if let Some(provider) = resolve_framework_transform_provider_with_context(
+            context, nodes, node, decorator,
+        ) && provider.provider_kind == Some(typepython_syntax::FrameworkTransformProviderKind::ClassDecorator)
+        {
+            return Some(provider);
+        }
+    }
+    for base in &class_site.bases {
+        if let Some(provider) = resolve_framework_transform_provider_with_context(context, nodes, node, base)
+            && provider.provider_kind == Some(typepython_syntax::FrameworkTransformProviderKind::BaseClass)
+        {
+            return Some(provider);
+        }
+    }
+    if let Some(metaclass) = class_site.metaclass.as_deref()
+        && let Some(provider) = resolve_framework_transform_provider_with_context(
+            context, nodes, node, metaclass,
+        ) && provider.provider_kind == Some(typepython_syntax::FrameworkTransformProviderKind::Metaclass)
+    {
+        return Some(provider);
+    }
+    None
+}
+
+fn framework_provider_supports_constructor_shape(
+    provider: &typepython_syntax::FrameworkTransformProviderSite,
+) -> bool {
+    provider
+        .capabilities
+        .contains(&typepython_syntax::FrameworkTransformCapability::FieldCollection)
+        && provider
+            .capabilities
+            .contains(&typepython_syntax::FrameworkTransformCapability::ConstructorGeneration)
+}
+
+fn resolve_framework_transform_provider_with_context(
+    context: &CheckerContext<'_>,
+    nodes: &[typepython_graph::ModuleNode],
+    node: &typepython_graph::ModuleNode,
+    name: &str,
+) -> Option<typepython_syntax::FrameworkTransformProviderSite> {
+    if let Some(local) = context
+        .load_framework_transform_module_info(node)?
+        .providers
+        .into_iter()
+        .find(|provider| provider.name == name)
+    {
+        return Some(local);
+    }
+
+    if let Some((module_alias, symbol_name)) = name.rsplit_once('.')
+        && let Some(import_target) = resolve_imported_symbol_semantic_target(node, nodes, module_alias)
+        && let Some(target_node) = import_target.module_target()
+    {
+        return context
+            .load_framework_transform_module_info(target_node)?
+            .providers
+            .into_iter()
+            .find(|provider| provider.name == symbol_name);
+    }
+
+    let import_target = resolve_imported_symbol_semantic_target(node, nodes, name)?;
+    let target_node = import_target.provider_node;
+    context
+        .load_framework_transform_module_info(target_node)?
         .providers
         .into_iter()
         .find(|provider| {

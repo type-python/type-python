@@ -91,11 +91,26 @@ pub(super) fn unsupported_framework_transform_diagnostics(
 fn framework_transform_provider_has_supported_semantics(
     provider: &typepython_syntax::FrameworkTransformProviderSite,
 ) -> bool {
-    provider.provider_kind
-        == Some(typepython_syntax::FrameworkTransformProviderKind::FunctionDecorator)
-        && provider
-            .capabilities
-            .contains(&typepython_syntax::FrameworkTransformCapability::FunctionToObjectReplacement)
+    match provider.provider_kind {
+        Some(typepython_syntax::FrameworkTransformProviderKind::FunctionDecorator) => {
+            provider.capabilities.contains(
+                &typepython_syntax::FrameworkTransformCapability::FunctionToObjectReplacement,
+            )
+        }
+        Some(
+            typepython_syntax::FrameworkTransformProviderKind::ClassDecorator
+            | typepython_syntax::FrameworkTransformProviderKind::BaseClass
+            | typepython_syntax::FrameworkTransformProviderKind::Metaclass,
+        ) => {
+            provider
+                .capabilities
+                .contains(&typepython_syntax::FrameworkTransformCapability::FieldCollection)
+                && provider.capabilities.contains(
+                    &typepython_syntax::FrameworkTransformCapability::ConstructorGeneration,
+                )
+        }
+        None => false,
+    }
 }
 
 pub(super) fn ambiguous_overload_call_diagnostics(

@@ -259,12 +259,22 @@ pub(crate) fn resolve_known_shape_from_type_with_context(
         ));
     }
 
-    resolve_known_dataclass_transform_shape_from_type_with_context(context, node, nodes, type_name)
+    if let Some(shape) =
+        resolve_known_dataclass_transform_shape_from_type_with_context(context, node, nodes, type_name)
+    {
+        return Some(Shape::from_dataclass_transform_class_shape(
+            type_name,
+            &shape,
+            ShapeSourceKind::DataclassTransform,
+        ));
+    }
+
+    resolve_known_framework_transform_shape_from_type_with_context(context, node, nodes, type_name)
         .map(|shape| {
             Shape::from_dataclass_transform_class_shape(
                 type_name,
                 &shape,
-                ShapeSourceKind::DataclassTransform,
+                ShapeSourceKind::FrameworkTransform,
             )
         })
 }

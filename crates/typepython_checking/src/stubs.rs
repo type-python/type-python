@@ -152,6 +152,15 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
                             declaration,
                             &mut BTreeSet::new(),
                         )
+                    })
+                    .or_else(|| {
+                        crate::resolve_framework_transform_class_shape_from_decl_with_context(
+                            &context,
+                            &graph.nodes,
+                            node,
+                            declaration,
+                            &mut BTreeSet::new(),
+                        )
                     })?;
                     if shape.has_explicit_init {
                         return None;

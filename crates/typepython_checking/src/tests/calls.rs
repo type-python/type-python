@@ -110,6 +110,27 @@ fn check_accepts_dataclass_transform_metaclass_constructor_call() {
 }
 
 #[test]
+fn check_accepts_framework_class_decorator_constructor_call() {
+    let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n    age: int = 1\n\nuser: User = User(\"Ada\")\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_reports_framework_class_decorator_constructor_type_mismatch() {
+    let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    age: int\n\nuser: User = User(\"oops\")\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"));
+    assert!(rendered.contains("synthesized dataclass-transform field `age` expects `int`"));
+}
+
+#[test]
 fn check_reports_dataclass_transform_constructor_arity_mismatch() {
     let result = check_temp_typepython_source(
         "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n    age: int\n\nuser: User = User(\"Ada\")\n",

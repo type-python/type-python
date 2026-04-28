@@ -96,6 +96,77 @@ fn check_reports_unsupported_framework_transform_provider_in_strict_mode() {
 }
 
 #[test]
+fn check_accepts_supported_framework_class_shape_provider_in_strict_mode() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "def framework_transform(*args, **kwargs):\n",
+            "    def wrap(obj):\n",
+            "        return obj\n",
+            "    return wrap\n\n",
+            "@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\"))\n",
+            "def model(cls):\n",
+            "    return cls\n\n",
+            "@model\n",
+            "class User:\n",
+            "    name: str\n\n",
+            "user: User = User(\"Ada\")\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4020"), "{rendered}");
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn framework_class_shape_provider_emits_synthetic_init_stub() {
+    let source_text = concat!(
+        "def framework_transform(*args, **kwargs):\n",
+        "    def wrap(obj):\n",
+        "        return obj\n",
+        "    return wrap\n\n",
+        "@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\"))\n",
+        "def model(cls):\n",
+        "    return cls\n\n",
+        "@model\n",
+        "class User:\n",
+        "    name: str\n",
+        "    age: int = 1\n",
+    );
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let methods = crate::collect_synthetic_method_stubs(&graph);
+
+    assert_eq!(methods.len(), 1);
+    assert_eq!(methods[0].owner_type_name, "User");
+    assert_eq!(methods[0].name, "__init__");
+    assert_eq!(methods[0].params[1].name, "name");
+    assert_eq!(methods[0].params[1].annotation.as_deref(), Some("str"));
+    assert!(!methods[0].params[1].has_default);
+    assert_eq!(methods[0].params[2].name, "age");
+    assert_eq!(methods[0].params[2].annotation.as_deref(), Some("int"));
+    assert!(methods[0].params[2].has_default);
+}
+
+#[test]
 fn check_reports_conditional_return_with_source_overrides_without_backing_file() {
     let result = check_virtual_source_with_overrides(
         "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n",
