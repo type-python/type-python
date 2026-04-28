@@ -122,9 +122,9 @@ pub(crate) fn dedupe_occurrences(occurrences: &mut Vec<SymbolOccurrence>) {
 
 #[derive(Debug)]
 pub(crate) struct TokenOccurrence {
-    name: String,
-    range: LspRange,
-    preceded_by_dot: bool,
+    pub(crate) name: String,
+    pub(crate) range: LspRange,
+    pub(crate) preceded_by_dot: bool,
 }
 
 pub(crate) fn tokenize_identifiers(text: &str) -> Vec<TokenOccurrence> {
