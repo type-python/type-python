@@ -452,6 +452,22 @@ fn check_reports_writable_typed_dict_item_assignment_type_mismatch() {
 }
 
 #[test]
+fn check_suggests_nearest_typed_dict_key_for_item_typo() {
+    let result = check_temp_typepython_source(
+        "from typing import TypedDict\n\nclass User(TypedDict):\n    name: str\n\ndef mutate(user: User) -> None:\n    user[\"nmae\"] = \"Grace\"\n",
+    );
+
+    let diagnostic = result
+        .diagnostics
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("item `nmae`"))
+        .expect("unknown item diagnostic should be emitted");
+    assert_eq!(diagnostic.suggestions.len(), 1);
+    assert_eq!(diagnostic.suggestions[0].replacement, "name");
+}
+
+#[test]
 fn check_reports_readonly_typed_dict_extra_item_assignment() {
     let result = check_temp_typepython_source(
         "from typing import TypedDict\nfrom typing_extensions import ReadOnly\n\nclass User(TypedDict, extra_items=ReadOnly[int]):\n    name: str\n\ndef mutate(user: User) -> None:\n    user[\"age\"] = 1\n",

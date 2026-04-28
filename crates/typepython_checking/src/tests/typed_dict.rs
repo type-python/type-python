@@ -350,6 +350,23 @@ fn check_reports_unknown_typed_dict_key() {
 }
 
 #[test]
+fn check_suggests_nearest_typed_dict_key_for_literal_typo() {
+    let result = check_temp_typepython_source(
+        "from typing import TypedDict\n\nclass User(TypedDict):\n    name: str\n\npayload: User = {\"nmae\": \"Ada\"}\n",
+    );
+
+    let diagnostic = result
+        .diagnostics
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("unknown key `nmae`"))
+        .expect("unknown key diagnostic should be emitted");
+    assert_eq!(diagnostic.suggestions.len(), 1);
+    assert_eq!(diagnostic.suggestions[0].replacement, "name");
+    assert!(diagnostic.suggestions[0].message.contains("Use declared key `name`"));
+}
+
+#[test]
 fn check_accepts_typed_dict_extra_items_literal_key() {
     let result = check_temp_typepython_source(
         "from typing import TypedDict\n\nclass User(TypedDict, extra_items=int):\n    id: int\n\npayload: User = {\"id\": 1, \"age\": 2}\n",

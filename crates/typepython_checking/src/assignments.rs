@@ -872,13 +872,15 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
 
             for (key, field) in &expansion_shape.fields {
                 let Some(target_field) = typed_dict_known_or_extra_field(target_shape, key) else {
-                    diagnostics.push(typed_dict_literal_diagnostic(
+                    diagnostics.push(typed_dict_unknown_key_diagnostic(
                         node,
                         line,
                         format!(
                             "TypedDict literal for `{}` expands unknown key `{}`",
                             target_shape.name, key
                         ),
+                        target_shape,
+                        key,
                     ));
                     continue;
                 };
@@ -943,10 +945,12 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
         };
 
         let Some(target_field) = typed_dict_known_or_extra_field(target_shape, key) else {
-            diagnostics.push(typed_dict_literal_diagnostic(
+            diagnostics.push(typed_dict_unknown_key_diagnostic(
                 node,
                 line,
                 format!("TypedDict literal for `{}` uses unknown key `{}`", target_shape.name, key),
+                target_shape,
+                key,
             ));
             continue;
         };
@@ -1008,6 +1012,87 @@ pub(super) fn typed_dict_literal_diagnostic(
         line,
         1,
     ))
+}
+
+pub(super) fn typed_dict_unknown_key_diagnostic(
+    node: &typepython_graph::ModuleNode,
+    line: usize,
+    message: String,
+    shape: &TypedDictShape,
+    key: &str,
+) -> Diagnostic {
+    let diagnostic = typed_dict_literal_diagnostic(node, line, message);
+    let Some(suggestion) = closest_typed_dict_key(shape, key) else {
+        return diagnostic;
+    };
+    diagnostic.with_suggestion(
+        format!("Use declared key `{suggestion}`"),
+        Span::new(node.module_path.display().to_string(), line, 1, line, 1),
+        suggestion,
+        SuggestionApplicability::MaybeIncorrect,
+    )
+}
+
+pub(super) fn typed_dict_unknown_item_key_diagnostic(
+    node: &typepython_graph::ModuleNode,
+    line: usize,
+    shape: &TypedDictShape,
+    key: &str,
+) -> Diagnostic {
+    let diagnostic = Diagnostic::error(
+        "TPY4001",
+        format!(
+            "TypedDict item `{}` on `{}` in module `{}` is not a declared key",
+            key,
+            shape.name,
+            node.module_path.display()
+        ),
+    )
+    .with_span(Span::new(node.module_path.display().to_string(), line, 1, line, 1));
+    let Some(suggestion) = closest_typed_dict_key(shape, key) else {
+        return diagnostic;
+    };
+    diagnostic.with_suggestion(
+        format!("Use declared key `{suggestion}`"),
+        Span::new(node.module_path.display().to_string(), line, 1, line, 1),
+        suggestion,
+        SuggestionApplicability::MaybeIncorrect,
+    )
+}
+
+pub(super) fn closest_typed_dict_key(shape: &TypedDictShape, key: &str) -> Option<String> {
+    shape
+        .fields
+        .keys()
+        .map(|candidate| (typed_dict_key_distance(key, candidate), candidate))
+        .filter(|(distance, candidate)| {
+            *distance <= typed_dict_key_suggestion_threshold(key, candidate)
+        })
+        .min_by(|(left_distance, left), (right_distance, right)| {
+            left_distance.cmp(right_distance).then(left.cmp(right))
+        })
+        .map(|(_, candidate)| candidate.clone())
+}
+
+fn typed_dict_key_suggestion_threshold(key: &str, candidate: &str) -> usize {
+    let longest = key.chars().count().max(candidate.chars().count());
+    2.max(longest / 3)
+}
+
+fn typed_dict_key_distance(left: &str, right: &str) -> usize {
+    let right_chars = right.chars().collect::<Vec<_>>();
+    let mut previous = (0..=right_chars.len()).collect::<Vec<_>>();
+    for (left_index, left_char) in left.chars().enumerate() {
+        let mut current = vec![left_index + 1];
+        for (right_index, right_char) in right_chars.iter().enumerate() {
+            let substitution = previous[right_index] + usize::from(left_char != *right_char);
+            let insertion = current[right_index] + 1;
+            let deletion = previous[right_index + 1] + 1;
+            current.push(substitution.min(insertion).min(deletion));
+        }
+        previous = current;
+    }
+    previous[right_chars.len()]
 }
 
 pub(super) fn direct_expr_metadata_for_known_type(
@@ -1130,22 +1215,12 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
             )?;
             let Some(field) = typed_dict_known_or_extra_field(&target_shape, key) else {
                 return Some(
-                    Diagnostic::error(
-                        "TPY4001",
-                        format!(
-                            "TypedDict item `{}` on `{}` in module `{}` is not a declared key",
-                            key,
-                            target_shape.name,
-                            node.module_path.display()
-                        ),
+                    typed_dict_unknown_item_key_diagnostic(
+                        node,
+                        site.line,
+                        &target_shape,
+                        key,
                     )
-                    .with_span(Span::new(
-                        node.module_path.display().to_string(),
-                        site.line,
-                        1,
-                        site.line,
-                        1,
-                    )),
                 );
             };
             if field.readonly() {
