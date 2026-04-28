@@ -150,9 +150,9 @@ Tasks:
 
 - [x] Generalize existing dataclass-transform shape collection.
 - [x] Represent generated `__init__` parameters as explicit synthetic signatures.
-- [ ] Support field aliases and keyword-only fields.
-- [ ] Support fields excluded from `__init__`.
-- [ ] Support frozen/readonly field diagnostics.
+- [x] Support field aliases and keyword-only fields.
+- [x] Support fields excluded from `__init__`.
+- [x] Support frozen/readonly field diagnostics.
 - [ ] Support generated class attributes such as managers, metadata, and validators.
 - [x] Ensure generated `.pyi` is checker-neutral.
 
