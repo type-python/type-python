@@ -915,6 +915,7 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let lowering_options = LoweringOptions {
         target_python: config.config.project.target_python,
         emit_style: config.config.emit.emit_style,
+        experimental_shape_transforms: false,
     };
     let lowering_results: Vec<_> = prepared
         .syntax_trees

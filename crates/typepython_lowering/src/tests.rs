@@ -15,6 +15,7 @@ fn compat_options(version: &str) -> LoweringOptions {
     LoweringOptions {
         target_python: PythonTarget::parse(version).expect("test target should parse"),
         emit_style: EmitStyle::Compat,
+        experimental_shape_transforms: false,
     }
 }
 
@@ -22,7 +23,12 @@ fn native_options(version: &str) -> LoweringOptions {
     LoweringOptions {
         target_python: PythonTarget::parse(version).expect("test target should parse"),
         emit_style: EmitStyle::Native,
+        experimental_shape_transforms: false,
     }
+}
+
+fn experimental_shape_options() -> LoweringOptions {
+    LoweringOptions { experimental_shape_transforms: true, ..LoweringOptions::default() }
 }
 
 #[test]
@@ -1812,6 +1818,80 @@ fn lower_expands_pick_typeddict_transform() {
         section.push('\n');
     }
     assert!(!section.contains("email"), "email should not appear in UserPublic Pick transform");
+}
+
+#[test]
+fn lower_expands_partial_dataclass_shape_transform_when_experimental() {
+    let lowered = lower_with_options(
+        &parse(SourceFile {
+            path: PathBuf::from("partial-dataclass.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "data class User:\n    id: int\n    name: str\n\ntypealias UserPatch = Partial[User]\n",
+            ),
+        }),
+        &experimental_shape_options(),
+    );
+
+    assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+    assert!(lowered.module.python_source.contains("from dataclasses import dataclass"));
+    assert!(lowered.module.python_source.contains("from typing import TypedDict"));
+    assert!(lowered.module.python_source.contains("from typing_extensions import NotRequired"));
+    assert!(lowered.module.python_source.contains("# tpy:derived Partial[User]"));
+    assert!(lowered.module.python_source.contains("class UserPatch(TypedDict):"));
+    assert!(lowered.module.python_source.contains("id: NotRequired[int]"));
+    assert!(lowered.module.python_source.contains("name: NotRequired[str]"));
+}
+
+#[test]
+fn lower_expands_pick_dataclass_shape_transform_when_experimental() {
+    let lowered = lower_with_options(
+        &parse(SourceFile {
+            path: PathBuf::from("pick-dataclass.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "data class User:\n    id: int\n    name: str\n    email: str\n\ntypealias UserPublic = Pick[User, \"id\", \"name\"]\n",
+            ),
+        }),
+        &experimental_shape_options(),
+    );
+
+    assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+    assert!(lowered.module.python_source.contains("class UserPublic(TypedDict):"));
+    assert!(lowered.module.python_source.contains("id: int"));
+    assert!(lowered.module.python_source.contains("name: str"));
+    let all_lines = lowered.module.python_source.lines().collect::<Vec<_>>();
+    let user_public_start = all_lines
+        .iter()
+        .position(|line| line.contains("class UserPublic"))
+        .expect("UserPublic class should be emitted");
+    let mut section = String::new();
+    for line in &all_lines[user_public_start..] {
+        if line.trim().is_empty() || line.trim().starts_with("class ") {
+            break;
+        }
+        section.push_str(line);
+        section.push('\n');
+    }
+    assert!(!section.contains("email"), "email should not appear in UserPublic Pick transform");
+}
+
+#[test]
+fn lower_rejects_dataclass_shape_transform_without_experimental_flag() {
+    let lowered = lower(&parse(SourceFile {
+        path: PathBuf::from("partial-dataclass-disabled.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(
+            "data class User:\n    id: int\n\ntypealias UserPatch = Partial[User]\n",
+        ),
+    }));
+
+    let rendered = lowered.diagnostics.as_text();
+    assert!(rendered.contains("TPY4017"));
+    assert!(rendered.contains("experimental shape source"));
 }
 
 #[test]

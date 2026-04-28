@@ -121,11 +121,16 @@ impl<'a> InsertedLineTracker<'a> {
 pub struct LoweringOptions {
     pub target_python: PythonTarget,
     pub emit_style: EmitStyle,
+    pub experimental_shape_transforms: bool,
 }
 
 impl Default for LoweringOptions {
     fn default() -> Self {
-        Self { target_python: PythonTarget::default(), emit_style: EmitStyle::Compat }
+        Self {
+            target_python: PythonTarget::default(),
+            emit_style: EmitStyle::Compat,
+            experimental_shape_transforms: false,
+        }
     }
 }
 
@@ -141,7 +146,7 @@ pub fn lower_with_options(tree: &SyntaxTree, options: &LoweringOptions) -> Lower
         SourceKind::TypePython => lower_typepython(tree, options),
         SourceKind::Python | SourceKind::Stub => lower_passthrough(&tree.source.text),
     };
-    let diagnostics = collect_lowering_diagnostics(tree);
+    let diagnostics = collect_lowering_diagnostics_with_options(tree, options);
 
     LoweringResult {
         module: LoweredModule {
@@ -262,6 +267,8 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         .filter(|statement| statement.bases.iter().any(|b| is_typed_dict_base(b)))
         .map(|statement| (statement.name.as_str(), *statement))
         .collect();
+    let data_classes_by_name: std::collections::BTreeMap<_, _> =
+        data_classes.values().map(|statement| (statement.name.as_str(), *statement)).collect();
     let function_defs: std::collections::BTreeMap<_, _> = tree
         .statements
         .iter()
@@ -417,6 +424,14 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         if !data_classes.is_empty() && !has_dataclass_import(&tree.source.text) {
             inserted_lines.emit_required_import(String::from("from dataclasses import dataclass"));
         }
+        if options.experimental_shape_transforms
+            && type_aliases.values().any(|statement| {
+                transform_targets_data_class(statement.value.trim(), &data_classes_by_name)
+            })
+            && !has_typeddict_import(&tree.source.text)
+        {
+            inserted_lines.emit_required_import(String::from("from typing import TypedDict"));
+        }
         if !overloads.is_empty() && !has_overload_import(&tree.source.text) {
             inserted_lines.emit_required_import(String::from("from typing import overload"));
         }
@@ -452,9 +467,13 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         let (replacement_lines, preserve_variadic_syntax) = if let Some(statement) =
             type_aliases.get(&line_number)
         {
-            if let Some(expanded) =
-                try_expand_typeddict_transform(&statement.value, &typed_dicts_by_name, line)
-            {
+            if let Some(expanded) = try_expand_typeddict_transform(
+                &statement.value,
+                &typed_dicts_by_name,
+                &data_classes_by_name,
+                options.experimental_shape_transforms,
+                line,
+            ) {
                 (expanded, false)
             } else {
                 (

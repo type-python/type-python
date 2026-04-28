@@ -11,6 +11,8 @@ pub(super) const TYPEDICT_TRANSFORMS: &[&str] =
 pub(super) fn try_expand_typeddict_transform(
     value: &str,
     typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    experimental_shape_transforms: bool,
     source_line: &str,
 ) -> Option<Vec<String>> {
     let value = value.trim();
@@ -36,19 +38,24 @@ pub(super) fn try_expand_typeddict_transform(
     let base_members = if let Some((inner_transform, inner_args)) = parse_transform_expr(target_arg)
     {
         if TYPEDICT_TRANSFORMS.contains(&inner_transform) && inner_args.len() >= 2 {
-            // Recursively expand the inner transform
-            let inner_target_name = inner_args[1]; // [1] is the target TypedDict name
-            let inner_key_args = &inner_args[2..]; // [2..] are the key args
-            let inner_target = typed_dicts.get(inner_target_name)?;
-            // inner_target is &&NamedBlockStatement, dereference to &
-            apply_transform_to_members(inner_transform, &inner_target.members, inner_key_args)
+            let inner_target = resolve_transform_members(
+                inner_args[1],
+                typed_dicts,
+                data_classes,
+                experimental_shape_transforms,
+            )?;
+            apply_transform_to_members(inner_transform, &inner_target.1, &inner_args[2..])
         } else {
             return None;
         }
     } else {
-        // target_arg is a regular TypedDict name
-        let target = typed_dicts.get(target_arg)?;
-        target.members.to_vec()
+        resolve_transform_members(
+            target_arg,
+            typed_dicts,
+            data_classes,
+            experimental_shape_transforms,
+        )?
+        .1
     };
 
     let indentation = source_line.len() - source_line.trim_start().len();
@@ -291,7 +298,50 @@ pub(super) fn has_readonly_import(source: &str) -> bool {
     })
 }
 
-pub(super) fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
+pub(super) fn has_typeddict_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from typing import TypedDict"
+            || trimmed == "from typing_extensions import TypedDict"
+            || (trimmed.starts_with("from typing import ") && trimmed.contains("TypedDict"))
+            || (trimmed.starts_with("from typing_extensions import ")
+                && trimmed.contains("TypedDict"))
+            || trimmed == "import typing"
+            || trimmed == "import typing_extensions"
+    })
+}
+
+pub(super) fn transform_targets_data_class(
+    value: &str,
+    data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+) -> bool {
+    let Some((transform, args)) = parse_transform_expr(value.trim()) else {
+        return false;
+    };
+    TYPEDICT_TRANSFORMS.contains(&transform)
+        && args.len() >= 2
+        && transform_expression_reaches_data_class(args[1], data_classes)
+}
+
+fn transform_expression_reaches_data_class(
+    value: &str,
+    data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+) -> bool {
+    if data_classes.contains_key(value.trim()) {
+        return true;
+    }
+    let Some((transform, args)) = parse_transform_expr(value.trim()) else {
+        return false;
+    };
+    TYPEDICT_TRANSFORMS.contains(&transform)
+        && args.len() >= 2
+        && transform_expression_reaches_data_class(args[1], data_classes)
+}
+
+pub(super) fn collect_lowering_diagnostics_with_options(
+    tree: &SyntaxTree,
+    options: &LoweringOptions,
+) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
     let typed_dicts_by_name: std::collections::BTreeMap<_, _> = tree
         .statements
@@ -300,6 +350,16 @@ pub(super) fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticRepor
             SyntaxStatement::ClassDef(statement)
                 if statement.bases.iter().any(|base| is_typed_dict_base(base)) =>
             {
+                Some((statement.name.as_str(), statement))
+            }
+            _ => None,
+        })
+        .collect();
+    let data_classes_by_name: std::collections::BTreeMap<_, _> = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::DataClass(statement) if is_lowerable_named_block(statement) => {
                 Some((statement.name.as_str(), statement))
             }
             _ => None,
@@ -315,6 +375,8 @@ pub(super) fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticRepor
                     statement.line,
                     &statement.value,
                     &typed_dicts_by_name,
+                    &data_classes_by_name,
+                    options.experimental_shape_transforms,
                 ) {
                     diagnostics.push(diagnostic);
                 }
@@ -359,6 +421,8 @@ fn collect_typed_dict_transform_diagnostics(
     line: usize,
     value: &str,
     typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    experimental_shape_transforms: bool,
 ) -> Vec<Diagnostic> {
     let Some((transform, args)) = parse_transform_expr(value.trim()) else {
         return Vec::new();
@@ -369,14 +433,19 @@ fn collect_typed_dict_transform_diagnostics(
 
     let target_arg = args[1];
     let key_args = &args[2..];
-    let (target_name, members) = match resolve_transform_members(target_arg, typed_dicts) {
+    let (target_name, members) = match resolve_transform_members(
+        target_arg,
+        typed_dicts,
+        data_classes,
+        experimental_shape_transforms,
+    ) {
         Some(result) => result,
         None => {
             return vec![typed_dict_transform_error(
                 path,
                 line,
                 format!(
-                    "type transform `{}` targets `{}` which is not a known TypedDict",
+                    "type transform `{}` targets `{}` which is not a known TypedDict or experimental shape source",
                     transform,
                     target_arg.trim()
                 ),
@@ -403,7 +472,7 @@ fn collect_typed_dict_transform_diagnostics(
                     path,
                     line,
                     format!(
-                        "type transform `{}` references unknown key `{}` on TypedDict `{}`",
+                        "type transform `{}` references unknown key `{}` on shape source `{}`",
                         transform, key, target_name
                     ),
                     Some((&key, key_arg, &field_names)),
@@ -416,6 +485,8 @@ fn collect_typed_dict_transform_diagnostics(
 fn resolve_transform_members(
     value: &str,
     typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    experimental_shape_transforms: bool,
 ) -> Option<(String, Vec<typepython_syntax::ClassMember>)> {
     if let Some((transform, args)) = parse_transform_expr(value.trim())
         && TYPEDICT_TRANSFORMS.contains(&transform)
@@ -423,12 +494,22 @@ fn resolve_transform_members(
     {
         let target_arg = args[1];
         let key_args = &args[2..];
-        let (target_name, base_members) = resolve_transform_members(target_arg, typed_dicts)?;
+        let (target_name, base_members) = resolve_transform_members(
+            target_arg,
+            typed_dicts,
+            data_classes,
+            experimental_shape_transforms,
+        )?;
         return Some((target_name, apply_transform_to_members(transform, &base_members, key_args)));
     }
 
-    let target = typed_dicts.get(value.trim())?;
-    Some((target.name.clone(), target.members.to_vec()))
+    if let Some(target) = typed_dicts.get(value.trim()) {
+        return Some((target.name.clone(), target.members.to_vec()));
+    }
+    if experimental_shape_transforms && let Some(target) = data_classes.get(value.trim()) {
+        return Some((target.name.clone(), target.members.to_vec()));
+    }
+    None
 }
 
 fn transform_key_name(key: &str) -> String {
