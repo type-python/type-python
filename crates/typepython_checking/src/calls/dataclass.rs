@@ -124,6 +124,7 @@ pub(super) fn resolve_plain_dataclass_class_shape_from_decl_with_context(
                 } else {
                     class_site.plain_dataclass_kw_only
                 },
+                frozen: false,
             })
         })
         .collect::<Vec<_>>();
@@ -418,6 +419,7 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
         } else {
             !field.has_default
         };
+        let frozen = supports_readonly && field.field_specifier_frozen.unwrap_or(false);
         let synthesized = DataclassTransformFieldShape {
             name: field.name.clone(),
             keyword_name: if supports_aliases {
@@ -433,6 +435,7 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
             } else {
                 false
             },
+            frozen,
         };
         if let Some(index) = fields.iter().position(|existing| existing.name == synthesized.name) {
             fields.remove(index);
@@ -442,7 +445,7 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
 
     Some(DataclassTransformClassShape {
         fields,
-        frozen: supports_readonly,
+        frozen: supports_readonly && provider.frozen_default,
         has_explicit_init,
         origin_path: Some(class_node.module_path.display().to_string()),
         origin_line: Some(class_site.line),
@@ -610,6 +613,7 @@ pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
             annotation_expr: field.annotation_expr.clone(),
             required,
             kw_only,
+            frozen: false,
         };
         if let Some(index) = fields.iter().position(|existing| existing.name == synthesized.name) {
             fields.remove(index);

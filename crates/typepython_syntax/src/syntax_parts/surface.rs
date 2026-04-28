@@ -124,6 +124,7 @@ mod tests {
                 FrameworkTransformCapability::GenericPreservation,
             ],
             fallback: FrameworkTransformFallback::NonStrictDegrade,
+            frozen_default: false,
             line: 12,
         };
 
@@ -1013,6 +1014,7 @@ pub struct DataclassTransformFieldSite {
     pub field_specifier_kw_only: Option<bool>,
     pub field_specifier_alias: Option<String>,
     pub field_specifier_has_dynamic_alias: bool,
+    pub field_specifier_frozen: Option<bool>,
     pub line: usize,
 }
 
@@ -1111,6 +1113,7 @@ pub struct FrameworkTransformProviderSite {
     pub provider_kind: Option<FrameworkTransformProviderKind>,
     pub capabilities: Vec<FrameworkTransformCapability>,
     pub fallback: FrameworkTransformFallback,
+    pub frozen_default: bool,
     pub line: usize,
 }
 

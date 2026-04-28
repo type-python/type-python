@@ -441,6 +441,7 @@ pub(crate) struct DataclassTransformFieldShape {
     pub(crate) annotation_expr: Option<typepython_syntax::TypeExpr>,
     pub(crate) required: bool,
     pub(crate) kw_only: bool,
+    pub(crate) frozen: bool,
 }
 
 #[allow(dead_code)]
@@ -605,7 +606,7 @@ impl Shape {
                     public_alias: field.keyword_name.clone(),
                     semantic_type: field.semantic_annotation(),
                     required: field.required,
-                    readonly: shape.frozen,
+                    readonly: shape.frozen || field.frozen,
                     constructor_participates: true,
                     has_default: !field.required,
                     has_default_factory: false,
@@ -1700,7 +1701,10 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
                     &target_type_rendered,
                 )
             })?;
-            if !shape.frozen || !shape.fields.iter().any(|field| field.name == site.field_name) {
+            let Some(field) = shape.fields.iter().find(|field| field.name == site.field_name) else {
+                return None;
+            };
+            if !(shape.frozen || field.frozen) {
                 return None;
             }
 

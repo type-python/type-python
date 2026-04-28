@@ -207,12 +207,24 @@ fn check_reports_framework_keyword_only_field_passed_positionally() {
 #[test]
 fn check_reports_framework_readonly_field_assignment_after_init() {
     let result = check_temp_typepython_source(
-        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"readonly_fields\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nuser: User = User(\"Ada\")\nuser.name = \"Grace\"\n",
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"readonly_fields\"), frozen_default=True)\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nuser: User = User(\"Ada\")\nuser.name = \"Grace\"\n",
     );
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"), "{rendered}");
     assert!(rendered.contains("frozen dataclass-transform field `name`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_pydantic_like_field_level_frozen_assignment_after_init() {
+    let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\ndef Field(*, default=None, default_factory=None, alias=None, frozen=False):\n    return default\n\n@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\", \"alias_handling\", \"required_optional_fields\", \"readonly_fields\"))\nclass BaseModel:\n    pass\n\nclass User(BaseModel):\n    id: int = Field(alias=\"user_id\", frozen=True)\n    name: str\n\nuser: User = User(user_id=1, name=\"Ada\")\nuser.id = 2\nuser.name = \"Grace\"\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("frozen dataclass-transform field `id`"), "{rendered}");
+    assert!(!rendered.contains("frozen dataclass-transform field `name`"), "{rendered}");
 }
 
 #[test]

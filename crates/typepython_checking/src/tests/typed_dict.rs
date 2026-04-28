@@ -132,6 +132,7 @@ fn shared_shape_can_wrap_dataclass_transform_fields() {
                 annotation_expr: typepython_syntax::TypeExpr::parse("str"),
                 required: true,
                 kw_only: false,
+                frozen: false,
             }],
             frozen: true,
             has_explicit_init: false,

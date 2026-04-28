@@ -842,13 +842,14 @@ pub(super) fn framework_transform_provider_site(
     decorators.iter().find_map(|decorator| {
         let expression = &decorator.expression;
         is_framework_transform_expr(expression, import_bindings).then(|| {
-            let (provider_kind, capabilities, fallback) =
+            let (provider_kind, capabilities, fallback, frozen_default) =
                 framework_transform_metadata_from_expr(source, expression, import_bindings);
             FrameworkTransformProviderSite {
                 name: provider_name.to_owned(),
                 provider_kind,
                 capabilities,
                 fallback,
+                frozen_default,
                 line,
             }
         })
@@ -863,13 +864,15 @@ pub(super) fn framework_transform_metadata_from_expr(
     Option<FrameworkTransformProviderKind>,
     Vec<FrameworkTransformCapability>,
     FrameworkTransformFallback,
+    bool,
 ) {
     let Expr::Call(call) = expr else {
-        return (None, Vec::new(), FrameworkTransformFallback::default());
+        return (None, Vec::new(), FrameworkTransformFallback::default(), false);
     };
     let mut provider_kind = None;
     let mut capabilities = Vec::new();
     let mut fallback = FrameworkTransformFallback::default();
+    let mut frozen_default = false;
     for keyword in &call.arguments.keywords {
         let Some(name) = keyword.arg.as_ref().map(|name| name.as_str()) else {
             continue;
@@ -890,10 +893,13 @@ pub(super) fn framework_transform_metadata_from_expr(
                     fallback = framework_transform_fallback(&value);
                 }
             }
+            "frozen_default" => {
+                frozen_default = expr_static_bool(&keyword.value).unwrap_or(false);
+            }
             _ => {}
         }
     }
-    (provider_kind, capabilities, fallback)
+    (provider_kind, capabilities, fallback, frozen_default)
 }
 
 pub(super) fn is_framework_transform_expr(
@@ -982,6 +988,7 @@ pub(super) fn extract_dataclass_transform_field(
         field_specifier_has_dynamic_alias: field_specifier
             .as_ref()
             .is_some_and(|site| site.has_dynamic_alias),
+        field_specifier_frozen: field_specifier.as_ref().and_then(|site| site.frozen),
         line: offset_to_line_column(source, assign.range.start().to_usize()).0,
     })
 }
@@ -995,6 +1002,7 @@ pub(super) struct FieldSpecifierSite {
     kw_only: Option<bool>,
     alias: Option<String>,
     has_dynamic_alias: bool,
+    frozen: Option<bool>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1021,6 +1029,7 @@ pub(super) fn extract_field_specifier_site(
         kw_only: None,
         alias: None,
         has_dynamic_alias: false,
+        frozen: None,
     };
     for keyword in &call.arguments.keywords {
         let Some(name) = keyword.arg.as_ref().map(|name| name.as_str()) else {
@@ -1035,6 +1044,7 @@ pub(super) fn extract_field_specifier_site(
                 result.alias = extract_string_literal_value(source, &keyword.value);
                 result.has_dynamic_alias = result.alias.is_none();
             }
+            "frozen" => result.frozen = expr_static_bool(&keyword.value),
             _ => {}
         }
     }
