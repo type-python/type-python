@@ -423,7 +423,7 @@ The first version should be a conservative surface diff, not a complete semantic
   - [x] `py.typed` or partial-stub metadata regression
 - [x] Classify changes as:
   - [x] source-compatible
-  - [ ] likely type-compatible
+  - [x] likely type-compatible
   - [x] likely type-breaking
   - [x] runtime-breaking signal
   - [x] unknown risk
