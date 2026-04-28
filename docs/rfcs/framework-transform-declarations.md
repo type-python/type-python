@@ -182,13 +182,19 @@ known `frozen_default=True` model metadata and `Field(frozen=True)` field metada
 frozen-field mutation diagnostics as dataclass-transform shapes. A provider with generated-member
 support also recognizes `computed_field`-decorated methods with explicit return annotations and
 emits them as value attributes in authoritative stubs.
+Framework-owned validator and serializer decorators such as `field_validator`, `model_validator`,
+`field_serializer`, and `model_serializer` are accepted on generated-member-capable transformed
+classes when their static signatures expose the minimum receiver/value shape and an explicit return
+annotation; malformed signatures produce deterministic framework-transform diagnostics instead of
+falling through to generic undecidable-decorator errors.
 
 Known unsupported Pydantic features remain explicit future work:
 
 - `computed_field` support is limited to statically named decorators and explicitly annotated
   return types; dynamic decorators or inferred return types are not synthesized.
-- Validators and serializers such as `field_validator`, `model_validator`, and serializer
-  decorators are not checked as framework-owned decorators yet.
+- Validator and serializer decorator support currently checks only statically named decorators with
+  obvious parameter-count and return-annotation requirements; mode-specific Pydantic semantics and
+  runtime field-name validation remain deferred.
 - `model_construct` signatures are not generated yet.
 - Runtime-computed aliases now produce deterministic diagnostics rather than guessed constructor
   parameters; only string-literal aliases participate in static constructor typing.

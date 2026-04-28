@@ -476,8 +476,13 @@ pub(super) fn undecidable_decorator_diagnostics(
             if decorated.decorators.is_empty() {
                 return None;
             }
-            if decorated_callable_is_supported_framework_value_transform(node, nodes, declaration, &decorated) {
-                return None;
+            if let Some(result) = framework_owned_decorator_diagnostic(
+                node,
+                nodes,
+                declaration,
+                &decorated,
+            ) {
+                return result;
             }
             match resolve_decorated_callable_semantic_type_for_declaration_with_context(
                 context,
@@ -508,20 +513,114 @@ pub(super) fn undecidable_decorator_diagnostics(
         .collect()
 }
 
-fn decorated_callable_is_supported_framework_value_transform(
+fn framework_owned_decorator_diagnostic(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     declaration: &Declaration,
     decorated: &typepython_syntax::DecoratedCallableSite,
-) -> bool {
+) -> Option<Option<Diagnostic>> {
     let Some(owner) = declaration.owner.as_ref() else {
-        return false;
+        return None;
     };
-    decorated
-        .decorators
-        .iter()
-        .any(|decorator| decorator == "computed_field" || decorator.ends_with(".computed_field"))
-        && framework_transform_class_supports_generated_members(node, nodes, &owner.name)
+    let Some(kind) = decorated.decorators.iter().find_map(|decorator| {
+        framework_owned_decorator_kind(decorator)
+    }) else {
+        return None;
+    };
+    if !framework_transform_class_supports_generated_members(node, nodes, &owner.name) {
+        return None;
+    }
+    match kind.signature_diagnostic(node, declaration, decorated) {
+        Some(diagnostic) => Some(Some(diagnostic)),
+        None => Some(None),
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FrameworkOwnedDecoratorKind {
+    ComputedField,
+    FieldValidator,
+    ModelValidator,
+    FieldSerializer,
+    ModelSerializer,
+}
+
+impl FrameworkOwnedDecoratorKind {
+    fn signature_diagnostic(
+        self,
+        node: &typepython_graph::ModuleNode,
+        declaration: &Declaration,
+        decorated: &typepython_syntax::DecoratedCallableSite,
+    ) -> Option<Diagnostic> {
+        let signature = declaration.callable_signature()?;
+        let param_count = signature
+            .params
+            .iter()
+            .filter(|param| !param.variadic && !param.keyword_variadic)
+            .count();
+        let missing_return = signature.returns.is_none();
+        let expected = match self {
+            Self::ComputedField => 1,
+            Self::FieldValidator | Self::FieldSerializer => 2,
+            Self::ModelValidator | Self::ModelSerializer => 1,
+        };
+        if param_count >= expected && !missing_return {
+            return None;
+        }
+        let mut reasons = Vec::new();
+        if param_count < expected {
+            reasons.push(format!(
+                "expected at least {} explicit parameter{}",
+                expected,
+                if expected == 1 { "" } else { "s" }
+            ));
+        }
+        if missing_return {
+            reasons.push(String::from("expected an explicit return annotation"));
+        }
+        Some(
+            Diagnostic::error(
+                "TPY4020",
+                format!(
+                    "framework-owned decorator `{}` on `{}` cannot be checked statically: {}",
+                    self.label(),
+                    declaration.name,
+                    reasons.join(" and "),
+                ),
+            )
+            .with_span(Span::new(
+                node.module_path.display().to_string(),
+                decorated.line,
+                1,
+                decorated.line,
+                1,
+            )),
+        )
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::ComputedField => "computed_field",
+            Self::FieldValidator => "field_validator",
+            Self::ModelValidator => "model_validator",
+            Self::FieldSerializer => "field_serializer",
+            Self::ModelSerializer => "model_serializer",
+        }
+    }
+}
+
+fn framework_owned_decorator_kind(name: &str) -> Option<FrameworkOwnedDecoratorKind> {
+    [
+        ("computed_field", FrameworkOwnedDecoratorKind::ComputedField),
+        ("field_validator", FrameworkOwnedDecoratorKind::FieldValidator),
+        ("model_validator", FrameworkOwnedDecoratorKind::ModelValidator),
+        ("field_serializer", FrameworkOwnedDecoratorKind::FieldSerializer),
+        ("model_serializer", FrameworkOwnedDecoratorKind::ModelSerializer),
+    ]
+    .into_iter()
+    .find_map(|(suffix, kind)| {
+        (name == suffix || name.ends_with(&format!(".{suffix}"))).then_some(kind)
+    })
 }
 
 pub(super) fn rewrite_imported_typing_semantic_callable_params(

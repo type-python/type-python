@@ -505,7 +505,7 @@ If TypePython can model a Pydantic/FastAPI-style app through the general transfo
 - [x] Support `default_factory`.
 - [x] Support frozen fields or model-level immutability where statically known.
 - [x] Support `computed_field` in emitted stubs.
-- [ ] Support validators and serializers as checked decorators where feasible.
+- [x] Support validators and serializers as checked decorators where feasible.
 - [ ] Emit accurate `__init__` and `model_construct` signatures.
 - [x] Diagnose dynamic aliases that prevent accurate static constructor typing.
 - [ ] Add fixture parity with common Pydantic mypy plugin strictness settings:

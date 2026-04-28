@@ -272,6 +272,97 @@ fn pydantic_like_computed_field_emits_value_stub_override() {
 }
 
 #[test]
+fn check_accepts_pydantic_like_validator_and_serializer_decorators() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "def framework_transform(*args, **kwargs):\n",
+            "    def wrap(obj):\n",
+            "        return obj\n",
+            "    return wrap\n\n",
+            "def field_validator(*fields, **kwargs):\n",
+            "    def wrap(fn):\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "def model_validator(*args, **kwargs):\n",
+            "    def wrap(fn):\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "def field_serializer(*fields, **kwargs):\n",
+            "    def wrap(fn):\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "def model_serializer(*args, **kwargs):\n",
+            "    def wrap(fn):\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\", \"method_synthesis\"))\n",
+            "class BaseModel:\n",
+            "    pass\n\n",
+            "class User(BaseModel):\n",
+            "    name: str\n\n",
+            "    @field_validator(\"name\")\n",
+            "    def validate_name(cls, value: str) -> str:\n",
+            "        return value\n\n",
+            "    @model_validator(mode=\"after\")\n",
+            "    def validate_model(self) -> User:\n",
+            "        return self\n\n",
+            "    @field_serializer(\"name\")\n",
+            "    def serialize_name(self, value: str) -> str:\n",
+            "        return value\n\n",
+            "    @model_serializer(mode=\"plain\")\n",
+            "    def serialize_model(self) -> dict[str, object]:\n",
+            "        return {}\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4001"), "{rendered}");
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_reports_malformed_pydantic_like_validator_decorator_signature() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "def framework_transform(*args, **kwargs):\n",
+            "    def wrap(obj):\n",
+            "        return obj\n",
+            "    return wrap\n\n",
+            "def field_validator(*fields, **kwargs):\n",
+            "    def wrap(fn):\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\", \"method_synthesis\"))\n",
+            "class BaseModel:\n",
+            "    pass\n\n",
+            "class User(BaseModel):\n",
+            "    name: str\n\n",
+            "    @field_validator(\"name\")\n",
+            "    def validate_name(cls):\n",
+            "        return cls\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4020"), "{rendered}");
+    assert!(rendered.contains("field_validator"), "{rendered}");
+    assert!(rendered.contains("expected at least 2 explicit parameters"), "{rendered}");
+    assert!(rendered.contains("expected an explicit return annotation"), "{rendered}");
+}
+
+#[test]
 fn check_reports_pydantic_like_dynamic_field_alias() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(
