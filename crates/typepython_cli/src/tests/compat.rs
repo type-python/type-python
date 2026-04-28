@@ -101,6 +101,15 @@ fn compat_checker_invocations_use_known_cli_conventions() {
     );
 }
 
+#[test]
+fn strict_compat_ignores_checker_allowlist() {
+    assert_eq!(compat_checker_allowlist(true, Some(PathBuf::from("checker-allowlist.toml"))), None,);
+    assert_eq!(
+        compat_checker_allowlist(false, Some(PathBuf::from("checker-allowlist.toml"))),
+        Some(PathBuf::from("checker-allowlist.toml")),
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn run_compat_uses_verify_pipeline_and_configured_checker() {

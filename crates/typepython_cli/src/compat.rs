@@ -12,18 +12,27 @@ pub(crate) fn run_compat(args: CompatArgs) -> Result<ExitCode> {
         Some(profile) => expand_compat_profile(profile)?,
         None => expand_checker_list(&args.checkers)?,
     };
+    let checker_allowlist =
+        compat_checker_allowlist(args.strict_portability, args.checker_allowlist);
     let verify_args = VerifyArgs {
         run: args.run,
         wheels: Vec::new(),
         sdists: Vec::new(),
         checkers,
         checker_preset: None,
-        checker_allowlist: args.checker_allowlist,
+        checker_allowlist,
         unsafe_runtime_imports: false,
     };
     let command_name =
         if args.strict_portability { "compat --strict-portability" } else { "compat" };
     run_verify_with_command(command_name, verify_args)
+}
+
+pub(crate) fn compat_checker_allowlist(
+    strict_portability: bool,
+    checker_allowlist: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    if strict_portability { None } else { checker_allowlist }
 }
 
 pub(crate) fn expand_compat_profile(profile: &str) -> Result<Vec<String>> {
