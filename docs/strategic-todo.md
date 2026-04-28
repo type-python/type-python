@@ -538,21 +538,21 @@ Reduce the cost of adopting TypePython in existing projects and increase confide
 
 ### Migration TODO
 
-- [ ] Improve `typepython migrate --report` into an adoption dashboard.
-- [ ] Report public API annotation completeness.
-- [ ] Report `dynamic` and `unknown` boundaries.
-- [ ] Report untyped imports.
-- [ ] Report modules with high downstream dependency impact.
-- [ ] Report framework patterns that would benefit from transform declarations.
-- [ ] Add JSON output suitable for CI dashboards.
+- [x] Improve `typepython migrate --report` into an adoption dashboard.
+- [x] Report public API annotation completeness.
+- [x] Report `dynamic` and `unknown` boundaries.
+- [x] Report untyped imports.
+- [x] Report modules with high downstream dependency impact.
+- [x] Report framework patterns that would benefit from transform declarations.
+- [x] Add JSON output suitable for CI dashboards.
 
 ### Baseline TODO
 
-- [ ] Add a diagnostic baseline file format.
-- [ ] Support "no new diagnostics" mode.
-- [ ] Support per-rule severity configuration.
-- [ ] Support inline suppression with diagnostic codes.
-- [ ] Add docs for strict migration strategy.
+- [x] Add a diagnostic baseline file format.
+- [x] Support "no new diagnostics" mode.
+- [x] Support per-rule severity configuration.
+- [x] Support inline suppression with diagnostic codes.
+- [x] Add docs for strict migration strategy.
 
 ### Publication TODO
 
@@ -564,8 +564,8 @@ Reduce the cost of adopting TypePython in existing projects and increase confide
 
 ### Acceptance Criteria
 
-- [ ] A partially typed project can adopt TypePython without fixing every diagnostic on day one.
-- [ ] CI can fail only on new errors.
+- [x] A partially typed project can adopt TypePython without fixing every diagnostic on day one.
+- [x] CI can fail only on new errors.
 - [ ] Library authors can run one command before publishing to validate generated artifacts.
 
 ## P1: IDE-First Migration and Refactor UX
