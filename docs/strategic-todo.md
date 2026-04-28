@@ -597,7 +597,7 @@ TypePython already has LSP infrastructure. It should use that position to make m
   - [ ] overload normalization
   - [ ] `TypedDict` key requiredness fixes
 - [x] Add preview UI for emitted `.py` and `.pyi` for the current file.
-- [ ] Add diagnostics that show whether a fix is TypePython-only or checker-portable.
+- [x] Add diagnostics that show whether a fix is TypePython-only or checker-portable.
 - [x] Add editor commands that run `migrate --report`, `compat`, and `type-health` for the current project.
 
 ### Acceptance Criteria

@@ -89,6 +89,8 @@ class User (data class)
   age: int
 ```
 
+Diagnostics that have known migration fixes include `data.fixPortability` metadata. Editors can show `checker-portable` fixes ahead of TypePython-only rewrites when both are available.
+
 ## Editor Setup
 
 The snippets below are generic LSP client configurations. TypePython does not currently ship an official VS Code, Neovim, Helix, Sublime, or Emacs plugin.
