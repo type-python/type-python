@@ -589,7 +589,7 @@ TypePython already has LSP infrastructure. It should use that position to make m
   - [ ] convert hand-written DTO class to shape-backed model
   - [ ] generate public `.pyi` preview for a selected symbol
   - [ ] insert minimal annotation to remove a downstream `unknown`
-- [ ] Add "Explain this type" hover support.
+- [x] Add "Explain this type" hover support.
 - [ ] Add "Find source of `Any`" and "Find source of `Unknown`" navigation.
 - [ ] Add quick fixes for portable typing rewrites:
   - [x] `typing.List` to `list` when target allows it

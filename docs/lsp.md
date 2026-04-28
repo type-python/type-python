@@ -77,7 +77,7 @@ line_length = 1000
 
 ### Hover
 
-Hover displays the inferred type of the symbol at the cursor:
+Hover displays the inferred type of the symbol at the cursor and a short explanation of how TypePython uses that surface for analysis and emitted stubs:
 
 ```
 x: int
