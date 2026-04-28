@@ -320,36 +320,36 @@ TypePython should not join the checker war. It should sit upstream and generate 
 
 ### TODO
 
-- [ ] Add a `typepython compat` command.
-- [ ] Support `typepython compat --checkers mypy,pyright,ty`.
-- [ ] Support optional `pyrefly`, `basedpyright`, and `zuban` checks when installed.
-- [ ] Run each configured checker against generated `.py` and `.pyi` artifacts.
-- [ ] Distinguish:
-  - [ ] TypePython compiler diagnostics
-  - [ ] downstream checker diagnostics
-  - [ ] checker disagreement
-  - [ ] known checker limitation
-  - [ ] invalid generated artifact
-- [ ] Produce machine-readable JSON output for CI.
-- [ ] Produce a human-readable portability report.
-- [ ] Add a checker disagreement allowlist with expiration dates and linked issues.
-- [ ] Add a `--strict-portability` mode that fails on any unallowlisted checker disagreement.
-- [ ] Add profiles:
-  - [ ] `library-portable`
-  - [ ] `app-strict`
-  - [ ] `pyright-first`
-  - [ ] `mypy-compatible`
-  - [ ] `experimental-checkers`
-- [ ] Detect non-portable constructs in emitted stubs before invoking external checkers.
-- [ ] Explain suggested rewrites for known portability problems.
-- [ ] Track a "type portability score" in reports.
+- [x] Add a `typepython compat` command.
+- [x] Support `typepython compat --checkers mypy,pyright,ty`.
+- [x] Support optional `pyrefly`, `basedpyright`, and `zuban` checks when installed.
+- [x] Run each configured checker against generated `.py` and `.pyi` artifacts.
+- [x] Distinguish:
+  - [x] TypePython compiler diagnostics
+  - [x] downstream checker diagnostics
+  - [x] checker disagreement
+  - [x] known checker limitation
+  - [x] invalid generated artifact
+- [x] Produce machine-readable JSON output for CI.
+- [x] Produce a human-readable portability report.
+- [x] Add a checker disagreement allowlist with expiration dates and linked issues.
+- [x] Add a `--strict-portability` mode that fails on any unallowlisted checker disagreement.
+- [x] Add profiles:
+  - [x] `library-portable`
+  - [x] `app-strict`
+  - [x] `pyright-first`
+  - [x] `mypy-compatible`
+  - [x] `experimental-checkers`
+- [x] Detect non-portable constructs in emitted stubs before invoking external checkers.
+- [x] Explain suggested rewrites for known portability problems.
+- [x] Track a "type portability score" in reports.
 
 ### Acceptance Criteria
 
-- [ ] A package can run one command to validate emitted artifacts across mypy, pyright, and ty.
-- [ ] Experimental checker results can be reported without making CI flaky by default.
-- [ ] Known checker disagreements are visible, reproducible, and reviewable.
-- [ ] CI can fail on portability regressions without requiring every checker to behave identically.
+- [x] A package can run one command to validate emitted artifacts across mypy, pyright, and ty.
+- [x] Experimental checker results can be reported without making CI flaky by default.
+- [x] Known checker disagreements are visible, reproducible, and reviewable.
+- [x] CI can fail on portability regressions without requiring every checker to behave identically.
 
 ## P0: Python 3.14+ Annotation Runtime Compatibility
 
