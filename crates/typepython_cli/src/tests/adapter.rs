@@ -60,5 +60,9 @@ fn run_adapter_validate_rejects_unsafe_manifest_capabilities() {
     };
     remove_temp_project_dir(&project_dir);
 
-    assert_eq!(result, ExitCode::FAILURE);
+    assert_eq!(
+        result,
+        ExitCode::FAILURE,
+        "TPY7003 adapter manifest diagnostics should reject unsafe capabilities",
+    );
 }
