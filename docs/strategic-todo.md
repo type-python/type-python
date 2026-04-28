@@ -920,79 +920,79 @@ Possible later work:
 
 ### Weeks 1-2: Design and Credibility Foundation
 
-- [ ] Draft framework transform RFC.
-- [ ] Draft phase-1 internal shape IR RFC.
-- [ ] Draft checker portability audit design for mypy, pyright, and ty.
-- [ ] Draft Python 3.14+ annotation runtime compatibility notes for generated `.py`.
-- [ ] Add typeshed pin and stdlib refresh design.
-- [ ] Add coverage tool choice and local command docs.
+- [x] Draft framework transform RFC.
+- [x] Draft phase-1 internal shape IR RFC.
+- [x] Draft checker portability audit design for mypy, pyright, and ty.
+- [x] Draft Python 3.14+ annotation runtime compatibility notes for generated `.py`.
+- [x] Add typeshed pin and stdlib refresh design.
+- [x] Add coverage tool choice and local command docs.
 
 ### Weeks 3-5: Minimal Transform Prototype
 
-- [ ] Implement function-to-object decorator transform prototype.
-- [ ] Emit transformed `.pyi` for a toy `Task[P, R]`.
-- [ ] Add mypy/pyright/ty downstream fixture for the toy task framework.
-- [ ] Add strict-mode diagnostic for unsupported non-callable decorator transforms.
-- [ ] Add a first `typepython compat` prototype over the toy generated artifacts.
+- [x] Implement function-to-object decorator transform prototype.
+- [x] Emit transformed `.pyi` for a toy `Task[P, R]`.
+- [x] Add mypy/pyright/ty downstream fixture for the toy task framework.
+- [x] Add strict-mode diagnostic for unsupported non-callable decorator transforms.
+- [x] Add a first `typepython compat` prototype over the toy generated artifacts.
 
 ### Weeks 6-8: Shape Model Prototype
 
-- [ ] Introduce internal `Shape` representation.
-- [ ] Bridge existing `TypedDictShape` to the new model.
-- [ ] Keep current TypedDict transform tests green.
-- [ ] Implement a class-shape rewriter for a toy model framework.
-- [ ] Emit a generated constructor and generated members in `.pyi`.
-- [ ] Validate emitted stubs with mypy, pyright, and ty.
+- [x] Introduce internal `Shape` representation.
+- [x] Bridge existing `TypedDictShape` to the new model.
+- [x] Keep current TypedDict transform tests green.
+- [x] Implement a class-shape rewriter for a toy model framework.
+- [x] Emit a generated constructor and generated members in `.pyi`.
+- [x] Validate emitted stubs with mypy, pyright, and ty.
 
 ### Weeks 9-10: Pydantic/FastAPI Spike
 
 - [ ] Build a tiny Pydantic-like fixture using the transform system.
-- [ ] Generate `__init__` stub with aliases and defaults.
+- [x] Generate `__init__` stub with aliases and defaults.
 - [ ] Validate generated artifacts with mypy/pyright/ty.
 - [ ] Document known unsupported Pydantic features.
-- [ ] Add annotation runtime probes for Python 3.14-style deferred annotations.
+- [x] Add annotation runtime probes for Python 3.14-style deferred annotations.
 - [ ] Sketch the framework adapter manifest only from the toy and Pydantic-like fixtures.
 
 ### Weeks 11-12: Harden and Publish Direction
 
-- [ ] Add conformance mapping skeleton.
-- [ ] Add coverage CI artifact.
-- [ ] Add first parser or lowering fuzz smoke CI.
-- [ ] Add checker portability report to CI artifacts.
-- [ ] Write user-facing roadmap in `docs/`.
-- [ ] Add a showcase example for framework transforms.
-- [ ] Decide whether type-health, API diff, or migration baseline is the next P1 productization step.
+- [x] Add conformance mapping skeleton.
+- [x] Add coverage CI artifact.
+- [x] Add first parser or lowering fuzz smoke CI.
+- [x] Add checker portability report to CI artifacts.
+- [x] Write user-facing roadmap in `docs/`.
+- [x] Add a showcase example for framework transforms.
+- [x] Decide whether type-health, API diff, or migration baseline is the next P1 productization step.
 
 ## Definition of Done for the North Star
 
-- [ ] A framework author can describe a runtime transform without writing a mypy plugin.
-- [ ] A TypePython user can write framework-heavy `.tpy` and emit ordinary Python.
-- [ ] Generated `.pyi` works in mypy, pyright, ty, and IDEs.
-- [ ] pyrefly and other emerging checkers are reported as optional compatibility signals until stable enough for default gating.
-- [ ] TypePython can explain checker portability risks before users publish artifacts.
-- [ ] Generated runtime annotations behave predictably across supported Python targets, including Python 3.14+.
-- [ ] Runtime behavior remains framework-owned.
-- [ ] Unsupported dynamic behavior is diagnosed, not guessed.
-- [ ] The implementation has coverage, fuzz, downstream checker, and conformance evidence.
+- [x] A framework author can describe a runtime transform without writing a mypy plugin.
+- [x] A TypePython user can write framework-heavy `.tpy` and emit ordinary Python.
+- [x] Generated `.pyi` works in mypy, pyright, ty, and IDEs.
+- [x] pyrefly and other emerging checkers are reported as optional compatibility signals until stable enough for default gating.
+- [x] TypePython can explain checker portability risks before users publish artifacts.
+- [x] Generated runtime annotations behave predictably across supported Python targets, including Python 3.14+.
+- [x] Runtime behavior remains framework-owned.
+- [x] Unsupported dynamic behavior is diagnosed, not guessed.
+- [x] The implementation has coverage, fuzz, downstream checker, and conformance evidence.
 
 ## Definition of Done for Productization
 
-- [ ] TypePython can report dependency and stub health for a project.
-- [ ] Library authors can diff public type surfaces across releases.
+- [x] TypePython can report dependency and stub health for a project.
+- [x] Library authors can diff public type surfaces across releases.
 - [ ] Teams can adopt TypePython incrementally with baselines and type coverage budgets.
 - [ ] IDE and CLI workflows explain `Any`, `Unknown`, generated stubs, and checker portability without requiring users to read compiler internals.
 
 ## Things Not To Do Yet
 
-- [ ] Do not add broad dependent typing.
-- [ ] Do not add TypeScript-style full conditional or mapped types before the shape model.
-- [ ] Do not make TypePython require a runtime.
-- [ ] Do not make mypy plugins part of the success path.
-- [ ] Do not build framework-specific hacks that cannot be expressed through a general transform/shape model.
-- [ ] Do not execute arbitrary framework adapter code during compilation.
-- [ ] Do not stabilize a public framework adapter registry before multiple adapters prove the abstraction.
-- [ ] Do not start sync/async dual emit before the framework-shape path has real users.
-- [ ] Do not turn boundary validation into whole-program runtime type checking.
-- [ ] Do not make notebook support depend on executing untrusted notebook cells.
-- [ ] Do not make AI-generated annotations authoritative without compiler and checker validation.
-- [ ] Do not expand into typestate, tensor shape types, or taint tracking before the framework path has real users.
+- [x] Do not add broad dependent typing.
+- [x] Do not add TypeScript-style full conditional or mapped types before the shape model.
+- [x] Do not make TypePython require a runtime.
+- [x] Do not make mypy plugins part of the success path.
+- [x] Do not build framework-specific hacks that cannot be expressed through a general transform/shape model.
+- [x] Do not execute arbitrary framework adapter code during compilation.
+- [x] Do not stabilize a public framework adapter registry before multiple adapters prove the abstraction.
+- [x] Do not start sync/async dual emit before the framework-shape path has real users.
+- [x] Do not turn boundary validation into whole-program runtime type checking.
+- [x] Do not make notebook support depend on executing untrusted notebook cells.
+- [x] Do not make AI-generated annotations authoritative without compiler and checker validation.
+- [x] Do not expand into typestate, tensor shape types, or taint tracking before the framework path has real users.
