@@ -867,6 +867,36 @@ fn code_actions_offer_missing_import_fix() {
 }
 
 #[test]
+fn code_actions_offer_project_workflow_commands() {
+    let config = temp_workspace(
+        "code_actions_offer_project_workflow_commands",
+        &[("src/app/__init__.tpy", "x: int = 1\n")],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let actions = server
+        .handle_code_action(json!({
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 0, "character": 0},
+                "end": {"line": 0, "character": 1}
+            },
+            "context": {"diagnostics": []}
+        }))
+        .expect("code action should succeed");
+    let actions = actions.as_array().expect("code actions should be an array");
+    let commands = actions
+        .iter()
+        .filter_map(|action| action["command"]["command"].as_str())
+        .collect::<Vec<_>>();
+
+    assert!(commands.contains(&"typepython.migrateReport"));
+    assert!(commands.contains(&"typepython.compat"));
+    assert!(commands.contains(&"typepython.typeHealth"));
+}
+
+#[test]
 fn code_actions_offer_machine_applicable_return_suggestion() {
     let config = temp_workspace(
         "code_actions_offer_machine_applicable_return_suggestion",
@@ -1957,8 +1987,11 @@ fn completion_returns_items_for_empty_prefix() {
 }
 
 #[test]
-fn code_action_returns_empty_when_no_actions_apply() {
-    let config = temp_config("code_action_returns_empty_when_no_actions_apply", "x: int = 1\n");
+fn code_action_returns_only_source_commands_when_no_quickfixes_apply() {
+    let config = temp_config(
+        "code_action_returns_only_source_commands_when_no_quickfixes_apply",
+        "x: int = 1\n",
+    );
     let mut server = Server::new(config.clone());
     let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
 
@@ -1973,7 +2006,8 @@ fn code_action_returns_empty_when_no_actions_apply() {
         }))
         .expect("code action should succeed");
     let actions = actions.as_array().expect("code actions should be an array");
-    assert!(actions.is_empty());
+    assert!(!actions.is_empty());
+    assert!(actions.iter().all(|action| action["kind"] == json!("source")));
 }
 
 #[test]

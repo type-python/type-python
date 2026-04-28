@@ -186,6 +186,26 @@ pub(crate) fn collect_missing_import_code_actions(
     )]
 }
 
+pub(crate) fn collect_project_workflow_code_actions(document: &DocumentState) -> Vec<Value> {
+    vec![
+        command_code_action(
+            String::from("Run `typepython migrate --report`"),
+            String::from("typepython.migrateReport"),
+            &document.uri,
+        ),
+        command_code_action(
+            String::from("Run `typepython compat`"),
+            String::from("typepython.compat"),
+            &document.uri,
+        ),
+        command_code_action(
+            String::from("Run `typepython type-health`"),
+            String::from("typepython.typeHealth"),
+            &document.uri,
+        ),
+    ]
+}
+
 pub(crate) fn code_action(title: String, uri: &str, edits: Vec<LspTextEdit>) -> Value {
     json!({
         "title": title,
@@ -194,6 +214,18 @@ pub(crate) fn code_action(title: String, uri: &str, edits: Vec<LspTextEdit>) -> 
             "changes": {
                 uri: edits
             }
+        }
+    })
+}
+
+pub(crate) fn command_code_action(title: String, command: String, uri: &str) -> Value {
+    json!({
+        "title": title,
+        "kind": "source",
+        "command": {
+            "title": title,
+            "command": command,
+            "arguments": [uri]
         }
     })
 }
@@ -214,4 +246,3 @@ pub(crate) fn import_insertion_range(document: &DocumentState) -> LspRange {
         end: LspPosition { line: insert_line as u32, character: 0 },
     }
 }
-
