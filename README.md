@@ -201,6 +201,7 @@ See [configuration reference](docs/configuration.md).
 | [LSP Integration](docs/lsp.md)                 | Editor setup and capabilities            |
 | [Interoperability](docs/interop.md)            | mypy/pyright compatibility               |
 | [Migration Guide](docs/migration-guide.md)     | Adopting TypePython in existing projects |
+| [Framework Adapters](docs/framework-adapters.md) | Declarative framework transform adapters |
 | [Architecture](docs/architecture.md)           | Crate map, pipeline, dependency graph    |
 | [Contributing](docs/contributing.md)           | Development setup and PR workflow        |
 | [FAQ](docs/faq.md)                             | Frequently asked questions               |

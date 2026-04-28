@@ -684,7 +684,7 @@ The ecosystem needs a constrained adapter model: expressive enough for common ru
   - [x] a Pydantic-like adapter works
   - [x] a non-validation framework adapter works
   - [x] checker portability reports cover adapter output
-- [ ] Add documentation for building first-party and third-party adapters.
+- [x] Add documentation for building first-party and third-party adapters.
 - [ ] Add examples for a toy ORM, task queue, and validation model.
 
 ### Acceptance Criteria
