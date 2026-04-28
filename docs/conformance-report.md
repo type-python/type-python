@@ -73,6 +73,9 @@ Feature claims: 57. Normative rules: 312 (226 mapped, 86 need mapping).
 These commands are the exact post-remediation checks used to validate the current strategic roadmap closure:
 
 - `cargo fmt --check`
+- `cargo test -p typepython-emit write_runtime_outputs_honors_named_validation_boundary_kinds`
+- `cargo test -p typepython-config loads_all_supported_typepython_toml_configuration_fields`
+- `python3 scripts/conformance_report.py --check`
 - `cargo test -p typepython-lsp code_actions_offer`
 - `cargo test -p typepython-emit write_runtime_outputs`
 - `cargo test -p typepython-cli run_pipeline_invalidates_cache_when_runtime_validators_change`

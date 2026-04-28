@@ -109,6 +109,9 @@ TEST_EVIDENCE: dict[str, tuple[str, ...]] = {
 
 VALIDATION_CHECKS: tuple[str, ...] = (
     "cargo fmt --check",
+    "cargo test -p typepython-emit write_runtime_outputs_honors_named_validation_boundary_kinds",
+    "cargo test -p typepython-config loads_all_supported_typepython_toml_configuration_fields",
+    "python3 scripts/conformance_report.py --check",
     "cargo test -p typepython-lsp code_actions_offer",
     "cargo test -p typepython-emit write_runtime_outputs",
     "cargo test -p typepython-cli run_pipeline_invalidates_cache_when_runtime_validators_change",
