@@ -185,26 +185,17 @@ pub fn normalize_source_variadic_type_syntax(text: &str) -> String {
         };
         let operand = text[operand_start..operand_end].trim();
         let bracket_is_type_context = if previous == Some('[') {
-            let mut cursor = index;
-            let mut result = false;
-            while cursor > 0 {
-                cursor -= 1;
-                let Some(character) = text[cursor..].chars().next() else {
-                    break;
-                };
-                if character.is_whitespace() {
-                    continue;
-                }
-                if character != '[' {
-                    break;
-                }
-                let before_bracket = text[..cursor].chars().next_back();
-                result = before_bracket.is_some_and(|character| {
-                    character.is_ascii_alphanumeric() || matches!(character, '_' | ']' | '.')
-                });
-                break;
-            }
-            result
+            previous_significant_char_with_index(text, index)
+                .and_then(|(cursor, character)| {
+                    (character == '[').then(|| {
+                        let before_bracket = text[..cursor].chars().next_back();
+                        before_bracket.is_some_and(|character| {
+                            character.is_ascii_alphanumeric()
+                                || matches!(character, '_' | ']' | '.')
+                        })
+                    })
+                })
+                .unwrap_or(false)
         } else {
             true
         };
@@ -225,6 +216,10 @@ pub fn normalize_source_variadic_type_syntax(text: &str) -> String {
     }
 
     normalized
+}
+
+fn previous_significant_char_with_index(text: &str, end: usize) -> Option<(usize, char)> {
+    text[..end].char_indices().rev().find(|(_, character)| !character.is_whitespace())
 }
 
 const FORMAT_MARKER_PREFIX: &str = "__typepython_format__:";
@@ -466,7 +461,7 @@ pub(super) fn restore_typepython_formatting_line(line: &str, kind: FormattingSyn
 }
 
 pub(super) fn previous_significant_char(text: &str, end: usize) -> Option<char> {
-    text[..end].chars().rev().find(|character| !character.is_whitespace())
+    previous_significant_char_with_index(text, end).map(|(_, character)| character)
 }
 
 pub(super) fn variadic_unpack_operand_bounds(

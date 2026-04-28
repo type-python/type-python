@@ -359,6 +359,12 @@ mod type_expr_tests {
     }
 
     #[test]
+    fn type_expr_parses_variadic_unpack_after_unicode_whitespace() {
+        let parsed = TypeExpr::parse("tuple[\u{a0}*Ts]").expect("parsed variadic tuple");
+        assert_eq!(parsed.render(), "tuple[Unpack[Ts]]");
+    }
+
+    #[test]
     fn parse_callable_annotation_parts_normalizes_params_and_return_type() {
         assert_eq!(
             parse_callable_annotation_parts(
