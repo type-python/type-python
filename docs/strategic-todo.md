@@ -375,7 +375,7 @@ Static correctness is not enough for TypePython's target users. Generated `.py` 
 - [x] Define target-version emit rules for annotations in generated `.py`.
 - [x] Preserve enough runtime metadata for frameworks without forcing eager imports.
 - [x] Add diagnostics for annotations that rely on local-scope names unavailable to runtime consumers.
-- [ ] Add diagnostics for circular imports caused only by runtime annotation evaluation.
+- [x] Add diagnostics for circular imports caused only by runtime annotation evaluation.
 - [x] Add guidance for when to emit string annotations, native annotations, or sidecar metadata.
 - [x] Add test fixtures for Python 3.10 through 3.14 behavior.
 - [x] Add runtime probes for representative Pydantic/FastAPI-like consumers.
