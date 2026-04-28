@@ -341,6 +341,72 @@ fn write_runtime_outputs_delegates_to_selected_validation_adapter() {
 }
 
 #[test]
+fn write_runtime_outputs_delegates_to_msgspec_validation_adapter() {
+    let temp_dir = temp_dir("write_runtime_outputs_delegates_to_msgspec_validation_adapter");
+    let modules = vec![LoweredModule {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(
+            "from dataclasses import dataclass\n\n# tpy:validate-boundary\n@dataclass\nclass UserModel:\n    __tpy_validate_boundary__ = True\n    __tpy_validation_adapter__ = \"msgspec\"\n    name: str\n",
+        ),
+        source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    }];
+    let artifacts = vec![EmitArtifact {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+        stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
+    }];
+    write_runtime_outputs(&artifacts, &modules, true, true, None)
+        .expect("msgspec adapter runtime output should be written");
+    let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
+        .expect("runtime file should be readable");
+    let stub = fs::read_to_string(temp_dir.join("build/app/__init__.pyi"))
+        .expect("stub file should be readable");
+    remove_temp_dir(&temp_dir);
+
+    assert!(runtime.contains("__tpy_validation_adapter__ = \"msgspec\""));
+    assert!(runtime.contains("import msgspec"));
+    assert!(runtime.contains("return msgspec.convert(__data, type=cls)"));
+    assert!(!stub.contains("__tpy_validate__"));
+}
+
+#[test]
+fn write_runtime_outputs_delegates_to_cattrs_validation_adapter() {
+    let temp_dir = temp_dir("write_runtime_outputs_delegates_to_cattrs_validation_adapter");
+    let modules = vec![LoweredModule {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(
+            "from dataclasses import dataclass\n\n# tpy:validate-boundary\n@dataclass\nclass UserModel:\n    __tpy_validate_boundary__ = True\n    __tpy_validation_adapter__ = \"cattrs\"\n    name: str\n",
+        ),
+        source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    }];
+    let artifacts = vec![EmitArtifact {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+        stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
+    }];
+    write_runtime_outputs(&artifacts, &modules, true, true, None)
+        .expect("cattrs adapter runtime output should be written");
+    let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
+        .expect("runtime file should be readable");
+    let stub = fs::read_to_string(temp_dir.join("build/app/__init__.pyi"))
+        .expect("stub file should be readable");
+    remove_temp_dir(&temp_dir);
+
+    assert!(runtime.contains("__tpy_validation_adapter__ = \"cattrs\""));
+    assert!(runtime.contains("import cattrs"));
+    assert!(runtime.contains("return cattrs.structure(__data, cls)"));
+    assert!(!stub.contains("__tpy_validate__"));
+}
+
+#[test]
 fn write_runtime_outputs_skips_runtime_validators_when_disabled() {
     let temp_dir = temp_dir("write_runtime_outputs_skips_runtime_validators_when_disabled");
     let modules = vec![LoweredModule {
