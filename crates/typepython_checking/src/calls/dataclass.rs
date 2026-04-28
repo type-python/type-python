@@ -384,7 +384,12 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
         if field.is_class_var {
             continue;
         }
+        let recognized_field_specifier = field
+            .field_specifier_name
+            .as_ref()
+            .is_some_and(|name| framework_field_specifier_name(name));
         if supports_descriptors
+            && !recognized_field_specifier
             && field
                 .value_metadata
                 .as_ref()
@@ -408,6 +413,11 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
         if supports_required_optional && field.field_specifier_init == Some(false) {
             continue;
         }
+        let required = if supports_required_optional && recognized_field_specifier {
+            !(field.field_specifier_has_default || field.field_specifier_has_default_factory)
+        } else {
+            !field.has_default
+        };
         let synthesized = DataclassTransformFieldShape {
             name: field.name.clone(),
             keyword_name: if supports_aliases {
@@ -417,13 +427,7 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
             },
             annotation: field.rendered_annotation(),
             annotation_expr: field.annotation_expr.clone(),
-            required: if supports_required_optional {
-                !(field.has_default
-                    || field.field_specifier_has_default
-                    || field.field_specifier_has_default_factory)
-            } else {
-                !field.has_default
-            },
+            required,
             kw_only: if supports_required_optional {
                 field.field_specifier_kw_only.unwrap_or(false)
             } else {
@@ -443,6 +447,10 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
         origin_path: Some(class_node.module_path.display().to_string()),
         origin_line: Some(class_site.line),
     })
+}
+
+fn framework_field_specifier_name(name: &str) -> bool {
+    matches!(name.rsplit('.').next().unwrap_or(name), "Field" | "field")
 }
 
 pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(

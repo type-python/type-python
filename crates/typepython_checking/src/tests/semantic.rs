@@ -170,6 +170,54 @@ fn framework_class_shape_provider_emits_synthetic_init_stub() {
 }
 
 #[test]
+fn pydantic_like_base_model_provider_emits_field_alias_and_default_init_stub() {
+    let source_text = concat!(
+        "def framework_transform(*args, **kwargs):\n",
+        "    def wrap(obj):\n",
+        "        return obj\n",
+        "    return wrap\n\n",
+        "def Field(*, default=None, default_factory=None, alias=None):\n",
+        "    return default\n\n",
+        "@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\", \"alias_handling\", \"required_optional_fields\"))\n",
+        "class BaseModel:\n",
+        "    pass\n\n",
+        "class User(BaseModel):\n",
+        "    id: int = Field(alias=\"user_id\")\n",
+        "    name: str = Field(default=\"Ada\")\n",
+        "    tags: object = Field(default_factory=list)\n",
+    );
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let methods = crate::collect_synthetic_method_stubs(&graph);
+    let user_init = methods
+        .iter()
+        .find(|method| method.owner_type_name == "User" && method.name == "__init__")
+        .expect("expected synthetic User.__init__ stub");
+
+    assert_eq!(user_init.params[1].name, "user_id");
+    assert_eq!(user_init.params[1].annotation.as_deref(), Some("int"));
+    assert!(!user_init.params[1].has_default);
+    assert_eq!(user_init.params[2].name, "name");
+    assert_eq!(user_init.params[2].annotation.as_deref(), Some("str"));
+    assert!(user_init.params[2].has_default);
+    assert_eq!(user_init.params[3].name, "tags");
+    assert_eq!(user_init.params[3].annotation.as_deref(), Some("object"));
+    assert!(user_init.params[3].has_default);
+}
+
+#[test]
 fn framework_method_synthesis_provider_emits_synthetic_value_stubs() {
     let source_text = concat!(
         "def framework_transform(*args, **kwargs):\n",
