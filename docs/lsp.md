@@ -49,13 +49,14 @@ Code actions include quick fixes generated from diagnostic suggestions. For exam
 
 The server also exposes source actions for project-level workflows so editor integrations can bind them to tasks or command palettes:
 
-| Title                                | Command ID                   | Intended CLI workflow                  |
+| Title                                | Command ID                   | Intended workflow                      |
 | ------------------------------------ | ---------------------------- | -------------------------------------- |
 | `Run typepython migrate --report`    | `typepython.migrateReport`   | `typepython migrate --project . --report` |
 | `Run typepython compat`              | `typepython.compat`          | `typepython compat --project .`        |
 | `Run typepython type-health`         | `typepython.typeHealth`      | `typepython type-health --project .`   |
+| `Preview emitted .py and .pyi`        | `typepython.previewEmit`     | Return current-file emitted runtime and stub text |
 
-The command argument is the current document URI. Editors should resolve the workspace root from the active LSP session and invoke the corresponding CLI command themselves; TypePython does not execute these workflows inside the language server process.
+The command argument is the current document URI. Project-level workflow commands execute the corresponding TypePython CLI workflow for the active workspace. `typepython.previewEmit` runs in memory and returns a JSON payload with `python` and `stub` fields so editors can show a preview without materializing build artifacts.
 
 ### Formatting
 
