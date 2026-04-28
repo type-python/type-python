@@ -104,6 +104,40 @@ pub struct Config {
     pub typing: TypingConfig,
     /// Watch settings.
     pub watch: WatchConfig,
+    /// Explicit runtime-validation boundary declarations.
+    pub boundaries: Vec<BoundaryConfig>,
+}
+
+/// Runtime-validation boundary kind.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BoundaryKind {
+    HttpRequest,
+    HttpResponse,
+    CliParam,
+    ConfigFile,
+    MessagePayload,
+    PluginEntrypoint,
+    SerializedPayload,
+}
+
+/// Runtime-validation ownership mode for a boundary.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BoundaryValidatorMode {
+    Delegate,
+    Generate,
+}
+
+/// Declarative runtime-validation boundary metadata.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct BoundaryConfig {
+    pub name: String,
+    pub kind: BoundaryKind,
+    pub provider: Option<String>,
+    pub schema: Option<String>,
+    pub validator: BoundaryValidatorMode,
+    pub failure: Option<String>,
 }
 
 /// Project-level settings.
@@ -333,6 +367,18 @@ struct RawConfig {
     emit: Option<RawEmitConfig>,
     typing: Option<RawTypingConfig>,
     watch: Option<RawWatchConfig>,
+    boundaries: Option<Vec<RawBoundaryConfig>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawBoundaryConfig {
+    name: String,
+    kind: BoundaryKind,
+    provider: Option<String>,
+    schema: Option<String>,
+    validator: BoundaryValidatorMode,
+    failure: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -545,6 +591,20 @@ impl Config {
             && let Some(debounce_ms) = watch.debounce_ms
         {
             config.watch.debounce_ms = debounce_ms;
+        }
+
+        if let Some(boundaries) = raw.boundaries {
+            config.boundaries = boundaries
+                .into_iter()
+                .map(|boundary| BoundaryConfig {
+                    name: boundary.name,
+                    kind: boundary.kind,
+                    provider: boundary.provider,
+                    schema: boundary.schema,
+                    validator: boundary.validator,
+                    failure: boundary.failure,
+                })
+                .collect();
         }
 
         config
@@ -1622,7 +1682,19 @@ mod tests {
                     "infer_passthrough = true\n",
                     "conditional_returns = true\n\n",
                     "[watch]\n",
-                    "debounce_ms = 125\n"
+                    "debounce_ms = 125\n\n",
+                    "[[boundaries]]\n",
+                    "name = \"create_user_request\"\n",
+                    "kind = \"http_request\"\n",
+                    "provider = \"toy.fastapi.Body\"\n",
+                    "schema = \"app.UserCreate\"\n",
+                    "validator = \"delegate\"\n",
+                    "failure = \"diagnostic\"\n\n",
+                    "[[boundaries]]\n",
+                    "name = \"config_payload\"\n",
+                    "kind = \"config_file\"\n",
+                    "schema = \"app.Config\"\n",
+                    "validator = \"generate\"\n"
                 ),
                 executable.display()
             ),
@@ -1681,6 +1753,15 @@ mod tests {
         assert!(handle.config.typing.infer_passthrough);
         assert!(handle.config.typing.conditional_returns);
         assert_eq!(handle.config.watch.debounce_ms, 125);
+        assert_eq!(handle.config.boundaries.len(), 2);
+        assert_eq!(handle.config.boundaries[0].name, "create_user_request");
+        assert_eq!(handle.config.boundaries[0].kind, super::BoundaryKind::HttpRequest);
+        assert_eq!(handle.config.boundaries[0].provider.as_deref(), Some("toy.fastapi.Body"));
+        assert_eq!(handle.config.boundaries[0].schema.as_deref(), Some("app.UserCreate"));
+        assert_eq!(handle.config.boundaries[0].validator, super::BoundaryValidatorMode::Delegate);
+        assert_eq!(handle.config.boundaries[0].failure.as_deref(), Some("diagnostic"));
+        assert_eq!(handle.config.boundaries[1].kind, super::BoundaryKind::ConfigFile);
+        assert_eq!(handle.config.boundaries[1].validator, super::BoundaryValidatorMode::Generate);
     }
 
     #[test]
