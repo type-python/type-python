@@ -276,7 +276,7 @@ Make TypePython credible as a compiler that users can place in a release pipelin
 - [x] Fuzz TypedDict/shape transform composition.
 - [x] Add corpus seeds from examples and test fixtures.
 - [x] Run fuzz smoke in CI with short duration.
-- [ ] Run long fuzz in scheduled CI.
+- [x] Run long fuzz in scheduled CI.
 
 ### Differential and External Checker TODO
 

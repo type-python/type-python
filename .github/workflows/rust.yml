@@ -5,6 +5,9 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
 
 jobs:
   workspace-fast:
@@ -119,6 +122,35 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-smoke-${{ matrix.fuzz-target }}-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+
+  fuzz-long:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzz-target: [parser, type_expr, lowering_stub]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        run: rustup toolchain install nightly --profile minimal
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Run scheduled long fuzz target
+        run: cargo +nightly fuzz run ${{ matrix.fuzz-target }} -- -max_total_time=300
+
+      - name: Upload fuzz artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-long-${{ matrix.fuzz-target }}-artifacts
           path: fuzz/artifacts/
           if-no-files-found: ignore
 
