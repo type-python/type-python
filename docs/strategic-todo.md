@@ -556,17 +556,17 @@ Reduce the cost of adopting TypePython in existing projects and increase confide
 
 ### Publication TODO
 
-- [ ] Extend `typepython verify` with checker presets.
-- [ ] Validate `py.typed`, `.pyi`, wheel, and sdist consistency.
-- [ ] Add richer public surface drift reports.
-- [ ] Add optional runtime import probes with clear trust model.
-- [ ] Add output that explains why a package is or is not PEP 561 ready.
+- [x] Extend `typepython verify` with checker presets.
+- [x] Validate `py.typed`, `.pyi`, wheel, and sdist consistency.
+- [x] Add richer public surface drift reports.
+- [x] Add optional runtime import probes with clear trust model.
+- [x] Add output that explains why a package is or is not PEP 561 ready.
 
 ### Acceptance Criteria
 
 - [x] A partially typed project can adopt TypePython without fixing every diagnostic on day one.
 - [x] CI can fail only on new errors.
-- [ ] Library authors can run one command before publishing to validate generated artifacts.
+- [x] Library authors can run one command before publishing to validate generated artifacts.
 
 ## P1: IDE-First Migration and Refactor UX
 
