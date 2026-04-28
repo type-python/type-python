@@ -218,6 +218,37 @@ fn pydantic_like_base_model_provider_emits_field_alias_and_default_init_stub() {
 }
 
 #[test]
+fn check_reports_pydantic_like_dynamic_field_alias() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "def framework_transform(*args, **kwargs):\n",
+            "    def wrap(obj):\n",
+            "        return obj\n",
+            "    return wrap\n\n",
+            "def Field(*, default=None, default_factory=None, alias=None):\n",
+            "    return default\n\n",
+            "ALIAS: str = \"user_id\"\n\n",
+            "@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\", \"alias_handling\", \"required_optional_fields\"))\n",
+            "class BaseModel:\n",
+            "    pass\n\n",
+            "class User(BaseModel):\n",
+            "    id: int = Field(alias=ALIAS)\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4021"), "{rendered}");
+    assert!(rendered.contains("dynamic alias"), "{rendered}");
+    assert!(rendered.contains("id"), "{rendered}");
+}
+
+#[test]
 fn framework_method_synthesis_provider_emits_synthetic_value_stubs() {
     let source_text = concat!(
         "def framework_transform(*args, **kwargs):\n",

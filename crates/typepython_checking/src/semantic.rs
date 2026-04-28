@@ -88,6 +88,46 @@ pub(super) fn unsupported_framework_transform_diagnostics(
         .collect()
 }
 
+pub(super) fn dynamic_framework_alias_diagnostics(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    strict: bool,
+) -> Vec<Diagnostic> {
+    if !strict || node.module_kind != SourceKind::TypePython {
+        return Vec::new();
+    }
+
+    context
+        .load_dataclass_transform_module_info(node)
+        .unwrap_or_default()
+        .classes
+        .into_iter()
+        .flat_map(|class_site| {
+            class_site
+                .fields
+                .into_iter()
+                .filter(|field| field.field_specifier_has_dynamic_alias)
+                .map(move |field| {
+                    Diagnostic::error(
+                        "TPY4021",
+                        format!(
+                            "field `{}` on framework-transformed class `{}` uses a dynamic alias that prevents safe constructor typing",
+                            field.name, class_site.name
+                        ),
+                    )
+                    .with_span(Span::new(
+                        node.module_path.display().to_string(),
+                        field.line,
+                        1,
+                        field.line,
+                        1,
+                    ))
+                    .with_note("use a string-literal alias or omit the alias so TypePython can synthesize a checker-portable constructor")
+                })
+        })
+        .collect()
+}
+
 fn framework_transform_provider_has_supported_semantics(
     provider: &typepython_syntax::FrameworkTransformProviderSite,
 ) -> bool {

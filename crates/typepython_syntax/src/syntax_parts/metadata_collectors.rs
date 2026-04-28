@@ -979,6 +979,9 @@ pub(super) fn extract_dataclass_transform_field(
         field_specifier_init: field_specifier.as_ref().and_then(|site| site.init),
         field_specifier_kw_only: field_specifier.as_ref().and_then(|site| site.kw_only),
         field_specifier_alias: field_specifier.as_ref().and_then(|site| site.alias.clone()),
+        field_specifier_has_dynamic_alias: field_specifier
+            .as_ref()
+            .is_some_and(|site| site.has_dynamic_alias),
         line: offset_to_line_column(source, assign.range.start().to_usize()).0,
     })
 }
@@ -991,6 +994,7 @@ pub(super) struct FieldSpecifierSite {
     init: Option<bool>,
     kw_only: Option<bool>,
     alias: Option<String>,
+    has_dynamic_alias: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1016,6 +1020,7 @@ pub(super) fn extract_field_specifier_site(
         init: None,
         kw_only: None,
         alias: None,
+        has_dynamic_alias: false,
     };
     for keyword in &call.arguments.keywords {
         let Some(name) = keyword.arg.as_ref().map(|name| name.as_str()) else {
@@ -1026,7 +1031,10 @@ pub(super) fn extract_field_specifier_site(
             "default_factory" => result.has_default_factory = true,
             "init" => result.init = expr_static_bool(&keyword.value),
             "kw_only" => result.kw_only = expr_static_bool(&keyword.value),
-            "alias" => result.alias = extract_string_literal_value(source, &keyword.value),
+            "alias" => {
+                result.alias = extract_string_literal_value(source, &keyword.value);
+                result.has_dynamic_alias = result.alias.is_none();
+            }
             _ => {}
         }
     }

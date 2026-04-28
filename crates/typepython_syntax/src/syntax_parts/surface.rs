@@ -1012,6 +1012,7 @@ pub struct DataclassTransformFieldSite {
     pub field_specifier_init: Option<bool>,
     pub field_specifier_kw_only: Option<bool>,
     pub field_specifier_alias: Option<String>,
+    pub field_specifier_has_dynamic_alias: bool,
     pub line: usize,
 }
 
