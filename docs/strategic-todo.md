@@ -107,15 +107,15 @@ TypePython can generate the final `.pyi` surface itself, so the output can be co
 
 ### Compiler TODO
 
-- [ ] Extend syntax metadata collection for transform declarations and transform applications.
-- [ ] Extend binding summaries to include transform provider metadata.
-- [ ] Extend checker semantic facts to resolve transform providers across imports.
-- [ ] Extend checker class-shape resolution beyond `dataclass_transform`.
-- [ ] Extend checker callable resolution for non-callable decorator replacement.
-- [ ] Extend stub generation to emit the transformed public surface rather than the raw source declaration.
+- [x] Extend syntax metadata collection for transform declarations and transform applications.
+- [x] Extend binding summaries to include transform provider metadata.
+- [x] Extend checker semantic facts to resolve transform providers across imports.
+- [x] Extend checker class-shape resolution beyond `dataclass_transform`.
+- [x] Extend checker callable resolution for non-callable decorator replacement.
+- [x] Extend stub generation to emit the transformed public surface rather than the raw source declaration.
 - [ ] Extend source maps so diagnostics point to the original framework declaration site.
-- [ ] Extend LSP hover/signature help to show transformed constructors and transformed callables.
-- [ ] Add `verify` checks that transformed `.pyi` surfaces remain compatible with emitted runtime names.
+- [x] Extend LSP hover/signature help to show transformed constructors and transformed callables.
+- [x] Add `verify` checks that transformed `.pyi` surfaces remain compatible with emitted runtime names.
 
 ### First Concrete Feature: Function-to-Object Decorators
 
@@ -127,13 +127,13 @@ decorator def celery_task[**P, R](fn: Callable[P, R]) -> Task[P, R]: ...
 
 Tasks:
 
-- [ ] Support a decorator transform whose static result is not `Callable`.
-- [ ] Preserve original function parameters through `ParamSpec`.
-- [ ] Preserve return type in task methods such as `delay()` and `apply_async()`.
-- [ ] Emit `.py` preserving the original framework decorator.
-- [ ] Emit `.pyi` exposing the transformed object type.
-- [ ] Add tests for plain functions, methods, overloads, async functions, and generic functions.
-- [ ] Add downstream checker fixtures for mypy, pyright, and ty.
+- [x] Support a decorator transform whose static result is not `Callable`.
+- [x] Preserve original function parameters through `ParamSpec`.
+- [x] Preserve return type in task methods such as `delay()` and `apply_async()`.
+- [x] Emit `.py` preserving the original framework decorator.
+- [x] Emit `.pyi` exposing the transformed object type.
+- [x] Add tests for plain functions, methods, overloads, async functions, and generic functions.
+- [x] Add downstream checker fixtures for mypy, pyright, and ty.
 
 ### First Concrete Feature: Class Shape Rewriters
 
@@ -148,21 +148,21 @@ class User:
 
 Tasks:
 
-- [ ] Generalize existing dataclass-transform shape collection.
-- [ ] Represent generated `__init__` parameters as explicit synthetic signatures.
+- [x] Generalize existing dataclass-transform shape collection.
+- [x] Represent generated `__init__` parameters as explicit synthetic signatures.
 - [ ] Support field aliases and keyword-only fields.
 - [ ] Support fields excluded from `__init__`.
 - [ ] Support frozen/readonly field diagnostics.
 - [ ] Support generated class attributes such as managers, metadata, and validators.
-- [ ] Ensure generated `.pyi` is checker-neutral.
+- [x] Ensure generated `.pyi` is checker-neutral.
 
 ### Acceptance Criteria
 
-- [ ] A small framework fixture can define a transform once and type-check generated stubs with mypy, pyright, and ty.
-- [ ] A decorated function can become a typed non-callable object in `.pyi`.
-- [ ] A transformed class can synthesize a constructor and generated members.
-- [ ] Unsupported dynamic transform behavior produces deterministic diagnostics.
-- [ ] No external checker plugin is required for generated artifacts.
+- [x] A small framework fixture can define a transform once and type-check generated stubs with mypy, pyright, and ty.
+- [x] A decorated function can become a typed non-callable object in `.pyi`.
+- [x] A transformed class can synthesize a constructor and generated members.
+- [x] Unsupported dynamic transform behavior produces deterministic diagnostics.
+- [x] No external checker plugin is required for generated artifacts.
 
 ## P0: First-Class Record and Shape Model
 
@@ -178,24 +178,24 @@ The spec already limits `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `R
 
 ### Shape Model TODO
 
-- [ ] Define `Shape` as an internal semantic object.
-- [ ] Define the phase-1 scope:
-  - [ ] `TypedDict`
+- [x] Define `Shape` as an internal semantic object.
+- [x] Define the phase-1 scope:
+  - [x] `TypedDict`
   - [ ] TypePython `data class`
   - [ ] standard `@dataclass`
-  - [ ] `dataclass_transform`
-  - [ ] transformed framework classes
-- [ ] Explicitly defer public transforms over arbitrary classes, protocols, and interfaces until assignability rules are proven.
-- [ ] Include field metadata:
-  - [ ] field name
+  - [x] `dataclass_transform`
+  - [x] transformed framework classes
+- [x] Explicitly defer public transforms over arbitrary classes, protocols, and interfaces until assignability rules are proven.
+- [x] Include field metadata:
+  - [x] field name
   - [ ] public alias
-  - [ ] type
-  - [ ] required/optional
-  - [ ] readonly/mutable
-  - [ ] constructor participation
-  - [ ] default/default factory
-  - [ ] descriptor behavior
-  - [ ] source declaration span
+  - [x] type
+  - [x] required/optional
+  - [x] readonly/mutable
+  - [x] constructor participation
+  - [x] default/default factory
+  - [x] descriptor behavior
+  - [x] source declaration span
 - [ ] Define phase-1 shape source behavior for:
   - [ ] `TypedDict`
   - [ ] `data class`
@@ -221,9 +221,9 @@ The spec already limits `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `R
 
 ### Implementation TODO
 
-- [ ] Add semantic shape structs in `typepython_checking`.
-- [ ] Move current `TypedDictShape` behavior toward shared shape primitives.
-- [ ] Keep existing TypedDict diagnostics stable during refactor.
+- [x] Add semantic shape structs in `typepython_checking`.
+- [x] Move current `TypedDictShape` behavior toward shared shape primitives.
+- [x] Keep existing TypedDict diagnostics stable during refactor.
 - [ ] Extend lowering transform expansion to consume shared shapes.
 - [ ] Emit stable names for generated shape aliases.
 - [ ] Add hover rendering for projected shapes.
@@ -231,10 +231,10 @@ The spec already limits `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `R
 
 ### Acceptance Criteria
 
-- [ ] Existing TypedDict transform tests continue to pass.
+- [x] Existing TypedDict transform tests continue to pass.
 - [ ] `Pick` and `Partial` can operate on at least one non-TypedDict source behind an experimental flag.
-- [ ] Transformed class shapes can be reused by framework integrations.
-- [ ] Generated stubs remain standard Python typing.
+- [x] Transformed class shapes can be reused by framework integrations.
+- [x] Generated stubs remain standard Python typing.
 - [ ] No public "arbitrary type transform" guarantee is made before assignability semantics are stable.
 
 ## P0: Trustworthiness and Test Infrastructure
