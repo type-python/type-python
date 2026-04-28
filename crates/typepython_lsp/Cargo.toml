@@ -21,6 +21,7 @@ typepython-diagnostics = { path = "../typepython_diagnostics" }
 typepython-emit = { path = "../typepython_emit" }
 typepython-graph = { path = "../typepython_graph" }
 typepython-incremental = { path = "../typepython_incremental" }
+typepython-lowering = { path = "../typepython_lowering" }
 typepython-project = { path = "../typepython_project" }
 typepython-syntax = { path = "../typepython_syntax" }
 url.workspace = true

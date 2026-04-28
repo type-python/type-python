@@ -1917,6 +1917,7 @@ dependencies = [
  "typepython-emit",
  "typepython-graph",
  "typepython-incremental",
+ "typepython-lowering",
  "typepython-project",
  "typepython-syntax",
  "url",
