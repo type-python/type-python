@@ -70,6 +70,21 @@
       }
     },
     {
+      "name": "fastapi-like-package",
+      "targets": ["3.12"],
+      "expected_stub_fragments": {
+        "3.12": [
+          "class UserCreate(BaseModel):",
+          "class UserOut(BaseModel):",
+          "def __init__(self, name: str) -> None: ...",
+          "def __init__(self, id: int, name: str) -> None: ...",
+          "app: FastAPI",
+          "@app.post(\"/users\", response_model=UserOut)",
+          "def create_user(payload: UserCreate, current_user: CurrentUser = Depends(get_current_user)) -> UserOut: ..."
+        ]
+      }
+    },
+    {
       "name": "negative-consumer-package",
       "targets": ["3.10"],
       "expect_checker_failure": true

@@ -1,0 +1,48 @@
+from typing import Callable, cast
+
+
+class FastAPI:
+    def post(self, path: str, *, response_model: object | None = None) -> Callable[[Callable[..., object]], Callable[..., object]]:
+        def decorate(fn: Callable[..., object]) -> Callable[..., object]:
+            return fn
+        return decorate
+
+
+def Depends[T](dependency: Callable[[], T]) -> T:
+    return dependency()
+
+
+def framework_transform(*args, **kwargs):
+    def wrap(obj):
+        return obj
+    return wrap
+
+
+@framework_transform(kind="base_class", capabilities=("field_collection", "constructor_generation", "method_synthesis"))
+class BaseModel:
+    pass
+
+
+class UserCreate(BaseModel):
+    name: str
+
+
+class UserOut(BaseModel):
+    id: int
+    name: str
+
+
+class CurrentUser(BaseModel):
+    id: int
+
+
+def get_current_user() -> CurrentUser:
+    return cast(CurrentUser, object())
+
+
+app: FastAPI = FastAPI()
+
+
+@app.post("/users", response_model=UserOut)
+def create_user(payload: UserCreate, current_user: CurrentUser = Depends(get_current_user)) -> UserOut:
+    return cast(UserOut, object())
