@@ -355,7 +355,7 @@ pub(crate) fn collect_portable_typing_rewrite_code_actions(
     document: &DocumentState,
     range: LspRange,
 ) -> Vec<Value> {
-    portable_typing_rewrite_sites(&document.text)
+    let mut actions = portable_typing_rewrite_sites(&document.text)
         .into_iter()
         .filter(|site| range_intersects(range, site.range))
         .map(|site| {
@@ -368,7 +368,113 @@ pub(crate) fn collect_portable_typing_rewrite_code_actions(
                 vec![LspTextEdit { range: site.range, new_text: site.replacement }],
             )
         })
-        .collect()
+        .collect::<Vec<_>>();
+    actions.extend(collect_typing_extensions_import_actions(document, range));
+    actions.extend(collect_overload_normalization_actions(document, range));
+    actions.extend(collect_typeddict_requiredness_actions(document, range));
+    actions
+}
+
+fn collect_typing_extensions_import_actions(
+    document: &DocumentState,
+    range: LspRange,
+) -> Vec<Value> {
+    let line = range.start.line as usize + 1;
+    let Some(line_text) = document.text.lines().nth(line.saturating_sub(1)) else {
+        return Vec::new();
+    };
+    if !line_text.trim_start().starts_with("from typing import ") {
+        return Vec::new();
+    }
+    let portable_names = ["NotRequired", "Required", "ReadOnly", "TypeIs", "TypeVarTuple", "Unpack"];
+    if !portable_names.iter().any(|name| line_text.contains(name)) {
+        return Vec::new();
+    }
+    vec![code_action(
+        String::from("Select target-compatible `typing_extensions` import"),
+        &document.uri,
+        vec![LspTextEdit {
+            range: LspRange {
+                start: LspPosition { line: line.saturating_sub(1) as u32, character: 0 },
+                end: LspPosition {
+                    line: line.saturating_sub(1) as u32,
+                    character: line_text.chars().count() as u32,
+                },
+            },
+            new_text: line_text.replacen("from typing import ", "from typing_extensions import ", 1),
+        }],
+    )]
+}
+
+fn collect_overload_normalization_actions(document: &DocumentState, range: LspRange) -> Vec<Value> {
+    let line = range.start.line as usize + 1;
+    let Some(line_text) = document.text.lines().nth(line.saturating_sub(1)) else {
+        return Vec::new();
+    };
+    let Some(prefix_index) = line_text.find("overload def ") else {
+        return Vec::new();
+    };
+    let indent = line_text.chars().take_while(|ch| ch.is_whitespace()).collect::<String>();
+    let replacement = format!(
+        "{indent}@overload\n{}def {}",
+        &line_text[..prefix_index],
+        &line_text[prefix_index + "overload def ".len()..]
+    );
+    vec![code_action(
+        String::from("Normalize overload to standard `@overload` form"),
+        &document.uri,
+        vec![LspTextEdit {
+            range: LspRange {
+                start: LspPosition { line: line.saturating_sub(1) as u32, character: 0 },
+                end: LspPosition {
+                    line: line.saturating_sub(1) as u32,
+                    character: line_text.chars().count() as u32,
+                },
+            },
+            new_text: replacement,
+        }],
+    )]
+}
+
+fn collect_typeddict_requiredness_actions(
+    document: &DocumentState,
+    range: LspRange,
+) -> Vec<Value> {
+    let line = range.start.line as usize + 1;
+    let Some(line_text) = document.text.lines().nth(line.saturating_sub(1)) else {
+        return Vec::new();
+    };
+    if !line_text.contains(':') || line_text.contains("NotRequired[") || line_text.contains("Required[") {
+        return Vec::new();
+    }
+    let inside_typeddict = document.syntax.statements.iter().any(|statement| {
+        let SyntaxStatement::ClassDef(class) = statement else {
+            return false;
+        };
+        class.line < line
+            && class.bases.iter().any(|base| base.ends_with("TypedDict"))
+            && class.members.iter().any(|member| member.line == line)
+    });
+    if !inside_typeddict {
+        return Vec::new();
+    }
+    let Some((left, right)) = line_text.split_once(':') else {
+        return Vec::new();
+    };
+    vec![code_action(
+        String::from("Mark TypedDict key as `NotRequired`"),
+        &document.uri,
+        vec![LspTextEdit {
+            range: LspRange {
+                start: LspPosition { line: line.saturating_sub(1) as u32, character: 0 },
+                end: LspPosition {
+                    line: line.saturating_sub(1) as u32,
+                    character: line_text.chars().count() as u32,
+                },
+            },
+            new_text: format!("{}: NotRequired[{}]", left, right.trim()),
+        }],
+    )]
 }
 
 pub(crate) fn collect_project_workflow_code_actions(document: &DocumentState) -> Vec<Value> {

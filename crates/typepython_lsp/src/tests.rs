@@ -1095,6 +1095,65 @@ fn code_actions_offer_checker_portable_typing_list_rewrite() {
 }
 
 #[test]
+fn code_actions_offer_remaining_portable_typing_rewrites() {
+    let config = temp_workspace(
+        "code_actions_offer_remaining_portable_typing_rewrites",
+        &[(
+            "src/app/__init__.tpy",
+            "from typing import NotRequired, TypedDict, overload\n\nclass User(TypedDict):\n    name: str\n\noverload def load(value: int) -> int:\n    ...\n",
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let import_actions = server
+        .handle_code_action(json!({
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 0, "character": 19},
+                "end": {"line": 0, "character": 30}
+            },
+            "context": {"diagnostics": []}
+        }))
+        .expect("typing_extensions import action should succeed");
+    assert!(import_actions.as_array().unwrap().iter().any(|action| {
+        action["title"] == json!("Select target-compatible `typing_extensions` import")
+    }));
+
+    let typed_dict_actions = server
+        .handle_code_action(json!({
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 3, "character": 4},
+                "end": {"line": 3, "character": 8}
+            },
+            "context": {"diagnostics": []}
+        }))
+        .expect("TypedDict requiredness action should succeed");
+    assert!(
+        typed_dict_actions
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|action| { action["title"] == json!("Mark TypedDict key as `NotRequired`") })
+    );
+
+    let overload_actions = server
+        .handle_code_action(json!({
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 5, "character": 0},
+                "end": {"line": 5, "character": 8}
+            },
+            "context": {"diagnostics": []}
+        }))
+        .expect("overload normalization action should succeed");
+    assert!(overload_actions.as_array().unwrap().iter().any(|action| {
+        action["title"] == json!("Normalize overload to standard `@overload` form")
+    }));
+}
+
+#[test]
 fn code_actions_offer_project_workflow_commands() {
     let config = temp_workspace(
         "code_actions_offer_project_workflow_commands",
