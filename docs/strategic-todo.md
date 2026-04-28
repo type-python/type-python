@@ -77,33 +77,33 @@ TypePython can generate the final `.pyi` surface itself, so the output can be co
 
 ### Design TODO
 
-- [ ] Write an RFC for framework transform declarations.
-- [ ] Define terminology:
-  - [ ] runtime declaration
-  - [ ] static shape
-  - [ ] transform provider
-  - [ ] transform target
-  - [ ] generated member
-  - [ ] generated constructor
-  - [ ] replacement callable/object
-  - [ ] emitted stub authority
-- [ ] Decide syntax for declaring transform providers.
-- [ ] Decide whether transform declarations live in `.tpy`, sidecar `.tpyi`, config, or all three.
-- [ ] Define a minimal transform metadata model that can represent:
-  - [ ] field collection
-  - [ ] constructor generation
-  - [ ] alias handling
-  - [ ] required vs optional fields
-  - [ ] readonly/frozen fields
-  - [ ] descriptor-backed attributes
-  - [ ] method synthesis
-  - [ ] function-to-object replacement
-  - [ ] generic preservation via `ParamSpec`, `TypeVar`, and `TypeVarTuple`
-- [ ] Specify fallback behavior when transform metadata depends on runtime-only values.
-- [ ] Define strict-mode diagnostics for unsupported transform behavior.
-- [ ] Define non-strict degradation behavior.
-- [ ] Add a spec section after the existing decorator/dataclass-transform rules.
-- [ ] Update `docs/spec/implementation-notes-v1.md` Appendix J after the design lands.
+- [x] Write an RFC for framework transform declarations.
+- [x] Define terminology:
+  - [x] runtime declaration
+  - [x] static shape
+  - [x] transform provider
+  - [x] transform target
+  - [x] generated member
+  - [x] generated constructor
+  - [x] replacement callable/object
+  - [x] emitted stub authority
+- [x] Decide syntax for declaring transform providers.
+- [x] Decide whether transform declarations live in `.tpy`, sidecar `.tpyi`, config, or all three.
+- [x] Define a minimal transform metadata model that can represent:
+  - [x] field collection
+  - [x] constructor generation
+  - [x] alias handling
+  - [x] required vs optional fields
+  - [x] readonly/frozen fields
+  - [x] descriptor-backed attributes
+  - [x] method synthesis
+  - [x] function-to-object replacement
+  - [x] generic preservation via `ParamSpec`, `TypeVar`, and `TypeVarTuple`
+- [x] Specify fallback behavior when transform metadata depends on runtime-only values.
+- [x] Define strict-mode diagnostics for unsupported transform behavior.
+- [x] Define non-strict degradation behavior.
+- [x] Add a spec section after the existing decorator/dataclass-transform rules.
+- [x] Update `docs/spec/implementation-notes-v1.md` Appendix J after the design lands.
 
 ### Compiler TODO
 
