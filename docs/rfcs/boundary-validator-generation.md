@@ -16,7 +16,9 @@ generated validators are part of public `.pyi` surfaces.
 ## Boundary annotations
 
 The prototype boundary model uses declarative metadata rather than executing validators during
-compilation. A future source form or adapter manifest may identify a boundary with these dimensions:
+compilation. Emitted classes may mark a selected boundary with `__tpy_validation_boundary__` or a
+`# tpy:validate-boundary:<kind>` comment, and adapter manifests may identify a boundary with these
+dimensions:
 
 | Boundary kind | Example input | Preferred runtime owner |
 | --- | --- | --- |

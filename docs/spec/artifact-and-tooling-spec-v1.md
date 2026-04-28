@@ -157,7 +157,7 @@ If `python_executable` is configured and its resolved Python major/minor version
 | `write_py_typed`     | bool | Emit `py.typed` marker for typed packages                       |
 | `preserve_comments`  | bool | Reserved toggle for future comment-stripping control; current implementations always preserve comments when available |
 | `no_emit_on_error`   | bool | Block best-effort output after semantic/public-surface errors; discovery/parse/lowering remain hard blockers |
-| `runtime_validators` | bool | Experimental: emit `validate` classmethod on `data class` types |
+| `runtime_validators` | bool | Experimental: emit `__tpy_validate__` classmethod on explicitly selected data-class trust boundaries |
 | `emit_style`         | string | Lowering strategy: `compat` preserves broad legacy compatibility, `native` preserves target-native typing syntax when supported |
 
 **`[typing]` fields:**
@@ -682,11 +682,12 @@ These requirements are about publishability and downstream-tool consumption, not
 
 #### 13.6.5 Runtime Validator Emission
 
-Runtime validator emission is Experimental v1. When `emit.runtime_validators = true`, the emitter MUST generate a `validate` classmethod on each `data class` type in the emitted `.py`:
+Runtime validator emission is Experimental v1. When `emit.runtime_validators = true`, the emitter MUST generate a `__tpy_validate__` classmethod only for explicitly selected data-class trust boundaries in the emitted `.py`. Selected boundaries may be marked with `# tpy:validate-boundary`, `# tpy:validate-boundary:<kind>`, `__tpy_validate_boundary__ = True`, or `__tpy_validation_boundary__ = "<kind>"`. Supported boundary kinds are `http_request`, `http_response`, `cli_param`, `config_file`, `message_payload`, `plugin_entrypoint`, and `serialized_payload`.
 
 ```python
 # Input (.tpy)
 data class UserInput:
+    __tpy_validation_boundary__ = "http_request"
     name: str
     age: int
     email: str | None = None
@@ -696,9 +697,12 @@ from dataclasses import dataclass
 
 @dataclass
 class UserInput:
+    __tpy_validation_boundary__ = "http_request"
     name: str
     age: int
     email: str | None = None
+
+    __tpy_validation_adapter__ = "builtin"
 
     @classmethod
     def __tpy_validate__(cls, __data: dict) -> "UserInput":
@@ -709,10 +713,11 @@ class UserInput:
 **Validator rules:**
 
 - The generated validator MUST check each field's runtime type using `isinstance` or equivalent checks for the supported type forms.
+- Boundary metadata MAY also be declared in project configuration with `[[boundaries]]` entries containing `name`, `kind`, `schema`, `validator = "delegate" | "generate"`, and optional provider/failure metadata; this manifest records ownership for framework adapters and review tooling.
 - Supported runtime-checkable types in Experimental v1: `int`, `float`, `str`, `bytes`, `bool`, `None`, `list`, `dict`, `set`, `tuple`, and nominal class types. For generic types (`list[int]`), the container type is checked but element types MAY be checked only shallowly (first element) or skipped with a documented limitation.
 - Union types are checked by attempting each branch.
 - `TypedDict` fields are checked key-by-key.
-- Types that cannot be runtime-checked (e.g., `Protocol`, unbounded `TypeVar`, `Callable`) MUST be skipped with no runtime check for that field rather than generating incorrect code.
+- Types that cannot be faithfully runtime-checked by the selected built-in adapter (e.g., `Protocol`, unbounded `TypeVar`, `Callable`) MUST produce `TPY5003` rather than generating incorrect code. Delegating adapters (`pydantic`, `msgspec`, `cattrs`) MUST call the owning library/framework entrypoint instead of emitting TypePython-owned field checks.
 - The validator method name is `__tpy_validate__` to avoid collision with user-defined methods. An implementation MAY additionally generate a `validate` alias.
 - The validator MUST raise `TypeError` or `ValueError` with a message identifying the failing field, expected type, and actual type.
 - Validator generation is purely additive — it MUST NOT change the behavior of the emitted code when the validator is not called.

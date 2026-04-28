@@ -132,13 +132,28 @@ preserve_comments = true
 # Default: true
 no_emit_on_error = true
 
-# [Experimental] Emit runtime __tpy_validate__() methods on data classes.
+# [Experimental] Emit runtime __tpy_validate__() methods on explicitly selected
+# data-class trust boundaries. Boundaries can be selected with
+# # tpy:validate-boundary[:kind], __tpy_validate_boundary__ = True, or
+# __tpy_validation_boundary__ = "http_request" / "config_file" / related kinds.
 # Validators are emitted only when this flag is true, record the selected
 # adapter marker in generated code, and stay out of public .pyi files.
 # Unsupported annotations fail with TPY5003 instead of silently weakening the
 # boundary check.
 # Default: false
 runtime_validators = false
+
+# Optional boundary manifest entries let adapters and review tooling record who
+# owns validation for framework edges. Supported kind values are http_request,
+# http_response, cli_param, config_file, message_payload, plugin_entrypoint, and
+# serialized_payload. Supported validator values are delegate and generate.
+[[boundaries]]
+name = "create_user_request"
+kind = "http_request"
+provider = "toy.fastapi.Body"
+schema = "app.UserCreate"
+validator = "delegate"
+failure = "diagnostic"
 
 # Lowering strategy for typing syntax.
 # "compat" preserves broad checker/runtime compatibility for older targets.

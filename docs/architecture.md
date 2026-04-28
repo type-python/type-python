@@ -310,7 +310,7 @@ Plans output artifacts and generates type stubs.
 **Features:**
 
 - Stub generation with value/callable overrides and synthetic methods
-- Runtime validator injection for data classes (experimental)
+- Runtime validator injection for selected data-class trust boundaries (experimental)
 - `py.typed` marker file writing for PEP 561 compliance
 - Optional `.pyc` bytecode compilation
 
