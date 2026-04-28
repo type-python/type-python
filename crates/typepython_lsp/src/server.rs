@@ -133,7 +133,8 @@ impl Server {
                                 "typepython.migrateReport",
                                 "typepython.compat",
                                 "typepython.typeHealth",
-                                "typepython.previewEmit"
+                                "typepython.previewEmit",
+                                "typepython.findTypeSource"
                             ]
                         },
                         "completionProvider": {
@@ -385,6 +386,10 @@ impl Server {
             let uri = command_uri_argument(&params, command)?;
             return self.analysis.preview_emit(&uri);
         }
+        if command == "typepython.findTypeSource" {
+            let (uri, position) = command_position_arguments(&params, command)?;
+            return self.analysis.find_type_source(&uri, position);
+        }
         let args = workflow_command_args(command, &self.analysis.config.config_dir)?;
         let executable = env::current_exe().unwrap_or_else(|_| PathBuf::from("typepython"));
         let output = ProcessCommand::new(&executable)
@@ -440,6 +445,34 @@ pub(super) fn workflow_command_args(
             "workspace/executeCommand received unsupported TypePython command `{command}`"
         ))),
     }
+}
+
+pub(super) fn command_position_arguments(
+    params: &Value,
+    command: &str,
+) -> Result<(String, LspPosition), LspError> {
+    let arguments = params.get("arguments").and_then(Value::as_array).ok_or_else(|| {
+        LspError::invalid_params(format!(
+            "workspace/executeCommand `{command}` requires arguments [uri, line, character]"
+        ))
+    })?;
+    let uri = arguments.first().and_then(Value::as_str).ok_or_else(|| {
+        LspError::invalid_params(format!(
+            "workspace/executeCommand `{command}` requires the current document URI as its first argument"
+        ))
+    })?;
+    let line = arguments.get(1).and_then(Value::as_u64).ok_or_else(|| {
+        LspError::invalid_params(format!(
+            "workspace/executeCommand `{command}` requires a zero-based line as its second argument"
+        ))
+    })?;
+    let character = arguments.get(2).and_then(Value::as_u64).ok_or_else(|| {
+        LspError::invalid_params(format!(
+            "workspace/executeCommand `{command}` requires a zero-based character as its third argument"
+        ))
+    })?;
+
+    Ok((uri.to_owned(), LspPosition { line: line as u32, character: character as u32 }))
 }
 
 pub(super) fn command_uri_argument(params: &Value, command: &str) -> Result<String, LspError> {

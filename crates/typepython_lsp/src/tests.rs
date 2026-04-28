@@ -37,7 +37,8 @@ fn handle_initialize_returns_required_capabilities() {
             "typepython.migrateReport",
             "typepython.compat",
             "typepython.typeHealth",
-            "typepython.previewEmit"
+            "typepython.previewEmit",
+            "typepython.findTypeSource"
         ])
     );
 }
@@ -1251,6 +1252,82 @@ fn diagnostics_include_fix_portability_metadata() {
 
     assert_eq!(diagnostics[0].data.as_ref().unwrap()["fixPortability"], json!("typepython-only"));
     assert_eq!(diagnostics[1].data.as_ref().unwrap()["fixPortability"], json!("checker-portable"));
+}
+
+#[test]
+fn code_actions_offer_any_unknown_source_lookup() {
+    let config = temp_workspace(
+        "code_actions_offer_any_unknown_source_lookup",
+        &[(
+            "src/app/__init__.tpy",
+            "from typing import Any\n\nraw: Any = 1\nvalue: unknown = raw\n",
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let actions = server
+        .handle_code_action(json!({
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 3, "character": 7},
+                "end": {"line": 3, "character": 14}
+            },
+            "context": {"diagnostics": []}
+        }))
+        .expect("code action should succeed");
+    let actions = actions.as_array().expect("actions should be an array");
+    let action = actions
+        .iter()
+        .find(|action| action["title"] == json!("Find source of `unknown`"))
+        .expect("unknown source lookup action should be present");
+
+    assert_eq!(action["command"]["command"], json!("typepython.findTypeSource"));
+}
+
+#[test]
+fn execute_command_explains_any_and_unknown_sources() {
+    let config = temp_workspace(
+        "execute_command_explains_any_and_unknown_sources",
+        &[(
+            "src/app/__init__.tpy",
+            "from typing import Any\n\nraw: Any = 1\nvalue: unknown = raw\n",
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let any_response = server
+        .handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "workspace/executeCommand",
+            "params": {
+                "command": "typepython.findTypeSource",
+                "arguments": [uri, 2, 5]
+            }
+        }))
+        .expect("Any source command should succeed");
+    assert_eq!(any_response[0]["result"]["source"], json!("typing.Any"));
+
+    let unknown_response = server
+        .handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "workspace/executeCommand",
+            "params": {
+                "command": "typepython.findTypeSource",
+                "arguments": [uri, 3, 7]
+            }
+        }))
+        .expect("unknown source command should succeed");
+    assert_eq!(unknown_response[0]["result"]["kind"], json!("Unknown"));
+    assert!(
+        unknown_response[0]["result"]["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("must be narrowed")
+    );
 }
 
 #[test]

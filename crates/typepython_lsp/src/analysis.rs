@@ -199,6 +199,53 @@ impl AnalysisHost {
         Ok(json!([LspLocation { uri: declaration.uri.clone(), range: declaration.range }]))
     }
 
+    pub(super) fn find_type_source(
+        &mut self,
+        uri: &str,
+        position: LspPosition,
+    ) -> Result<Value, LspError> {
+        let workspace = self.workspace()?;
+        let Some(document) = workspace.queries.documents_by_uri.get(uri) else {
+            return Ok(Value::Null);
+        };
+        let Some(token) = token_at_position(&document.text, position) else {
+            return Ok(Value::Null);
+        };
+
+        if token.name == "Any" {
+            return Ok(json!({
+                "kind": "Any",
+                "source": "typing.Any",
+                "reason": "`Any` was written explicitly or imported from Python typing; checker-portable output preserves it as an escape hatch."
+            }));
+        }
+        if token.name == "unknown" {
+            return Ok(json!({
+                "kind": "Unknown",
+                "source": "TypePython unknown boundary",
+                "reason": "`unknown` was written explicitly in TypePython source and must be narrowed before member access, calls, or emitted public surfaces."
+            }));
+        }
+
+        if let Some(canonical) = document.local_symbols.get(&token.name) {
+            if let Some(declaration) = workspace.declarations_by_canonical.get(canonical) {
+                return Ok(json!({
+                    "kind": "Symbol",
+                    "source": canonical,
+                    "location": LspLocation { uri: declaration.uri.clone(), range: declaration.range },
+                    "reason": "resolved to a project declaration before TypePython rendered the public type surface"
+                }));
+            }
+            return Ok(json!({
+                "kind": "Unknown",
+                "source": canonical,
+                "reason": "this name resolves to an import target with no project declaration, so strict analysis treats it as an unknown import boundary"
+            }));
+        }
+
+        Ok(Value::Null)
+    }
+
     pub(super) fn references(
         &mut self,
         uri: &str,
@@ -673,6 +720,7 @@ impl AnalysisHost {
         actions.extend(collect_unsafe_code_actions(document, range, params));
         actions.extend(collect_missing_import_code_actions(workspace, document, range));
         actions.extend(collect_portable_typing_rewrite_code_actions(document, range));
+        actions.extend(collect_type_source_code_actions(document, range));
         actions.extend(collect_project_workflow_code_actions(document));
         Ok(json!(actions))
     }

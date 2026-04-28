@@ -231,6 +231,28 @@ pub(crate) fn collect_project_workflow_code_actions(document: &DocumentState) ->
     ]
 }
 
+pub(crate) fn collect_type_source_code_actions(
+    document: &DocumentState,
+    range: LspRange,
+) -> Vec<Value> {
+    let Some(token) = token_at_position(&document.text, range.start) else {
+        return Vec::new();
+    };
+    if !matches!(token.name.as_str(), "Any" | "unknown") {
+        return Vec::new();
+    }
+    let title = format!("Find source of `{}`", token.name);
+    vec![json!({
+        "title": title,
+        "kind": "quickfix",
+        "command": {
+            "title": title,
+            "command": "typepython.findTypeSource",
+            "arguments": [document.uri, token.range.start.line, token.range.start.character]
+        }
+    })]
+}
+
 pub(crate) fn code_action(title: String, uri: &str, edits: Vec<LspTextEdit>) -> Value {
     json!({
         "title": title,
