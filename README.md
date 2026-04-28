@@ -72,7 +72,7 @@ typepython build --project .
 You now have `.typepython/build/` with `.py` + `.pyi` + `py.typed` ready for any Python interpreter, IDE, or downstream type checker.
 
 > **Wheels** are prebuilt for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64. Other platforms fall back to source and need Rust + `cargo`.
-> **Python**: the package bridge supports 3.9+; generated projects target 3.10 – 3.14.
+> **Python**: the package bridge supports 3.9+; generated projects target Python 3.10 through 3.14.
 
 ## What you actually write vs. what ships
 
@@ -287,7 +287,7 @@ Full guide: [`docs/migration-guide.md`](docs/migration-guide.md).
 
 ## Contributing & community
 
-The compiler is a Rust workspace (MSRV 1.94.0) of focused crates — parser, binder, graph, checker, lowering, emit, incremental, LSP, CLI. The architecture diagram in [`docs/architecture.md`](docs/architecture.md) is the fastest way to orient yourself.
+The workspace MSRV is Rust 1.94.0. The compiler is a focused Rust workspace — parser, binder, graph, checker, lowering, emit, incremental, LSP, CLI. The architecture diagram in [`docs/architecture.md`](docs/architecture.md) is the fastest way to orient yourself.
 
 Local development:
 

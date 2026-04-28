@@ -35,7 +35,7 @@ any Python interpreter, IDE, or downstream type checker.
 
 - **Wheels** are prebuilt for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64.
   Other platforms fall back to source and need Rust + `cargo`.
-- **Python**: the package bridge supports 3.9+; generated projects target 3.10 – 3.14.
+- **Python**: the package bridge supports 3.9+; generated projects target Python 3.10 through 3.14.
 
 ## See it in 15 lines
 
