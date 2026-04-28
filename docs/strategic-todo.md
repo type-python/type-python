@@ -227,7 +227,7 @@ The spec already limits `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `R
 - [ ] Extend lowering transform expansion to consume shared shapes.
 - [ ] Emit stable names for generated shape aliases.
 - [ ] Add hover rendering for projected shapes.
-- [ ] Add diagnostics for unknown keys with suggestions.
+- [x] Add diagnostics for unknown keys with suggestions.
 
 ### Acceptance Criteria
 
