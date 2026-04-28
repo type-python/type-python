@@ -1,7 +1,7 @@
 # Framework Adapter Examples
 
-These examples show the three adapter shapes the prototype is meant to cover first: a validation
-model, a task queue decorator, and an ORM-style model. They are illustrative manifests for the
+These examples show the adapter shapes the prototype is meant to cover first: a validation
+model, a task queue decorator, an ORM-style model, and a FastAPI-like route surface. They are illustrative manifests for the
 declarative adapter model; adapters still validate through `typepython adapter validate` before a
 project build consumes them.
 
@@ -114,3 +114,36 @@ The ORM shape is deliberately constrained: it may collect annotated fields, excl
 attributes from constructor synthesis, and expose generated members through the framework transform
 metadata model. It must not execute database metadata, inspect live models, or infer runtime-only
 relationships during compilation.
+
+## FastAPI-like route surface
+
+```toml
+[adapter]
+name = "toy-fastapi"
+version = "0.1.0"
+framework = "toy.fastapi"
+typepython_min = "0.3.0"
+python_targets = ["3.12"]
+stability = "prototype"
+
+[[transforms]]
+provider = "toy.fastapi.BaseModel"
+kind = "base_class"
+target = "class"
+capabilities = ["field_collection", "constructor_generation", "method_synthesis"]
+field_collector = "annotated_class_fields"
+constructor = "fields"
+fallback = "strict_diagnostic"
+
+[[golden_tests]]
+name = "fastapi-like-package"
+input = "test-fixtures/downstream-checkers/fastapi-like-package/src/app/__init__.tpy"
+expected_py = "expected/fastapi-like/app/__init__.py"
+expected_pyi = "expected/fastapi-like/app/__init__.pyi"
+checkers = ["mypy", "pyright", "ty"]
+```
+
+The FastAPI-like fixture keeps the runtime route decorator in emitted `.py`, exposes request-body and
+response-model classes through ordinary generated constructors, and models `Depends(...)` parameters
+as typed defaults in `.pyi`. Runtime request parsing and dependency resolution remain owned by the
+framework; TypePython emits checker-neutral surfaces for IDEs and downstream checkers.

@@ -516,19 +516,19 @@ If TypePython can model a Pydantic/FastAPI-style app through the general transfo
 
 ### FastAPI TODO
 
-- [ ] Model endpoint request body shape.
-- [ ] Model response model shape.
-- [ ] Model dependency-injected parameters.
-- [ ] Preserve runtime FastAPI decorators in emitted `.py`.
-- [ ] Emit `.pyi` surfaces that IDEs can understand.
-- [ ] Add examples for typical API endpoints.
+- [x] Model endpoint request body shape.
+- [x] Model response model shape.
+- [x] Model dependency-injected parameters.
+- [x] Preserve runtime FastAPI decorators in emitted `.py`.
+- [x] Emit `.pyi` surfaces that IDEs can understand.
+- [x] Add examples for typical API endpoints.
 
 ### Acceptance Criteria
 
-- [ ] A small FastAPI/Pydantic app written in `.tpy` builds to ordinary Python.
+- [x] A small FastAPI/Pydantic app written in `.tpy` builds to ordinary Python.
 - [x] Generated artifacts pass mypy, pyright, and ty without Pydantic-specific checker plugins.
-- [ ] Runtime behavior remains delegated to Pydantic/FastAPI, not a TypePython runtime.
-- [ ] The implementation path can be reused by at least one non-Pydantic framework fixture.
+- [x] Runtime behavior remains delegated to Pydantic/FastAPI, not a TypePython runtime.
+- [x] The implementation path can be reused by at least one non-Pydantic framework fixture.
 
 ## P1: Migration and Publication Workflow
 
