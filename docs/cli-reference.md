@@ -12,6 +12,7 @@ Project-oriented commands use these shared options:
 
 - `check`, `build`, `watch`, `verify`, `compat`, and `migrate` accept `--project PATH` and `--format text|json`
 - `api-diff` accepts two artifact paths and `--format text|json`
+- `adapter validate` accepts an adapter manifest path and `--format text|json`
 - `clean` accepts `--project PATH`
 - `lsp` accepts `--project PATH` and speaks JSON-RPC over stdio instead of CLI JSON output
 - `init` has its own command-specific flags
@@ -489,6 +490,30 @@ typepython migrate --project . --budget-baseline .typepython/type-budget.json --
 
 # Generate starter stubs
 typepython migrate --project . --emit-stubs src/ --stub-out-dir stubs/
+```
+
+---
+
+### `typepython adapter validate`
+
+Validate a declarative framework adapter manifest such as `typepython-framework.toml` before a project build consumes it.
+
+```bash
+typepython adapter validate PATH [OPTIONS]
+```
+
+| Argument / Flag    | Description                         |
+| ------------------ | ----------------------------------- |
+| `PATH`             | Adapter manifest to validate        |
+| `--format FORMAT`  | Output format: `text` or `json`     |
+
+The validator accepts only the prototype-safe transform families described in the framework adapter manifest RFC: class decorator, base class, metaclass, function-to-object decorator, field collection, constructor synthesis, descriptor-backed attributes, and literal alias/default/frozen metadata mapping. It rejects unsupported transform kinds, unsafe capabilities, missing compatibility metadata, and golden-test inputs that cannot be found locally.
+
+**Example:**
+
+```bash
+typepython adapter validate typepython-framework.toml
+typepython adapter validate typepython-framework.toml --format json
 ```
 
 ## Exit Codes

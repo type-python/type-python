@@ -672,7 +672,7 @@ The ecosystem needs a constrained adapter model: expressive enough for common ru
   - [x] descriptor-backed attribute rules
   - [x] alias/default/frozen metadata mapping
 - [x] Prohibit arbitrary Python execution in adapter definitions.
-- [ ] Add an adapter validation command.
+- [x] Add an adapter validation command.
 - [ ] Require adapter golden tests:
   - [ ] input `.tpy`
   - [ ] emitted `.py`
@@ -691,7 +691,7 @@ The ecosystem needs a constrained adapter model: expressive enough for common ru
 
 - [ ] A framework can ship a TypePython adapter without depending on a mypy plugin.
 - [ ] Adapter behavior is deterministic, reviewable, and testable.
-- [ ] TypePython can reject unsafe or unsupported adapter declarations before compilation.
+- [x] TypePython can reject unsafe or unsupported adapter declarations before compilation.
 - [ ] The SDK is not treated as stable until multiple adapters have been implemented.
 
 ## P2: Sync/Async Dual Emit

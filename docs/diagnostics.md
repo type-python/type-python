@@ -122,6 +122,7 @@ This is the largest category, covering all type checking rules.
 | `TPY4020` | error         | Framework transform declaration cannot be applied by the current checker                                           |
 | `TPY4021` | error         | Framework field alias is dynamic and cannot be used for safe constructor typing                                    |
 | `TPY4101` | warning/error | Use of deprecated declaration                                                                                      |
+| `TPY7003` | error         | Framework adapter manifest is invalid                                                                             |
 
 #### TPY4001 -- Type mismatch
 
