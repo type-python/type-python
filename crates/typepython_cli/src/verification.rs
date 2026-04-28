@@ -29,6 +29,7 @@ use crate::pipeline::{
     persist_pipeline_analysis_state, py_typed_package_roots, run_pipeline,
     runtime_write_diagnostic, should_emit_build_outputs,
 };
+use crate::type_health::{TypeHealthReport, build_type_health_report_for_target};
 use crate::{
     CommandSummary, RUNTIME_IMPORTABILITY_SCRIPT, bytecode_path_for, exit_code, load_project,
     load_project_without_python_executable_validation, print_summary, resolve_python_executable,
@@ -252,6 +253,20 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
             .diagnostics,
         );
     }
+    let mut type_health_report = None;
+    if !snapshot.diagnostics.has_errors()
+        && !diagnostics.has_errors()
+        && args.publication_type_health
+    {
+        let report = build_type_health_report_for_target(
+            &config.config_dir,
+            &config.config.resolution.type_roots,
+            config.config.project.target_python,
+        )?;
+        diagnostics.diagnostics.extend(publication_type_health_diagnostics(&report).diagnostics);
+        notes.push(format!("publication type-health score: {}/100", report.score));
+        type_health_report = Some(report);
+    }
     let checkers = verify_checker_invocations(&args)?;
     let checker_allowlist = load_checker_allowlist(&config, args.checker_allowlist.as_deref())?;
     if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
@@ -305,6 +320,7 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
         &diagnostics,
         portability_report.as_ref(),
         Some(&pep561_report),
+        type_health_report.as_ref(),
     )?;
     Ok(exit_code(&diagnostics))
 }
@@ -315,6 +331,7 @@ fn print_verify_summary(
     diagnostics: &DiagnosticReport,
     portability: Option<&TypePortabilityReport>,
     pep561: Option<&Pep561ReadinessReport>,
+    type_health: Option<&TypeHealthReport>,
 ) -> Result<()> {
     match format {
         OutputFormat::Text => {
@@ -331,6 +348,9 @@ fn print_verify_summary(
                     println!("    advisory: {advisory}");
                 }
             }
+            if let Some(type_health) = type_health {
+                println!("  publication type-health score: {}/100", type_health.score);
+            }
             Ok(())
         }
         OutputFormat::Json => {
@@ -339,6 +359,7 @@ fn print_verify_summary(
                 "diagnostics": diagnostics,
                 "portability": portability,
                 "pep561": pep561,
+                "type_health": type_health,
             });
             println!(
                 "{}",
@@ -348,6 +369,51 @@ fn print_verify_summary(
             Ok(())
         }
     }
+}
+
+pub(crate) fn publication_type_health_diagnostics(report: &TypeHealthReport) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+    if report.score < 100 {
+        diagnostics.push(Diagnostic::error(
+            "TPY7002",
+            format!(
+                "publication type-health score {} is below package maintainer threshold 100",
+                report.score
+            ),
+        ));
+    }
+    for package in &report.packages {
+        if !package.has_py_typed && !package.is_stub_only {
+            diagnostics.push(Diagnostic::error(
+                "TPY7002",
+                format!(
+                    "package `{}` does not expose PEP 561 typing metadata (`py.typed` or stubs)",
+                    package.name
+                ),
+            ));
+        }
+        if package.stub_version_matches_runtime == Some(false) {
+            diagnostics.push(Diagnostic::warning(
+                "TPY7002",
+                format!(
+                    "stub package `{}` version {} does not match runtime version {}",
+                    package.name,
+                    package.stub_version.as_deref().unwrap_or("unknown"),
+                    package.runtime_version.as_deref().unwrap_or("unknown")
+                ),
+            ));
+        }
+        if package.precision_debt > 0 {
+            diagnostics.push(Diagnostic::warning(
+                "TPY7002",
+                format!(
+                    "package `{}` has {} type precision debt finding(s)",
+                    package.name, package.precision_debt
+                ),
+            ));
+        }
+    }
+    diagnostics
 }
 
 pub(crate) fn pep561_readiness_report(

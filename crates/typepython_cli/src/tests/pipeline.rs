@@ -465,6 +465,7 @@ fn run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed() {
             checker_preset: None,
             checker_allowlist: None,
             unsafe_runtime_imports: false,
+            publication_type_health: false,
         })
         .expect("verify should run to completion");
 

@@ -19,11 +19,12 @@ pub(super) use super::type_health::{build_type_health_report_for_target, run_typ
 pub(super) use super::verification::{
     CheckerAllowlistEntry, SuppliedArtifactKind, SuppliedVerifyArtifact, TypePortabilityReport,
     allowlisted_checker_diagnostic, expand_checker_list, external_checker_invocation,
-    pep561_readiness_report, run_verify, runtime_annotation_compatibility_diagnostics,
-    stub_portability_diagnostics, supplied_verify_artifacts, type_portability_report,
-    type_portability_score, verify_build_artifacts, verify_checker_invocations,
-    verify_emitted_declaration_surface, verify_packaged_artifacts, verify_publication_metadata,
-    verify_runtime_public_name_parity, verify_runtime_public_name_parity_for_artifact,
+    pep561_readiness_report, publication_type_health_diagnostics, run_verify,
+    runtime_annotation_compatibility_diagnostics, stub_portability_diagnostics,
+    supplied_verify_artifacts, type_portability_report, type_portability_score,
+    verify_build_artifacts, verify_checker_invocations, verify_emitted_declaration_surface,
+    verify_packaged_artifacts, verify_publication_metadata, verify_runtime_public_name_parity,
+    verify_runtime_public_name_parity_for_artifact,
 };
 pub(super) use super::{
     Cli, Command, InitArgs, OutputFormat, RunArgs, bytecode_path_for, embedded_config_template,

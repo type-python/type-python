@@ -111,6 +111,11 @@ pub(crate) struct VerifyArgs {
         help = "Import emitted runtime modules during verification to compare runtime-visible public names; this executes project-controlled Python code"
     )]
     pub(crate) unsafe_runtime_imports: bool,
+    #[arg(
+        long = "publication-type-health",
+        help = "Run package-maintainer type-health checks during verification and fail on type metadata debt"
+    )]
+    pub(crate) publication_type_health: bool,
 }
 
 #[derive(Debug, Args)]

@@ -22,6 +22,7 @@ pub(crate) fn run_compat(args: CompatArgs) -> Result<ExitCode> {
         checker_preset: None,
         checker_allowlist,
         unsafe_runtime_imports: false,
+        publication_type_health: false,
     };
     let command_name =
         if args.strict_portability { "compat --strict-portability" } else { "compat" };

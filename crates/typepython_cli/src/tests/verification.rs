@@ -62,6 +62,7 @@ fn run_verify_bootstraps_outputs_after_clean_project() {
             checker_preset: None,
             checker_allowlist: None,
             unsafe_runtime_imports: false,
+            publication_type_health: false,
         })
         .expect("verify should succeed");
 
@@ -122,6 +123,7 @@ fn run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled() {
             checker_preset: None,
             checker_allowlist: None,
             unsafe_runtime_imports: false,
+            publication_type_health: false,
         })
         .expect("verify should succeed");
 
@@ -165,6 +167,7 @@ fn run_verify_invokes_external_checker_on_emitted_output() {
             checker_preset: None,
             checker_allowlist: None,
             unsafe_runtime_imports: false,
+            publication_type_health: false,
         })
         .expect("verify should succeed with a passing checker");
 
@@ -203,6 +206,7 @@ fn run_verify_reports_external_checker_failure() {
             checker_preset: None,
             checker_allowlist: None,
             unsafe_runtime_imports: false,
+            publication_type_health: false,
         })
         .expect("verify should complete with checker diagnostics")
     };
@@ -235,6 +239,7 @@ fn run_verify_reports_python_companion_stub_signature_mismatch() {
             checker_preset: None,
             checker_allowlist: None,
             unsafe_runtime_imports: false,
+            publication_type_health: false,
         })
         .expect("verify should run")
     };
@@ -276,6 +281,7 @@ fn run_verify_reports_python_companion_stub_signature_mismatch_in_wheel() {
             checker_preset: None,
             checker_allowlist: None,
             unsafe_runtime_imports: false,
+            publication_type_health: false,
         })
         .expect("verify should run")
     };
@@ -313,6 +319,7 @@ fn run_verify_skips_runtime_import_probes_by_default() {
             checker_preset: None,
             checker_allowlist: None,
             unsafe_runtime_imports: false,
+            publication_type_health: false,
         })
         .expect("verify should run")
     };
@@ -352,6 +359,7 @@ fn run_verify_reports_runtime_import_failure_when_unsafe_runtime_imports_enabled
             checker_preset: None,
             checker_allowlist: None,
             unsafe_runtime_imports: true,
+            publication_type_health: false,
         })
         .expect("verify should run")
     };
@@ -402,6 +410,7 @@ fn run_verify_ignores_project_python_executable_by_default() {
             checker_preset: None,
             checker_allowlist: None,
             unsafe_runtime_imports: false,
+            publication_type_health: false,
         })
         .expect("verify should run")
     };
@@ -3389,6 +3398,7 @@ fn verify_command_parses_supplied_artifact_flags() {
         "all",
         "--checker-allowlist",
         "checker-allowlist.toml",
+        "--publication-type-health",
     ]);
 
     let super::Command::Verify(args) = cli.command else {
@@ -3399,6 +3409,7 @@ fn verify_command_parses_supplied_artifact_flags() {
     assert_eq!(args.checker_preset, Some(String::from("all")));
     assert_eq!(args.checker_allowlist, Some(PathBuf::from("checker-allowlist.toml")));
     assert!(args.unsafe_runtime_imports);
+    assert!(args.publication_type_health);
     assert_eq!(supplied.len(), 2);
     assert!(supplied.iter().any(|artifact| {
         matches!(artifact.kind, SuppliedArtifactKind::Wheel)
@@ -3408,6 +3419,61 @@ fn verify_command_parses_supplied_artifact_flags() {
         matches!(artifact.kind, SuppliedArtifactKind::Sdist)
             && artifact.path == Path::new("dist/pkg.tar.gz")
     }));
+}
+
+#[test]
+fn publication_type_health_diagnostics_fail_for_untyped_packages() {
+    let project_dir = temp_project_dir("publication_type_health_diagnostics_fail");
+    let diagnostics = {
+        fs::create_dir_all(project_dir.join("site/untyped")).expect("untyped package should exist");
+        let report = build_type_health_report_for_target(
+            &project_dir,
+            &[String::from("site")],
+            PythonTarget::default(),
+        )
+        .expect("type-health report should build");
+        publication_type_health_diagnostics(&report)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let rendered = diagnostics.as_text();
+    assert!(rendered.contains("TPY7002"));
+    assert!(rendered.contains("publication type-health score 0"));
+    assert!(rendered.contains("does not expose PEP 561 typing metadata"));
+}
+
+#[test]
+fn run_verify_publication_type_health_fails_on_untyped_package_metadata() {
+    let project_dir = temp_project_dir("run_verify_publication_type_health_fails");
+    let verify_result = {
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"site\"]\n",
+        )
+        .expect("config should be written");
+        fs::create_dir_all(project_dir.join("src/app")).expect("source package should exist");
+        fs::write(project_dir.join("src/app/__init__.tpy"), "pass\n")
+            .expect("source file should be written");
+        fs::create_dir_all(project_dir.join("site/untyped")).expect("untyped package should exist");
+
+        run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+            checkers: Vec::new(),
+            checker_preset: None,
+            checker_allowlist: None,
+            unsafe_runtime_imports: false,
+            publication_type_health: true,
+        })
+        .expect("verify should run")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(verify_result, ExitCode::from(1));
 }
 
 #[test]
@@ -3521,6 +3587,7 @@ fn verify_checker_preset_expands_and_deduplicates_with_explicit_checkers() {
         checker_preset: Some(String::from("all")),
         checker_allowlist: None,
         unsafe_runtime_imports: false,
+        publication_type_health: false,
     };
 
     assert_eq!(
