@@ -70,6 +70,17 @@
       }
     },
     {
+      "name": "negative-pydantic-strictness-package",
+      "targets": ["3.12"],
+      "expected_checker_failures": ["mypy", "ty"],
+      "expected_stub_fragments": {
+        "3.12": [
+          "class StrictUser(BaseModel):",
+          "def __init__(self, user_id: int, name: str, age: int = ...) -> None: ..."
+        ]
+      }
+    },
+    {
       "name": "fastapi-like-package",
       "targets": ["3.12"],
       "expected_stub_fragments": {

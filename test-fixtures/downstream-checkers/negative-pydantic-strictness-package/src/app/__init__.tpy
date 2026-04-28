@@ -1,0 +1,22 @@
+from typing import Any, Callable
+
+
+def framework_transform[T](*args: object, **kwargs: object) -> Callable[[T], T]:
+    def wrap(obj: T) -> T:
+        return obj
+    return wrap
+
+
+def Field(default=None, alias=None) -> Any:
+    return default
+
+
+@framework_transform(kind="base_class", capabilities=("field_collection", "constructor_generation", "alias_handling", "required_optional_fields"))
+class BaseModel:
+    pass
+
+
+class StrictUser(BaseModel):
+    id: int = Field(alias="user_id")
+    name: str
+    age: int = Field(default=0)
