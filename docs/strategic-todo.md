@@ -591,11 +591,11 @@ TypePython already has LSP infrastructure. It should use that position to make m
   - [x] insert minimal annotation to remove a downstream `unknown`
 - [x] Add "Explain this type" hover support.
 - [x] Add "Find source of `Any`" and "Find source of `Unknown`" navigation.
-- [ ] Add quick fixes for portable typing rewrites:
+- [x] Add quick fixes for portable typing rewrites:
   - [x] `typing.List` to `list` when target allows it
-  - [ ] target-compatible `typing_extensions` import selection
-  - [ ] overload normalization
-  - [ ] `TypedDict` key requiredness fixes
+  - [x] target-compatible `typing_extensions` import selection
+  - [x] overload normalization
+  - [x] `TypedDict` key requiredness fixes
 - [x] Add preview UI for emitted `.py` and `.pyi` for the current file.
 - [x] Add diagnostics that show whether a fix is TypePython-only or checker-portable.
 - [x] Add editor commands that run `migrate --report`, `compat`, and `type-health` for the current project.
@@ -604,7 +604,7 @@ TypePython already has LSP infrastructure. It should use that position to make m
 
 - [x] A user can migrate a small module from the editor without reading the full CLI docs.
 - [x] LSP explains why a public type is unknown and which upstream file caused it.
-- [ ] Quick fixes do not introduce TypePython-only constructs when a standard Python rewrite is enough.
+- [x] Quick fixes do not introduce TypePython-only constructs when a standard Python rewrite is enough.
 
 ## P1: Type Coverage Budget and Incremental Gate
 
