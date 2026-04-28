@@ -11,7 +11,7 @@ pub(crate) fn collect_declarations(
                 let canonical = format!("{module_key}.{}", statement.name);
                 local_symbols.insert(statement.name.clone(), canonical.clone());
                 if let Some(range) =
-                    find_name_range(&document.text, statement.line, &statement.name)
+                    find_declaration_name_range(&document.text, statement.line, &statement.name)
                 {
                     declarations.push(SymbolOccurrence {
                         canonical,
@@ -33,7 +33,7 @@ pub(crate) fn collect_declarations(
                 let canonical = format!("{module_key}.{}", statement.name);
                 local_symbols.insert(statement.name.clone(), canonical.clone());
                 if let Some(range) =
-                    find_name_range(&document.text, statement.line, &statement.name)
+                    find_declaration_name_range(&document.text, statement.line, &statement.name)
                 {
                     declarations.push(SymbolOccurrence {
                         canonical: canonical.clone(),
@@ -83,7 +83,7 @@ pub(crate) fn collect_declarations(
 
                 let canonical = format!("{module_key}.{}", name);
                 local_symbols.insert(name.clone(), canonical.clone());
-                if let Some(range) = find_name_range(&document.text, line, name) {
+                if let Some(range) = find_declaration_name_range(&document.text, line, name) {
                     declarations.push(SymbolOccurrence {
                         canonical,
                         name: name.clone(),
@@ -500,6 +500,20 @@ pub(crate) fn resolve_top_level_declaration<'a>(
         .iter()
         .find(|declaration| declaration.owner.is_none() && declaration.name == name)?;
     Some((node, declaration))
+}
+
+fn find_declaration_name_range(text: &str, line: usize, name: &str) -> Option<LspRange> {
+    find_name_range(text, line, name).or_else(|| {
+        (line + 1..=line + 6).find_map(|candidate_line| {
+            let line_text = text.lines().nth(candidate_line.saturating_sub(1))?.trim_start();
+            (line_text.starts_with("class ")
+                || line_text.starts_with("def ")
+                || line_text.starts_with("async def ")
+                || line_text.starts_with("overload def ")
+                || line_text.starts_with("typealias "))
+            .then(|| find_name_range(text, candidate_line, name))?
+        })
+    })
 }
 
 pub(crate) fn document_for_module_key<'a>(

@@ -206,6 +206,52 @@ fn signature_help_returns_member_signature_without_self() {
 }
 
 #[test]
+fn signature_help_returns_framework_transformed_constructor_shape() {
+    let config = temp_workspace(
+        "signature_help_returns_framework_transformed_constructor_shape",
+        &[(
+            "src/app/__init__.tpy",
+            "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n    age: int\n\nuser = User(\"Ada\", 1)\n",
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+    let text = fs::read_to_string(config.config_dir.join("src/app/__init__.tpy"))
+        .expect("source file should be readable");
+    server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"textDocument/didOpen",
+            "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+        }))
+        .expect("didOpen should succeed");
+    let workspace = server.analysis.workspace().expect("workspace should load");
+    let document =
+        workspace.queries.documents_by_uri.get(&uri).expect("document should be indexed");
+    let active = active_call(document, LspPosition { line: 14, character: 19 }, &uri)
+        .expect("active call should resolve")
+        .expect("active call should be present");
+    assert_eq!(active.callee, "User");
+    assert_eq!(active.active_parameter, 1);
+    let canonical = document.local_symbols.get("User").expect("User should be local");
+    assert!(!signature_candidates_for_canonical(workspace, canonical).is_empty());
+    assert!(!top_level_signature_candidates(document, "User").is_empty());
+
+    let signature_help = server
+        .handle_signature_help(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 14, "character": 19}
+        }))
+        .expect("signatureHelp should succeed");
+    assert_ne!(signature_help, Value::Null, "{signature_help:?}");
+    assert_eq!(signature_help["activeParameter"], json!(1));
+    assert_eq!(
+        signature_help["signatures"][0]["label"],
+        json!("User(name: str, age: int) -> User")
+    );
+}
+
+#[test]
 fn signature_help_selects_overload_by_active_parameter() {
     let config = temp_config(
         "signature_help_selects_overload_by_active_parameter",
