@@ -498,11 +498,11 @@ If TypePython can model a Pydantic/FastAPI-style app through the general transfo
 
 ### Pydantic TODO
 
-- [ ] Support Pydantic-style model field collection.
-- [ ] Implement support through generic framework transforms and shapes, not hard-coded checker behavior.
-- [ ] Support `Field(...)` default and alias metadata.
-- [ ] Support required vs optional field inference.
-- [ ] Support `default_factory`.
+- [x] Support Pydantic-style model field collection.
+- [x] Implement support through generic framework transforms and shapes, not hard-coded checker behavior.
+- [x] Support `Field(...)` default and alias metadata.
+- [x] Support required vs optional field inference.
+- [x] Support `default_factory`.
 - [ ] Support frozen fields or model-level immutability where statically known.
 - [ ] Support `computed_field` in emitted stubs.
 - [ ] Support validators and serializers as checked decorators where feasible.
@@ -946,10 +946,10 @@ Possible later work:
 
 ### Weeks 9-10: Pydantic/FastAPI Spike
 
-- [ ] Build a tiny Pydantic-like fixture using the transform system.
+- [x] Build a tiny Pydantic-like fixture using the transform system.
 - [x] Generate `__init__` stub with aliases and defaults.
 - [ ] Validate generated artifacts with mypy/pyright/ty.
-- [ ] Document known unsupported Pydantic features.
+- [x] Document known unsupported Pydantic features.
 - [x] Add annotation runtime probes for Python 3.14-style deferred annotations.
 - [ ] Sketch the framework adapter manifest only from the toy and Pydantic-like fixtures.
 

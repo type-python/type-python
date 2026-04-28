@@ -169,6 +169,28 @@ Non-strict mode should report notes or warnings only when degradation changes th
 2. generated constructor/member names do not claim runtime names that the framework cannot provide
 3. downstream checker runs can consume the generated `.pyi` without TypePython-specific plugins
 
+## Pydantic-like spike status
+
+The first Pydantic-style spike is intentionally implemented through the generic class-shape
+transform path rather than a Pydantic-specific checker branch. A `base_class` provider with
+`field_collection`, `constructor_generation`, `alias_handling`, and
+`required_optional_fields` capabilities can model a tiny `BaseModel` fixture whose annotated
+fields use `Field(default=...)`, `Field(default_factory=...)`, and `Field(alias=...)` metadata.
+The generated constructor treats aliased fields without defaults as required, while defaults and
+default factories make fields optional.
+
+Known unsupported Pydantic features remain explicit future work:
+
+- `computed_field` is not synthesized into emitted stubs yet.
+- Validators and serializers such as `field_validator`, `model_validator`, and serializer
+  decorators are not checked as framework-owned decorators yet.
+- `model_construct` signatures are not generated yet.
+- Runtime-computed aliases are not diagnosed yet; only string-literal aliases participate in
+  static constructor typing.
+- Advanced Pydantic alias precedence, validation-vs-serialization alias splits, and annotated
+  metadata patterns are deferred until the declarative adapter model can express them without
+  executing framework code.
+
 ## First vertical slice
 
 The implementation sequence should be:
