@@ -899,9 +899,9 @@ ML users need tensor shape checking, but shape algebra moves toward dependent ty
 
 Possible later work:
 
-- [ ] Survey jaxtyping, torchtyping, beartype, PyTorch, JAX, and NumPy typing.
-- [ ] Decide whether TypePython should emit runtime asserts or only static metadata.
-- [ ] Avoid adding general dependent types to Core.
+- [x] Survey jaxtyping, torchtyping, beartype, PyTorch, JAX, and NumPy typing.
+- [x] Decide whether TypePython should emit runtime asserts or only static metadata.
+- [x] Avoid adding general dependent types to Core.
 
 ## Deferred: Taint and Provenance Types
 
