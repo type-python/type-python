@@ -60,7 +60,8 @@ A third-party adapter should include:
 - minimum TypePython version
 - supported Python targets
 - downstream checker coverage expectations
-- golden tests for input `.tpy`, emitted `.py`, emitted `.pyi`, and checker outcomes
+- golden tests for input `.tpy`, emitted `.py`, emitted `.pyi`, and checker outcomes; add
+  runtime smoke expectations when the framework exposes runtime-visible generated behavior
 
 Third-party adapters must still be declarative. They must not import the framework package, call
 framework decorators, or run adapter Python during compilation or validation. If framework behavior

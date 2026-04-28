@@ -673,12 +673,12 @@ The ecosystem needs a constrained adapter model: expressive enough for common ru
   - [x] alias/default/frozen metadata mapping
 - [x] Prohibit arbitrary Python execution in adapter definitions.
 - [x] Add an adapter validation command.
-- [ ] Require adapter golden tests:
-  - [ ] input `.tpy`
-  - [ ] emitted `.py`
-  - [ ] emitted `.pyi`
-  - [ ] downstream checker expectations
-  - [ ] runtime smoke expectations where relevant
+- [x] Require adapter golden tests:
+  - [x] input `.tpy`
+  - [x] emitted `.py`
+  - [x] emitted `.pyi`
+  - [x] downstream checker expectations
+  - [x] runtime smoke expectations where relevant
 - [x] Add minimal adapter compatibility metadata for local validation.
 - [x] Defer a public registry and broad versioning policy until after:
   - [x] a Pydantic-like adapter works
@@ -690,7 +690,7 @@ The ecosystem needs a constrained adapter model: expressive enough for common ru
 ### Acceptance Criteria
 
 - [ ] A framework can ship a TypePython adapter without depending on a mypy plugin.
-- [ ] Adapter behavior is deterministic, reviewable, and testable.
+- [x] Adapter behavior is deterministic, reviewable, and testable.
 - [x] TypePython can reject unsafe or unsupported adapter declarations before compilation.
 - [ ] The SDK is not treated as stable until multiple adapters have been implemented.
 
