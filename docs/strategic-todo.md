@@ -507,12 +507,12 @@ If TypePython can model a Pydantic/FastAPI-style app through the general transfo
 - [ ] Support `computed_field` in emitted stubs.
 - [ ] Support validators and serializers as checked decorators where feasible.
 - [ ] Emit accurate `__init__` and `model_construct` signatures.
-- [ ] Diagnose dynamic aliases that prevent accurate static constructor typing.
+- [x] Diagnose dynamic aliases that prevent accurate static constructor typing.
 - [ ] Add fixture parity with common Pydantic mypy plugin strictness settings:
   - [ ] typed init
   - [ ] forbid extra
   - [ ] warn untyped fields
-  - [ ] warn required dynamic aliases
+  - [x] warn required dynamic aliases
 
 ### FastAPI TODO
 

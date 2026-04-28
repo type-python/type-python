@@ -185,8 +185,8 @@ Known unsupported Pydantic features remain explicit future work:
 - Validators and serializers such as `field_validator`, `model_validator`, and serializer
   decorators are not checked as framework-owned decorators yet.
 - `model_construct` signatures are not generated yet.
-- Runtime-computed aliases are not diagnosed yet; only string-literal aliases participate in
-  static constructor typing.
+- Runtime-computed aliases now produce deterministic diagnostics rather than guessed constructor
+  parameters; only string-literal aliases participate in static constructor typing.
 - Advanced Pydantic alias precedence, validation-vs-serialization alias splits, and annotated
   metadata patterns are deferred until the declarative adapter model can express them without
   executing framework code.
