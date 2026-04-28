@@ -103,8 +103,13 @@ TEST_EVIDENCE: dict[str, tuple[str, ...]] = {
     "`typepython verify` library publishability checks": ("cargo test -p typepython-cli tests::verification",),
     "Runtime validator emission for selected data-class trust boundaries": (
         "cargo test -p typepython-emit write_runtime_outputs",
+        "cargo test -p typepython-emit write_runtime_outputs_honors_named_validation_boundary_kinds",
         "cargo test -p typepython-config loads_all_supported_typepython_toml_configuration_fields",
     ),
+    "`typepython lsp`": ("cargo test -p typepython-lsp",),
+    "typepython lsp": ("cargo test -p typepython-lsp",),
+    "`typepython migrate --report`": ("cargo test -p typepython-cli build_migration_report",),
+    "typepython migrate --report": ("cargo test -p typepython-cli build_migration_report",),
 }
 
 VALIDATION_CHECKS: tuple[str, ...] = (
