@@ -590,7 +590,7 @@ TypePython already has LSP infrastructure. It should use that position to make m
   - [ ] generate public `.pyi` preview for a selected symbol
   - [ ] insert minimal annotation to remove a downstream `unknown`
 - [x] Add "Explain this type" hover support.
-- [ ] Add "Find source of `Any`" and "Find source of `Unknown`" navigation.
+- [x] Add "Find source of `Any`" and "Find source of `Unknown`" navigation.
 - [ ] Add quick fixes for portable typing rewrites:
   - [x] `typing.List` to `list` when target allows it
   - [ ] target-compatible `typing_extensions` import selection
@@ -603,7 +603,7 @@ TypePython already has LSP infrastructure. It should use that position to make m
 ### Acceptance Criteria
 
 - [ ] A user can migrate a small module from the editor without reading the full CLI docs.
-- [ ] LSP explains why a public type is unknown and which upstream file caused it.
+- [x] LSP explains why a public type is unknown and which upstream file caused it.
 - [ ] Quick fixes do not introduce TypePython-only constructs when a standard Python rewrite is enough.
 
 ## P1: Type Coverage Budget and Incremental Gate

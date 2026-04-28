@@ -55,8 +55,9 @@ The server also exposes source actions for project-level workflows so editor int
 | `Run typepython compat`              | `typepython.compat`          | `typepython compat --project .`        |
 | `Run typepython type-health`         | `typepython.typeHealth`      | `typepython type-health --project .`   |
 | `Preview emitted .py and .pyi`        | `typepython.previewEmit`     | Return current-file emitted runtime and stub text |
+| `Find source of Any/Unknown`          | `typepython.findTypeSource`  | Return the declaration, import fallback, or intrinsic type source at the cursor |
 
-The command argument is the current document URI. Project-level workflow commands execute the corresponding TypePython CLI workflow for the active workspace. `typepython.previewEmit` runs in memory and returns a JSON payload with `python` and `stub` fields so editors can show a preview without materializing build artifacts.
+The command argument is the current document URI. Project-level workflow commands execute the corresponding TypePython CLI workflow for the active workspace. `typepython.previewEmit` runs in memory and returns a JSON payload with `python` and `stub` fields so editors can show a preview without materializing build artifacts. `typepython.findTypeSource` takes `[uri, line, character]` and reports whether `Any`/`unknown` came from typing, an explicit TypePython boundary, a project declaration, or an unresolved import fallback.
 
 ### Formatting
 
