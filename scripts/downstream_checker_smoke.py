@@ -22,6 +22,7 @@ class FixtureCase:
     name: str
     targets: tuple[str, ...]
     expect_checker_failure: bool = False
+    expected_checker_failures: tuple[str, ...] = ()
     expected_stub_fragments: dict[str, tuple[str, ...]] | None = None
 
 
@@ -31,10 +32,17 @@ def load_fixture_matrix(path: pathlib.Path = MATRIX_PATH) -> dict[str, FixtureCa
     for raw_case in payload.get("fixtures", []):
         name = raw_case["name"]
         expected_stub_fragments = raw_case.get("expected_stub_fragments")
+        expect_checker_failure = bool(raw_case.get("expect_checker_failure", False))
+        expected_checker_failures = tuple(raw_case.get("expected_checker_failures", ()))
+        if expect_checker_failure and expected_checker_failures:
+            raise SystemExit(
+                f"fixture `{name}` cannot set both expect_checker_failure and expected_checker_failures"
+            )
         fixtures[name] = FixtureCase(
             name=name,
             targets=tuple(raw_case["targets"]),
-            expect_checker_failure=bool(raw_case.get("expect_checker_failure", False)),
+            expect_checker_failure=expect_checker_failure,
+            expected_checker_failures=expected_checker_failures,
             expected_stub_fragments=(
                 None
                 if expected_stub_fragments is None
@@ -133,6 +141,9 @@ def check_fixture(case: FixtureCase, checkers: tuple[str, ...]) -> None:
     source_dir = FIXTURE_ROOT / case.name
     if not source_dir.is_dir():
         raise SystemExit(f"missing checker smoke fixture: {source_dir}")
+    expected_failure_checkers = set(case.expected_checker_failures)
+    if case.expect_checker_failure:
+        expected_failure_checkers.update(checkers)
 
     for target in case.targets:
         with tempfile.TemporaryDirectory(
@@ -145,21 +156,23 @@ def check_fixture(case: FixtureCase, checkers: tuple[str, ...]) -> None:
             run([sys.executable, "-m", "typepython", "build", "--project", str(project_dir)])
 
             build_dir = project_dir / ".typepython" / "build"
-            if case.expect_checker_failure:
-                consumer_path = source_dir / "checker-consumer.py"
-                if not consumer_path.exists():
-                    raise SystemExit(
-                        f"negative downstream checker fixture `{case.name}` is missing {consumer_path}"
-                    )
-                shutil.copy2(consumer_path, build_dir / "checker_consumer.py")
+            consumer_path = source_dir / "checker-consumer.py"
+            build_consumer_path = build_dir / "checker_consumer.py"
+            if expected_failure_checkers and not consumer_path.exists():
+                raise SystemExit(
+                    f"negative downstream checker fixture `{case.name}` is missing {consumer_path}"
+                )
             if case.expected_stub_fragments is not None:
                 assert_expected_stub_fragments(build_dir, target, case.expected_stub_fragments)
 
             for checker in checkers:
                 command = checker_command(checker, target, build_dir)
-                if case.expect_checker_failure:
+                if checker in expected_failure_checkers:
+                    shutil.copy2(consumer_path, build_consumer_path)
                     run_expect_failure(command, cwd=project_dir)
                 else:
+                    if build_consumer_path.exists():
+                        build_consumer_path.unlink()
                     run(command, cwd=project_dir)
 
 

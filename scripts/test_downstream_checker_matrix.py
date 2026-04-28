@@ -26,7 +26,11 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
     def test_negative_fixtures_are_explicitly_marked(self) -> None:
         matrix = downstream_checker_smoke.load_fixture_matrix()
 
-        negative_cases = [case for case in matrix.values() if case.expect_checker_failure]
+        negative_cases = [
+            case
+            for case in matrix.values()
+            if case.expect_checker_failure or case.expected_checker_failures
+        ]
         self.assertGreater(len(negative_cases), 0)
         for case in negative_cases:
             self.assertTrue(case.name.startswith("negative-"))
