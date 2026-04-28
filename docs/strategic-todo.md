@@ -886,10 +886,10 @@ Do not start until the framework-shape path is stable.
 
 Possible later work:
 
-- [ ] Model finite states with sealed classes.
-- [ ] Model method transitions.
-- [ ] Emit runtime assertions optionally.
-- [ ] Explore whether external `.pyi` can expose useful receiver-state changes.
+- [x] Model finite states with sealed classes.
+- [x] Model method transitions.
+- [x] Emit runtime assertions optionally.
+- [x] Explore whether external `.pyi` can expose useful receiver-state changes.
 
 ## Deferred: Tensor Shape Types
 
