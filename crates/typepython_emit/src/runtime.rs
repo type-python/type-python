@@ -3,7 +3,16 @@ use super::*;
 #[derive(Debug)]
 pub enum RuntimeWriteError {
     Io(io::Error),
-    StubGeneration { source_path: PathBuf, legacy_detail: String },
+    StubGeneration {
+        source_path: PathBuf,
+        legacy_detail: String,
+    },
+    UnsupportedValidation {
+        source_path: PathBuf,
+        class_name: String,
+        field_name: String,
+        annotation: String,
+    },
 }
 
 impl std::fmt::Display for RuntimeWriteError {
@@ -16,6 +25,16 @@ impl std::fmt::Display for RuntimeWriteError {
                 source_path.display(),
                 legacy_detail
             ),
+            Self::UnsupportedValidation { source_path, class_name, field_name, annotation } => {
+                write!(
+                    f,
+                    "TPY5003: unable to generate faithful runtime validator for `{}.{}` in `{}`: annotation `{}` is not supported by the selected validation adapter",
+                    class_name,
+                    field_name,
+                    source_path.display(),
+                    annotation
+                )
+            }
         }
     }
 }
@@ -24,7 +43,26 @@ impl std::error::Error for RuntimeWriteError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
-            Self::StubGeneration { .. } => None,
+            Self::StubGeneration { .. } | Self::UnsupportedValidation { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum RuntimeValidationAdapter {
+    Builtin,
+    Pydantic,
+    Msgspec,
+    Cattrs,
+}
+
+impl RuntimeValidationAdapter {
+    fn marker(self) -> &'static str {
+        match self {
+            Self::Builtin => "builtin",
+            Self::Pydantic => "pydantic",
+            Self::Msgspec => "msgspec",
+            Self::Cattrs => "cattrs",
         }
     }
 }
@@ -60,7 +98,7 @@ pub fn write_runtime_outputs(
             }
             let runtime_source =
                 if runtime_validators && module.source_kind == SourceKind::TypePython {
-                    inject_runtime_validators(&module.python_source)?
+                    inject_runtime_validators(module)?
                 } else {
                     module.python_source.clone()
                 };
@@ -123,11 +161,24 @@ fn is_package_init_path(path: &Path) -> bool {
     path.file_name().is_some_and(|name| name == "__init__.py" || name == "__init__.pyi")
 }
 
-fn inject_runtime_validators(python: &str) -> Result<String, RuntimeWriteError> {
+fn inject_runtime_validators(module: &LoweredModule) -> Result<String, RuntimeWriteError> {
+    let python = &module.python_source;
     let typed_dicts = collect_typed_dict_fields(python);
     let edits = collect_runtime_validator_edits(python, &typed_dicts);
     if edits.is_empty() {
         return Ok(python.to_owned());
+    }
+    for edit in &edits {
+        for field in &edit.fields {
+            if !annotation_is_faithfully_validated(&field.annotation, &typed_dicts) {
+                return Err(RuntimeWriteError::UnsupportedValidation {
+                    source_path: module.source_path.clone(),
+                    class_name: edit.class_name.clone(),
+                    field_name: field.name.clone(),
+                    annotation: field.annotation.clone(),
+                });
+            }
+        }
     }
 
     let lines: Vec<&str> = python.lines().collect();
@@ -151,6 +202,8 @@ fn inject_runtime_validators(python: &str) -> Result<String, RuntimeWriteError> 
 struct RuntimeValidatorEdit {
     after_line: usize,
     insertion: Vec<String>,
+    class_name: String,
+    fields: Vec<ValidatorField>,
 }
 
 #[derive(Debug, Clone)]
@@ -221,6 +274,8 @@ fn collect_runtime_validator_edits(
             edits.push(RuntimeValidatorEdit {
                 after_line: body_end + 1,
                 insertion: build_validator_lines(class_indent, class_name, &fields, typed_dicts),
+                class_name: class_name.to_owned(),
+                fields,
             });
         }
         index = cursor;
@@ -253,6 +308,10 @@ fn build_validator_lines(
     let nested_indent = " ".repeat(class_indent + 12);
     let mut lines = vec![
         String::new(),
+        format!(
+            "{method_indent}__tpy_validation_adapter__ = \"{}\"",
+            RuntimeValidationAdapter::Builtin.marker()
+        ),
         format!("{method_indent}@classmethod"),
         format!("{method_indent}def __tpy_validate__(cls, __data: dict) -> \"{class_name}\":"),
         format!("{body_indent}if not isinstance(__data, dict):"),
@@ -426,6 +485,33 @@ fn runtime_check_expression(
         return Some(format!("isinstance({variable}, {annotation})"));
     }
     None
+}
+
+fn annotation_is_faithfully_validated(
+    annotation: &str,
+    typed_dicts: &BTreeMap<String, Vec<ValidatorField>>,
+) -> bool {
+    let annotation = annotation.trim();
+    if annotation.is_empty() {
+        return true;
+    }
+    if let Some(inner) = strip_wrapper(annotation, "NotRequired")
+        .or_else(|| strip_wrapper(annotation, "Required_"))
+        .or_else(|| strip_wrapper(annotation, "ReadOnly"))
+        .or_else(|| strip_wrapper(annotation, "Mutable"))
+    {
+        return annotation_is_faithfully_validated(inner, typed_dicts);
+    }
+    let union_parts = split_top_level(annotation, '|');
+    if union_parts.len() > 1 {
+        return union_parts
+            .iter()
+            .all(|part| annotation_is_faithfully_validated(part, typed_dicts));
+    }
+    if typed_dicts.contains_key(annotation) {
+        return true;
+    }
+    runtime_check_expression("__value", annotation, typed_dicts).is_some()
 }
 
 fn strip_wrapper<'a>(annotation: &'a str, wrapper: &str) -> Option<&'a str> {

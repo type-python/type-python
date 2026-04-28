@@ -243,8 +243,40 @@ fn write_runtime_outputs_adds_runtime_validators_only_when_enabled() {
 
     let (runtime, stub) = result;
     assert!(runtime.contains("def __tpy_validate__(cls, __data: dict) -> \"UserInput\":"));
+    assert!(runtime.contains("__tpy_validation_adapter__ = \"builtin\""));
     assert!(runtime.contains("field `name' expected str but got"));
     assert!(!stub.contains("__tpy_validate__"));
+}
+
+#[test]
+fn write_runtime_outputs_rejects_unfaithful_runtime_validator_annotation() {
+    let temp_dir =
+        temp_dir("write_runtime_outputs_rejects_unfaithful_runtime_validator_annotation");
+    let modules = vec![LoweredModule {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(
+            "from dataclasses import dataclass\nfrom typing import Callable\n\n@dataclass\nclass HookInput:\n    handler: Callable[[int], str]\n",
+        ),
+        source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    }];
+    let artifacts = vec![EmitArtifact {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+        stub_path: None,
+    }];
+
+    let error = write_runtime_outputs(&artifacts, &modules, true, true, None)
+        .expect_err("unsupported callable validator annotation should fail");
+    remove_temp_dir(&temp_dir);
+
+    let rendered = error.to_string();
+    assert!(rendered.contains("TPY5003"), "{rendered}");
+    assert!(rendered.contains("HookInput.handler"), "{rendered}");
+    assert!(rendered.contains("Callable[[int], str]"), "{rendered}");
 }
 
 #[test]
