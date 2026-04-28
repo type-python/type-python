@@ -153,7 +153,7 @@ Tasks:
 - [x] Support field aliases and keyword-only fields.
 - [x] Support fields excluded from `__init__`.
 - [x] Support frozen/readonly field diagnostics.
-- [ ] Support generated class attributes such as managers, metadata, and validators.
+- [x] Support generated class attributes such as managers, metadata, and validators.
 - [x] Ensure generated `.pyi` is checker-neutral.
 
 ### Acceptance Criteria
