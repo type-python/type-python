@@ -68,6 +68,17 @@ Feature claims: 57. Normative rules: 312 (226 mapped, 86 need mapping).
 | Pass-through `.py` inference (`infer_passthrough`) | Experimental v1 | MAY | missing |
 | Runtime validator emission for `data class` | Experimental v1 | MAY | missing |
 
+## Current Validation Evidence
+
+These commands are the exact post-remediation checks used to validate the current strategic roadmap closure:
+
+- `cargo fmt --check`
+- `cargo test -p typepython-lsp code_actions_offer`
+- `cargo test -p typepython-emit write_runtime_outputs`
+- `cargo test -p typepython-cli run_pipeline_invalidates_cache_when_runtime_validators_change`
+- `python3 scripts/diagnostic_test_coverage.py --check`
+- `python3 -m unittest scripts.test_repo_contracts scripts.test_annotation_compat scripts.test_downstream_checker_matrix`
+
 ## Normative MUST Traceability
 
 | Rule | Source | Status | Requirement | Evidence |

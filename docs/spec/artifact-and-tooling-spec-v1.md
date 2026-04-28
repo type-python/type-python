@@ -98,7 +98,7 @@ emit_pyc = false                                 # Emit .pyc files
 write_py_typed = true                            # Emit py.typed marker
 preserve_comments = true                         # Current implementations always preserve comments when available
 no_emit_on_error = true                          # Block best-effort emit on semantic errors
-runtime_validators = false                       # Experimental: emit runtime validators for data class
+runtime_validators = false                       # Experimental: emit runtime validators for selected data-class trust boundaries
 emit_style = "compat"                            # "compat" or "native"; defaults by target version
 
 [typing]
@@ -784,7 +784,7 @@ At minimum, a Core v1 implementation MUST reserve the following concrete codes w
 | `TPY4101` | Use of deprecated declaration                                           |
 | `TPY5001` | `.pyi` generation failure                                               |
 | `TPY5002` | Best-effort emit blocked by `no_emit_on_error` after semantic errors     |
-| `TPY5003` | Public API verification failure                                         |
+| `TPY5003` | Public API verification or unsupported runtime-validator annotation failure |
 | `TPY6001` | Incremental cache incompatibility or corruption                         |
 | `TPY6002` | LSP overlay/state synchronization failure                               |
 

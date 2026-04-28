@@ -103,6 +103,15 @@ TEST_EVIDENCE: dict[str, tuple[str, ...]] = {
     "`typepython verify` library publishability checks": ("cargo test -p typepython-cli tests::verification",),
 }
 
+VALIDATION_CHECKS: tuple[str, ...] = (
+    "cargo fmt --check",
+    "cargo test -p typepython-lsp code_actions_offer",
+    "cargo test -p typepython-emit write_runtime_outputs",
+    "cargo test -p typepython-cli run_pipeline_invalidates_cache_when_runtime_validators_change",
+    "python3 scripts/diagnostic_test_coverage.py --check",
+    "python3 -m unittest scripts.test_repo_contracts scripts.test_annotation_compat scripts.test_downstream_checker_matrix",
+)
+
 RULE_EVIDENCE_PATTERNS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = tuple(
     (re.compile(pattern, re.IGNORECASE), tests)
     for pattern, tests in [
@@ -221,6 +230,14 @@ def render_markdown(claims: Iterable[FeatureClaim], rules: Iterable[NormativeRul
     for claim in claims:
         evidence = "<br>".join(f"`{test}`" for test in claim.tests) if claim.tests else "missing"
         lines.append(f"| {markdown_cell(claim.feature)} | {claim.tier} | {claim.status} | {evidence} |")
+    lines.extend([
+        "",
+        "## Current Validation Evidence",
+        "",
+        "These commands are the exact post-remediation checks used to validate the current strategic roadmap closure:",
+        "",
+    ])
+    lines.extend(f"- `{check}`" for check in VALIDATION_CHECKS)
     lines.extend([
         "",
         "## Normative MUST Traceability",
