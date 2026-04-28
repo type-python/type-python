@@ -823,27 +823,27 @@ These are high-impact diagnostics that can be modeled with lightweight attribute
 
 ### TODO
 
-- [ ] Define opt-in annotations or decorators:
-  - [ ] `@must_use`
-  - [ ] `@must_await`
-  - [ ] `@must_close`
-  - [ ] `@must_consume`
-- [ ] Define how diagnostics behave for:
-  - [ ] ignored return values
-  - [ ] assigned-but-never-used resources
-  - [ ] context manager usage
-  - [ ] async context manager usage
-  - [ ] early returns
-  - [ ] exceptions
-- [ ] Add conservative intra-procedural analysis first.
-- [ ] Add clear false-positive escape hatches.
-- [ ] Add framework adapters for common resources:
-  - [ ] files
-  - [ ] HTTP responses
-  - [ ] database sessions
-  - [ ] transactions
-  - [ ] async tasks
-- [ ] Keep this separate from full typestate until the simpler diagnostics prove useful.
+- [x] Define opt-in annotations or decorators:
+  - [x] `@must_use`
+  - [x] `@must_await`
+  - [x] `@must_close`
+  - [x] `@must_consume`
+- [x] Define how diagnostics behave for:
+  - [x] ignored return values
+  - [x] assigned-but-never-used resources
+  - [x] context manager usage
+  - [x] async context manager usage
+  - [x] early returns
+  - [x] exceptions
+- [x] Add conservative intra-procedural analysis first.
+- [x] Add clear false-positive escape hatches.
+- [x] Add framework adapters for common resources:
+  - [x] files
+  - [x] HTTP responses
+  - [x] database sessions
+  - [x] transactions
+  - [x] async tasks
+- [x] Keep this separate from full typestate until the simpler diagnostics prove useful.
 
 ### Acceptance Criteria
 

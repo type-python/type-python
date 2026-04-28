@@ -547,3 +547,7 @@ default, and TypePython does not require throws annotations for imported Python 
 | `@deprecated("msg")`   | Marks as deprecated; usage generates warnings       |
 | `@abstractmethod`      | Abstract method (must be implemented by subclasses) |
 | `@dataclass_transform` | Framework-level dataclass behavior                  |
+
+Future lifecycle decorators such as `@must_use`, `@must_await`, `@must_close`, and `@must_consume`
+are design-only and not enforced yet. See [the lifecycle diagnostics RFC](rfcs/lifecycle-diagnostics.md)
+for the conservative analysis boundary and false-positive escape hatches.
