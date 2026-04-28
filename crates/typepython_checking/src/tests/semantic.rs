@@ -218,6 +218,50 @@ fn pydantic_like_base_model_provider_emits_field_alias_and_default_init_stub() {
 }
 
 #[test]
+fn pydantic_like_base_model_provider_emits_model_construct_stub() {
+    let source_text = concat!(
+        "def framework_transform(*args, **kwargs):\n",
+        "    def wrap(obj):\n",
+        "        return obj\n",
+        "    return wrap\n\n",
+        "@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\", \"method_synthesis\"))\n",
+        "class BaseModel:\n",
+        "    pass\n\n",
+        "class User(BaseModel):\n",
+        "    name: str\n",
+    );
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let methods = crate::collect_synthetic_method_stubs(&graph);
+    let construct = methods
+        .iter()
+        .find(|method| method.owner_type_name == "User" && method.name == "model_construct")
+        .expect("expected synthetic User.model_construct stub");
+
+    assert_eq!(construct.method_kind, typepython_syntax::MethodKind::Class);
+    assert_eq!(construct.returns.as_deref(), Some("User"));
+    assert_eq!(construct.params[0].name, "cls");
+    assert_eq!(construct.params[1].name, "_fields_set");
+    assert_eq!(construct.params[1].annotation.as_deref(), Some("set[str] | None"));
+    assert!(construct.params[1].has_default);
+    assert_eq!(construct.params[2].name, "values");
+    assert_eq!(construct.params[2].annotation.as_deref(), Some("object"));
+    assert!(construct.params[2].keyword_variadic);
+}
+
+#[test]
 fn pydantic_like_computed_field_emits_value_stub_override() {
     let source_text = concat!(
         "def framework_transform(*args, **kwargs):\n",

@@ -187,6 +187,9 @@ Framework-owned validator and serializer decorators such as `field_validator`, `
 classes when their static signatures expose the minimum receiver/value shape and an explicit return
 annotation; malformed signatures produce deterministic framework-transform diagnostics instead of
 falling through to generic undecidable-decorator errors.
+The same generated-member capability emits a minimal checker-neutral `model_construct` classmethod
+stub for transformed model classes: `_fields_set: set[str] | None = ...`, `**values: object`, and a
+return type of the transformed class.
 
 Known unsupported Pydantic features remain explicit future work:
 
@@ -195,7 +198,8 @@ Known unsupported Pydantic features remain explicit future work:
 - Validator and serializer decorator support currently checks only statically named decorators with
   obvious parameter-count and return-annotation requirements; mode-specific Pydantic semantics and
   runtime field-name validation remain deferred.
-- `model_construct` signatures are not generated yet.
+- `model_construct` support is limited to the generic trusted-data classmethod shape; RootModel,
+  typed per-field keyword overloads, and full Pydantic alias/extra semantics are deferred.
 - Runtime-computed aliases now produce deterministic diagnostics rather than guessed constructor
   parameters; only string-literal aliases participate in static constructor typing.
 - Advanced Pydantic alias precedence, validation-vs-serialization alias splits, and annotated

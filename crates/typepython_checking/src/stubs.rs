@@ -226,12 +226,23 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
                     declaration.owner.is_none()
                         && declaration.kind == typepython_binding::DeclarationKind::Class
                 })
-                .filter_map(|declaration| {
+                .flat_map(|declaration| {
                     let class_line = module_info
                         .classes
                         .iter()
                         .find(|class_site| class_site.name == declaration.name)
-                        .map(|class_site| class_site.line)?;
+                        .map(|class_site| class_site.line);
+                    let Some(class_line) = class_line else {
+                        return Vec::new();
+                    };
+                    let framework_shape =
+                        crate::resolve_framework_transform_class_shape_from_decl_with_context(
+                            &context,
+                            &graph.nodes,
+                            node,
+                            declaration,
+                            &mut BTreeSet::new(),
+                        );
                     let shape = resolve_dataclass_transform_class_shape_from_decl_with_context(
                         &context,
                         &graph.nodes,
@@ -248,17 +259,12 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
                             &mut BTreeSet::new(),
                         )
                     })
-                    .or_else(|| {
-                        crate::resolve_framework_transform_class_shape_from_decl_with_context(
-                            &context,
-                            &graph.nodes,
-                            node,
-                            declaration,
-                            &mut BTreeSet::new(),
-                        )
-                    })?;
+                    .or_else(|| framework_shape.clone());
+                    let Some(shape) = shape else {
+                        return Vec::new();
+                    };
                     if shape.has_explicit_init {
-                        return None;
+                        return Vec::new();
                     }
                     let mut params = vec![FunctionParam {
                         name: String::from("self"),
@@ -280,7 +286,7 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
                         variadic: false,
                         keyword_variadic: false,
                     }));
-                    Some(SyntheticMethodStub {
+                    let mut methods = vec![SyntheticMethodStub {
                         module_key: node.module_key.clone(),
                         owner_type_name: declaration.name.clone(),
                         class_line,
@@ -288,7 +294,21 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
                         method_kind: MethodKind::Instance,
                         params,
                         returns: Some(String::from("None")),
-                    })
+                    }];
+                    if framework_shape.is_some()
+                        && crate::framework_transform_class_supports_generated_members(
+                            node,
+                            &graph.nodes,
+                            &declaration.name,
+                        )
+                    {
+                        methods.push(generated_model_construct_method_stub(
+                            node,
+                            declaration,
+                            class_line,
+                        ));
+                    }
+                    methods
                 })
                 .collect::<Vec<_>>()
         })
@@ -301,6 +321,53 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
             .then(left.name.cmp(&right.name))
     });
     methods
+}
+
+fn generated_model_construct_method_stub(
+    node: &typepython_graph::ModuleNode,
+    declaration: &typepython_binding::Declaration,
+    class_line: usize,
+) -> SyntheticMethodStub {
+    SyntheticMethodStub {
+        module_key: node.module_key.clone(),
+        owner_type_name: declaration.name.clone(),
+        class_line,
+        name: String::from("model_construct"),
+        method_kind: MethodKind::Class,
+        params: vec![
+            FunctionParam {
+                name: String::from("cls"),
+                annotation: None,
+                annotation_expr: None,
+                has_default: false,
+                positional_only: false,
+                keyword_only: false,
+                variadic: false,
+                keyword_variadic: false,
+            },
+            FunctionParam {
+                name: String::from("_fields_set"),
+                annotation: Some(String::from("set[str] | None")),
+                annotation_expr: typepython_syntax::TypeExpr::parse("set[str] | None"),
+                has_default: true,
+                positional_only: false,
+                keyword_only: false,
+                variadic: false,
+                keyword_variadic: false,
+            },
+            FunctionParam {
+                name: String::from("values"),
+                annotation: Some(String::from("object")),
+                annotation_expr: typepython_syntax::TypeExpr::parse("object"),
+                has_default: false,
+                positional_only: false,
+                keyword_only: false,
+                variadic: false,
+                keyword_variadic: true,
+            },
+        ],
+        returns: Some(declaration.name.clone()),
+    }
 }
 
 fn function_params_from_direct_sites(
