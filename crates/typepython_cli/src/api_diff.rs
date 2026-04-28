@@ -254,6 +254,9 @@ fn collect_surface(root: &Path) -> Result<BTreeMap<String, BTreeMap<String, Publ
 
     let mut files = Vec::new();
     collect_pyi_files(root, &mut files)?;
+    if files.is_empty() {
+        collect_source_surface_files(root, &mut files)?;
+    }
     let mut modules = BTreeMap::new();
     for path in files {
         let module = module_name(root, &path)?;
@@ -397,6 +400,25 @@ fn collect_pyi_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+fn collect_source_surface_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    if root.is_file() {
+        if matches!(root.extension().and_then(|ext| ext.to_str()), Some("py" | "tpy")) {
+            files.push(root.to_owned());
+        }
+        return Ok(());
+    }
+    for entry in fs::read_dir(root).with_context(|| format!("unable to read {}", root.display()))? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_source_surface_files(&path, files)?;
+        } else if matches!(path.extension().and_then(|ext| ext.to_str()), Some("py" | "tpy")) {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(())
+}
+
 fn module_name(root: &Path, path: &Path) -> Result<String> {
     let relative = if root.is_file() {
         path.file_name().map(PathBuf::from)
@@ -448,7 +470,11 @@ fn public_def(line: &str, prefix: &str) -> Option<(String, String)> {
 }
 
 fn public_class(line: &str) -> Option<(String, String)> {
-    let rest = line.strip_prefix("class ")?;
+    let rest = line
+        .strip_prefix("class ")
+        .or_else(|| line.strip_prefix("data class "))
+        .or_else(|| line.strip_prefix("interface "))
+        .or_else(|| line.strip_prefix("sealed class "))?;
     let name = rest.split(['(', ':', '[']).next()?.trim();
     public_name(name).then(|| (name.to_owned(), line.to_owned()))
 }

@@ -101,6 +101,59 @@ fn diff_api_surfaces_accepts_wheel_and_sdist_stub_inputs() {
 }
 
 #[test]
+fn diff_api_surfaces_accepts_source_directory_inputs_when_stubs_are_absent() {
+    let project_dir = temp_project_dir("diff_api_surfaces_accepts_source_directory_inputs");
+    let report = {
+        let old_dir = project_dir.join("old/src");
+        let new_dir = project_dir.join("new/src");
+        fs::create_dir_all(old_dir.join("app")).expect("old source package should be created");
+        fs::create_dir_all(new_dir.join("app")).expect("new source package should be created");
+        fs::write(
+            old_dir.join("app/__init__.py"),
+            "def parse(value: str) -> int:\n    return 1\n\nclass User:\n    pass\n",
+        )
+        .expect("old source should be written");
+        fs::write(
+            new_dir.join("app/__init__.py"),
+            "def parse(value: str) -> str:\n    return \"1\"\n\nclass User:\n    pass\n",
+        )
+        .expect("new source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should read source dirs")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].module, "app");
+    assert_eq!(report.changed[0].symbol, "parse");
+}
+
+#[test]
+fn diff_api_surfaces_accepts_typepython_source_directory_inputs() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_accepts_typepython_source_directory_inputs");
+    let report = {
+        let old_dir = project_dir.join("old/src");
+        let new_dir = project_dir.join("new/src");
+        fs::create_dir_all(&old_dir).expect("old source dir should be created");
+        fs::create_dir_all(&new_dir).expect("new source dir should be created");
+        fs::write(old_dir.join("models.tpy"), "data class Removed:\n    id: int\n")
+            .expect("old tpy source should be written");
+        fs::write(
+            new_dir.join("models.tpy"),
+            "interface Added:\n    def render(self) -> str: ...\n",
+        )
+        .expect("new tpy source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should read tpy source dirs")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.removed[0].symbol, "Removed");
+    assert_eq!(report.added[0].symbol, "Added");
+}
+
+#[test]
 fn diff_api_surfaces_reports_py_typed_metadata_regression() {
     let project_dir = temp_project_dir("diff_api_surfaces_reports_py_typed_metadata_regression");
     let report = {
