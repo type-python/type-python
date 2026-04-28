@@ -1341,6 +1341,7 @@ fn production_semantic_paths_do_not_read_legacy_detail_directly() {
 
 mod advanced;
 mod advanced_generics;
+mod advanced_overloads;
 mod calls;
 mod property_based;
 mod semantic;

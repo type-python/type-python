@@ -292,8 +292,8 @@ Make TypePython credible as a compiler that users can place in a release pipelin
 - [x] Build a mapping from spec `MUST` rules to test names.
 - [x] Add a generated conformance report.
 - [x] Ensure every diagnostic code has positive and negative tests.
-- [ ] Split giant checker fixtures into thematic files where practical.
-- [ ] Keep insta snapshots limited to emission/golden output tests.
+- [x] Split giant checker fixtures into thematic files where practical.
+- [x] Keep insta snapshots limited to emission/golden output tests.
 
 ### Acceptance Criteria
 
