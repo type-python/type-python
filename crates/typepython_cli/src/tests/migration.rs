@@ -227,6 +227,13 @@ fn build_migration_budget_baseline_records_public_any_unknown_and_untyped_import
             .iter()
             .any(|issue| { issue.contains("untyped import") })
     );
+    assert!(baseline.path_budgets.iter().any(|budget| {
+        budget.path.ends_with("src/app/__init__.tpy")
+            && budget.category == "library public surface"
+            && budget.max_public_any == 1
+            && budget.max_public_unknown == 1
+            && budget.max_untyped_imports == 1
+    }));
 }
 
 #[test]
@@ -243,6 +250,7 @@ fn compare_migration_budget_baseline_reports_new_public_any_and_unknown() {
         untyped_imports: Vec::new(),
         dynamic_framework_boundaries: Vec::new(),
         checker_portability_issues: Vec::new(),
+        path_budgets: Vec::new(),
     };
     let current = MigrationBudgetBaseline {
         public_any: vec![

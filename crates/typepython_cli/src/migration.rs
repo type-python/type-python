@@ -75,6 +75,17 @@ pub(crate) struct MigrationBudgetBaseline {
     pub(crate) untyped_imports: Vec<MigrationUntypedImportEntry>,
     pub(crate) dynamic_framework_boundaries: Vec<MigrationFrameworkPatternEntry>,
     pub(crate) checker_portability_issues: Vec<String>,
+    pub(crate) path_budgets: Vec<MigrationPathBudgetEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) struct MigrationPathBudgetEntry {
+    pub(crate) path: String,
+    pub(crate) category: String,
+    pub(crate) max_public_any: usize,
+    pub(crate) max_public_unknown: usize,
+    pub(crate) max_untyped_imports: usize,
+    pub(crate) max_dynamic_framework_boundaries: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -536,6 +547,66 @@ pub(crate) fn build_migration_budget_baseline(
         untyped_imports: report.untyped_import_files.clone(),
         dynamic_framework_boundaries: report.framework_pattern_files.clone(),
         checker_portability_issues: migration_checker_portability_issues(report),
+        path_budgets: migration_path_budget_entries(report),
+    }
+}
+
+fn migration_path_budget_entries(report: &MigrationReport) -> Vec<MigrationPathBudgetEntry> {
+    let public_any_counts = migration_public_debt_counts(report, "Any");
+    let public_unknown_counts = migration_public_debt_counts(report, "Unknown");
+    let untyped_import_counts = report
+        .untyped_import_files
+        .iter()
+        .map(|entry| (entry.path.clone(), entry.untyped_import_count))
+        .collect::<BTreeMap<_, _>>();
+    let framework_boundary_counts = report
+        .framework_pattern_files
+        .iter()
+        .map(|entry| (entry.path.clone(), entry.frameworks.len()))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut paths = BTreeSet::new();
+    paths.extend(public_any_counts.keys().cloned());
+    paths.extend(public_unknown_counts.keys().cloned());
+    paths.extend(untyped_import_counts.keys().cloned());
+    paths.extend(framework_boundary_counts.keys().cloned());
+
+    paths
+        .into_iter()
+        .map(|path| MigrationPathBudgetEntry {
+            category: migration_path_budget_category(&path),
+            max_public_any: public_any_counts.get(&path).copied().unwrap_or(0),
+            max_public_unknown: public_unknown_counts.get(&path).copied().unwrap_or(0),
+            max_untyped_imports: untyped_import_counts.get(&path).copied().unwrap_or(0),
+            max_dynamic_framework_boundaries: framework_boundary_counts
+                .get(&path)
+                .copied()
+                .unwrap_or(0),
+            path,
+        })
+        .collect()
+}
+
+fn migration_public_debt_counts(report: &MigrationReport, token: &str) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for entry in migration_public_type_debt_entries(report, token) {
+        *counts.entry(entry.path).or_default() += 1;
+    }
+    counts
+}
+
+fn migration_path_budget_category(path: &str) -> String {
+    let lowered = path.to_ascii_lowercase();
+    if lowered.contains(".typepython") || lowered.contains("generated") {
+        String::from("generated")
+    } else if lowered.contains("test") {
+        String::from("tests")
+    } else if lowered.contains("migration") || lowered.contains("script") {
+        String::from("migrations/scripts")
+    } else if lowered.contains("__init__") || lowered.contains("lib") || lowered.contains("api") {
+        String::from("library public surface")
+    } else {
+        String::from("application code")
     }
 }
 

@@ -628,12 +628,12 @@ Most real Python codebases cannot become fully typed in a single migration. A st
   - [x] checker portability issues
 - [x] Add "no new public `Any`" mode.
 - [x] Add "no new `Unknown` exported from package" mode.
-- [ ] Add per-path budgets for:
-  - [ ] library public surface
-  - [ ] application code
-  - [ ] generated code
-  - [ ] tests
-  - [ ] migrations/scripts
+- [x] Add per-path budgets for:
+  - [x] library public surface
+  - [x] application code
+  - [x] generated code
+  - [x] tests
+  - [x] migrations/scripts
 - [x] Rank untyped modules by downstream blast radius.
 - [ ] Add CI annotations for only the lines changed in a PR.
 - [ ] Add JSON and SARIF output for dashboards.
@@ -643,7 +643,7 @@ Most real Python codebases cannot become fully typed in a single migration. A st
 
 - [x] A partially typed project can enforce "no new type debt" in CI.
 - [x] Reports identify the smallest set of files that would unlock the largest downstream precision gain.
-- [ ] Teams can ratchet strictness without mass suppressions.
+- [x] Teams can ratchet strictness without mass suppressions.
 
 ## P1: Framework Adapter SDK Prototype
 
