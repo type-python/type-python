@@ -248,6 +248,58 @@ impl AnalysisHost {
         Ok(json!([LspTextEdit { range: full_document_range(&document.text), new_text: restored }]))
     }
 
+    pub(super) fn preview_emit(&mut self, uri: &str) -> Result<Value, LspError> {
+        let config = self.config.clone();
+        let workspace = self.workspace()?;
+        let Some(document) = workspace.queries.documents_by_uri.get(uri) else {
+            return Err(LspError::invalid_params(format!(
+                "typepython.previewEmit could not find open document `{uri}`"
+            )));
+        };
+        if document.syntax.source.kind != typepython_syntax::SourceKind::TypePython {
+            return Err(LspError::invalid_params(format!(
+                "typepython.previewEmit only supports TypePython source files, got `{}`",
+                document.path.display()
+            )));
+        }
+
+        let lowering = lower_with_options(
+            &document.syntax,
+            &LoweringOptions {
+                target_python: config.config.project.target_python,
+                emit_style: config.config.emit.emit_style,
+                experimental_shape_transforms: false,
+            },
+        );
+        if lowering.diagnostics.has_errors() {
+            return Err(LspError::request_failed(format!(
+                "TPY6005: unable to preview emitted output for `{}`: {}",
+                document.path.display(),
+                lowering.diagnostics.as_text().trim()
+            ))
+            .with_tpy_code("TPY6005"));
+        }
+        let stub_source = typepython_emit::generate_typepython_stub_source(
+            &lowering.module,
+            &typepython_emit::TypePythonStubContext::default(),
+        )
+        .map_err(|error| {
+            LspError::request_failed(format!(
+                "TPY6005: unable to preview emitted stub for `{}`: {error}",
+                document.path.display()
+            ))
+            .with_tpy_code("TPY6005")
+        })?;
+
+        Ok(json!({
+            "command": "typepython.previewEmit",
+            "uri": uri,
+            "path": document.path.display().to_string(),
+            "python": lowering.module.python_source,
+            "stub": stub_source,
+        }))
+    }
+
     pub(super) fn signature_help(
         &mut self,
         uri: &str,

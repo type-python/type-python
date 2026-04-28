@@ -132,7 +132,8 @@ impl Server {
                             "commands": [
                                 "typepython.migrateReport",
                                 "typepython.compat",
-                                "typepython.typeHealth"
+                                "typepython.typeHealth",
+                                "typepython.previewEmit"
                             ]
                         },
                         "completionProvider": {
@@ -380,6 +381,10 @@ impl Server {
                 "workspace/executeCommand request missing `params.command`",
             ))
         })?;
+        if command == "typepython.previewEmit" {
+            let uri = command_uri_argument(&params, command)?;
+            return self.analysis.preview_emit(&uri);
+        }
         let args = workflow_command_args(command, &self.analysis.config.config_dir)?;
         let executable = env::current_exe().unwrap_or_else(|_| PathBuf::from("typepython"));
         let output = ProcessCommand::new(&executable)
@@ -435,6 +440,20 @@ pub(super) fn workflow_command_args(
             "workspace/executeCommand received unsupported TypePython command `{command}`"
         ))),
     }
+}
+
+pub(super) fn command_uri_argument(params: &Value, command: &str) -> Result<String, LspError> {
+    params
+        .get("arguments")
+        .and_then(Value::as_array)
+        .and_then(|arguments| arguments.first())
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            LspError::invalid_params(format!(
+                "workspace/executeCommand `{command}` requires the current document URI as its first argument"
+            ))
+        })
 }
 
 fn workflow_stderr_suffix(stderr: &[u8]) -> String {

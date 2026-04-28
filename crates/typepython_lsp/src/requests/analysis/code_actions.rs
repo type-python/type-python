@@ -223,6 +223,11 @@ pub(crate) fn collect_project_workflow_code_actions(document: &DocumentState) ->
             String::from("typepython.typeHealth"),
             &document.uri,
         ),
+        command_code_action(
+            String::from("Preview emitted `.py` and `.pyi`"),
+            String::from("typepython.previewEmit"),
+            &document.uri,
+        ),
     ]
 }
 

@@ -33,7 +33,12 @@ fn handle_initialize_returns_required_capabilities() {
     assert_eq!(capabilities["codeActionProvider"], json!(true));
     assert_eq!(
         capabilities["executeCommandProvider"]["commands"],
-        json!(["typepython.migrateReport", "typepython.compat", "typepython.typeHealth"])
+        json!([
+            "typepython.migrateReport",
+            "typepython.compat",
+            "typepython.typeHealth",
+            "typepython.previewEmit"
+        ])
     );
 }
 
@@ -1017,6 +1022,40 @@ fn code_actions_offer_project_workflow_commands() {
     assert!(commands.contains(&"typepython.migrateReport"));
     assert!(commands.contains(&"typepython.compat"));
     assert!(commands.contains(&"typepython.typeHealth"));
+    assert!(commands.contains(&"typepython.previewEmit"));
+}
+
+#[test]
+fn execute_command_previews_current_file_emit_outputs() {
+    let config = temp_workspace(
+        "execute_command_previews_current_file_emit_outputs",
+        &[(
+            "src/app/__init__.tpy",
+            "data class User:\n    name: str\n\ndef build() -> User:\n    return User(\"Ada\")\n",
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let responses = server
+        .handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "workspace/executeCommand",
+            "params": {
+                "command": "typepython.previewEmit",
+                "arguments": [uri]
+            }
+        }))
+        .expect("preview command should succeed");
+
+    assert_eq!(responses.len(), 1);
+    let result = &responses[0]["result"];
+    assert_eq!(result["command"], json!("typepython.previewEmit"));
+    assert!(result["python"].as_str().unwrap_or_default().contains("@dataclass"));
+    assert!(result["python"].as_str().unwrap_or_default().contains("class User:"));
+    assert!(result["stub"].as_str().unwrap_or_default().contains("class User:"));
+    assert!(result["stub"].as_str().unwrap_or_default().contains("def build() -> User"));
 }
 
 #[test]

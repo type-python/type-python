@@ -23,6 +23,7 @@ use typepython_incremental::{
     IncrementalState, ModuleDependencyIndex, affected_modules, dependency_index, diff,
     snapshot_diff_modules,
 };
+use typepython_lowering::{LoweringOptions, lower_with_options};
 use typepython_project::{DiscoveredSource, SupportSourceIndex};
 #[cfg(test)]
 use typepython_syntax::SourceKind;
