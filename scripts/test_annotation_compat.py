@@ -106,6 +106,21 @@ class AnnotationCompatTests(unittest.TestCase):
         )
         self.assertTrue(audit.safe_for_runtime_introspection)
 
+    def test_audit_source_flags_type_checking_only_annotation_imports(self) -> None:
+        audit = annotation_compat.audit_source(
+            "from typing import TYPE_CHECKING, get_type_hints\n"
+            "if TYPE_CHECKING:\n"
+            "    from models import User\n\n"
+            "def build(user: 'User') -> None:\n"
+            "    return None\n\n"
+            "get_type_hints(build)\n"
+        )
+
+        self.assertFalse(audit.safe_for_runtime_introspection)
+        self.assertIn(annotation_compat.AnnotationConsumer.TYPING_GET_TYPE_HINTS, audit.consumers)
+        self.assertEqual({finding.code for finding in audit.findings}, {"TPY-A002"})
+        self.assertIn("TYPE_CHECKING-only", audit.findings[0].message)
+
 
 if __name__ == "__main__":
     unittest.main()

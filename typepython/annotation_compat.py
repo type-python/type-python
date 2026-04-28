@@ -186,7 +186,16 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
     def __init__(self) -> None:
         self.consumers: set[AnnotationConsumer] = set()
         self.findings: list[AnnotationAuditFinding] = []
+        self._type_checking_only_names: set[str] = set()
         self._scope_depth = 0
+
+    def visit_If(self, node: ast.If) -> None:
+        if _is_type_checking_guard(node.test):
+            self._record_type_checking_only_imports(node.body)
+            for statement in node.orelse:
+                self.visit(statement)
+            return
+        self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         for decorator in node.decorator_list:
@@ -223,9 +232,47 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
     ) -> None:
         if self._scope_depth > 0:
             self._record_nested_annotation_findings(node)
+        self._record_type_checking_annotation_findings(node)
         self._scope_depth += 1
         self.generic_visit(node)
         self._scope_depth -= 1
+
+    def _record_type_checking_only_imports(self, statements: list[ast.stmt]) -> None:
+        for statement in statements:
+            if isinstance(statement, ast.Import):
+                for alias in statement.names:
+                    self._type_checking_only_names.add(alias.asname or alias.name.split(".", 1)[0])
+            elif isinstance(statement, ast.ImportFrom):
+                for alias in statement.names:
+                    if alias.name == "*":
+                        continue
+                    self._type_checking_only_names.add(alias.asname or alias.name)
+            elif isinstance(statement, ast.If) and _is_type_checking_guard(statement.test):
+                self._record_type_checking_only_imports(statement.body)
+
+    def _record_type_checking_annotation_findings(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
+    ) -> None:
+        if not self._type_checking_only_names:
+            return
+        for annotation in _node_annotations(node):
+            names = _annotation_names(annotation)
+            blocked = sorted(names & self._type_checking_only_names)
+            if not blocked:
+                continue
+            self.findings.append(
+                AnnotationAuditFinding(
+                    code="TPY-A002",
+                    message=(
+                        "annotation references TYPE_CHECKING-only import(s) "
+                        f"{', '.join(blocked)}; runtime annotation evaluation can fail or "
+                        "reintroduce import cycles"
+                    ),
+                    line=annotation.lineno,
+                    column=annotation.col_offset + 1,
+                )
+            )
 
     def _record_nested_annotation_findings(
         self,
@@ -273,6 +320,19 @@ def _annotation_mentions_local_name(annotation: ast.expr) -> bool:
     if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
         return True
     return any(isinstance(child, ast.Name) for child in ast.walk(annotation))
+
+
+def _annotation_names(annotation: ast.expr) -> set[str]:
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        try:
+            annotation = ast.parse(annotation.value, mode="eval").body
+        except SyntaxError:
+            return set()
+    return {child.id for child in ast.walk(annotation) if isinstance(child, ast.Name)}
+
+
+def _is_type_checking_guard(test: ast.expr) -> bool:
+    return _dotted_name(test) in {"TYPE_CHECKING", "typing.TYPE_CHECKING"}
 
 
 def _call_consumer(func: ast.expr) -> AnnotationConsumer | None:
