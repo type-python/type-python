@@ -203,7 +203,7 @@ The following appendix remains normative for conformance and capability claims.
 | Optional `.pyc` generation                                                                                    | DX v1           | MAY    |
 | Conditional return types (overload sugar via `-> match param:`)                                               | Experimental v1 | MAY    |
 | Pass-through `.py` inference (`infer_passthrough`)                                                            | Experimental v1 | MAY    |
-| Runtime validator emission for `data class`                                                                   | Experimental v1 | MAY    |
+| Runtime validator emission for selected data-class trust boundaries                                           | Experimental v1 | MAY    |
 
 **Deferred beyond v1:**
 

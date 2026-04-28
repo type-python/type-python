@@ -101,6 +101,10 @@ TEST_EVIDENCE: dict[str, tuple[str, ...]] = {
     "Public API completeness enforcement when configured": ("cargo test -p typepython-cli public_surface",),
     "Packaging artifact consistency rules for typed publication": ("cargo test -p typepython-cli tests::verification",),
     "`typepython verify` library publishability checks": ("cargo test -p typepython-cli tests::verification",),
+    "Runtime validator emission for selected data-class trust boundaries": (
+        "cargo test -p typepython-emit write_runtime_outputs",
+        "cargo test -p typepython-config loads_all_supported_typepython_toml_configuration_fields",
+    ),
 }
 
 VALIDATION_CHECKS: tuple[str, ...] = (
@@ -149,6 +153,7 @@ RULE_EVIDENCE_PATTERNS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = tu
         (r"diagnostic|TPY\d+|severity", TEST_EVIDENCE["Deterministic diagnostics"]),
         (r"cache|incremental|invalidation|rechecking|summary", TEST_EVIDENCE["Cache invalidation"]),
         (r"verify|wheel|sdist|artifact|publication", TEST_EVIDENCE["`typepython verify` library publishability checks"]),
+        (r"runtime validator|validation boundary|boundaries|__tpy_validate__", TEST_EVIDENCE["Runtime validator emission for selected data-class trust boundaries"]),
     ]
 )
 
