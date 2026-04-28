@@ -952,7 +952,8 @@ fn code_actions_offer_common_migration_actions() {
             "context": {"diagnostics": []}
         }))
         .expect("dict migration action should succeed");
-    assert!(dict_actions.as_array().unwrap().iter().any(|action| {
+    let dict_actions = dict_actions.as_array().expect("dict migration actions should be an array");
+    assert!(dict_actions.iter().any(|action| {
         action["title"] == json!("Extract TypedDict `PayloadShape` from dict literal")
     }));
 
@@ -969,7 +970,7 @@ fn code_actions_offer_common_migration_actions() {
     assert!(
         annotation_actions
             .as_array()
-            .unwrap()
+            .expect("minimal annotation actions should be an array")
             .iter()
             .any(|action| { action["title"] == json!("Insert minimal annotation for `value`") })
     );
@@ -1116,7 +1117,9 @@ fn code_actions_offer_remaining_portable_typing_rewrites() {
             "context": {"diagnostics": []}
         }))
         .expect("typing_extensions import action should succeed");
-    assert!(import_actions.as_array().unwrap().iter().any(|action| {
+    let import_actions =
+        import_actions.as_array().expect("typing_extensions import actions should be an array");
+    assert!(import_actions.iter().any(|action| {
         action["title"] == json!("Select target-compatible `typing_extensions` import")
     }));
 
@@ -1133,7 +1136,7 @@ fn code_actions_offer_remaining_portable_typing_rewrites() {
     assert!(
         typed_dict_actions
             .as_array()
-            .unwrap()
+            .expect("TypedDict requiredness actions should be an array")
             .iter()
             .any(|action| { action["title"] == json!("Mark TypedDict key as `NotRequired`") })
     );
@@ -1148,7 +1151,9 @@ fn code_actions_offer_remaining_portable_typing_rewrites() {
             "context": {"diagnostics": []}
         }))
         .expect("overload normalization action should succeed");
-    assert!(overload_actions.as_array().unwrap().iter().any(|action| {
+    let overload_actions =
+        overload_actions.as_array().expect("overload normalization actions should be an array");
+    assert!(overload_actions.iter().any(|action| {
         action["title"] == json!("Normalize overload to standard `@overload` form")
     }));
 }
@@ -1385,9 +1390,13 @@ fn diagnostics_include_fix_portability_metadata() {
 
     let diagnostics = diagnostics_by_uri(&[document], &report);
     let diagnostics = diagnostics.get(&uri).expect("diagnostics should map to the document URI");
+    let first_data =
+        diagnostics[0].data.as_ref().expect("first diagnostic should include LSP data");
+    let second_data =
+        diagnostics[1].data.as_ref().expect("second diagnostic should include LSP data");
 
-    assert_eq!(diagnostics[0].data.as_ref().unwrap()["fixPortability"], json!("typepython-only"));
-    assert_eq!(diagnostics[1].data.as_ref().unwrap()["fixPortability"], json!("checker-portable"));
+    assert_eq!(first_data["fixPortability"], json!("typepython-only"));
+    assert_eq!(second_data["fixPortability"], json!("checker-portable"));
 }
 
 #[test]

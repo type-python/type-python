@@ -285,7 +285,7 @@ fn diagnostic_lsp_data(diagnostic: &Diagnostic) -> Option<Value> {
     if let Some(portability) = diagnostic_fix_portability(&diagnostic.code) {
         data.insert(String::from("fixPortability"), json!(portability));
     }
-    (!data.is_empty()).then(|| Value::Object(data))
+    (!data.is_empty()).then_some(Value::Object(data))
 }
 
 fn diagnostic_fix_portability(code: &str) -> Option<&'static str> {

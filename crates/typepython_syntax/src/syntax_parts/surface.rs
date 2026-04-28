@@ -1117,16 +1117,11 @@ pub enum FrameworkTransformCapability {
 }
 
 /// Fallback behavior when a framework transform cannot be fully resolved statically.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
 pub enum FrameworkTransformFallback {
+    #[default]
     StrictDiagnostic,
     NonStrictDegrade,
-}
-
-impl Default for FrameworkTransformFallback {
-    fn default() -> Self {
-        Self::StrictDiagnostic
-    }
 }
 
 /// One framework transform provider declaration captured from source or sidecar metadata.

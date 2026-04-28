@@ -524,14 +524,11 @@ fn framework_owned_decorator_diagnostic(
     declaration: &Declaration,
     decorated: &typepython_syntax::DecoratedCallableSite,
 ) -> Option<Option<Diagnostic>> {
-    let Some(owner) = declaration.owner.as_ref() else {
-        return None;
-    };
-    let Some(kind) = decorated.decorators.iter().find_map(|decorator| {
-        framework_owned_decorator_kind(decorator)
-    }) else {
-        return None;
-    };
+    let owner = declaration.owner.as_ref()?;
+    let kind = decorated
+        .decorators
+        .iter()
+        .find_map(|decorator| framework_owned_decorator_kind(decorator))?;
     if !framework_transform_class_supports_generated_members(node, nodes, &owner.name) {
         return None;
     }

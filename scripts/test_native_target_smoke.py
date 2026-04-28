@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import tempfile
 import unittest
@@ -30,6 +31,27 @@ class NativeTargetSmokeTests(unittest.TestCase):
         self.assertIn('target_python = "3.14"', rendered)
         self.assertNotIn('target_python = "3.10"', rendered)
 
+    def test_rewrite_python_executable_updates_single_resolution_line(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="native-target-smoke-test-") as tmp:
+            config_path = pathlib.Path(tmp) / "typepython.toml"
+            config_path.write_text(
+                '[project]\nsrc = ["src"]\n\n[resolution]\npython_executable = null\n',
+                encoding="utf-8",
+            )
+
+            native_target_smoke.rewrite_python_executable(
+                config_path,
+                "/tmp/python with spaces/bin/python",
+            )
+
+            rendered = config_path.read_text(encoding="utf-8")
+
+        self.assertIn(
+            'python_executable = "/tmp/python with spaces/bin/python"',
+            rendered,
+        )
+        self.assertNotIn("python_executable = null", rendered)
+
     def test_main_runs_native_build_and_verify_flow(self) -> None:
         commands: list[tuple[list[str], pathlib.Path | None]] = []
         entrypoint = "/fake/typepython"
@@ -45,7 +67,8 @@ class NativeTargetSmokeTests(unittest.TestCase):
                 project_dir = cwd / "native-project"
                 (project_dir / "src" / "app").mkdir(parents=True)
                 (project_dir / "typepython.toml").write_text(
-                    '[project]\nsrc = ["src"]\ntarget_python = "3.10"\n',
+                    '[project]\nsrc = ["src"]\ntarget_python = "3.10"\n\n'
+                    "[resolution]\npython_executable = null\n",
                     encoding="utf-8",
                 )
 
@@ -114,6 +137,47 @@ class NativeTargetSmokeTests(unittest.TestCase):
             },
         )
         self.assertTrue(payload["framework_annotation_safe"])
+
+    def test_runtime_probe_is_self_contained(self) -> None:
+        captured_probe: list[str] = []
+
+        def fake_capture(command: list[str], cwd: pathlib.Path | None = None) -> str:
+            self.assertIsNone(cwd)
+            self.assertEqual(command[1], "-c")
+            captured_probe.append(command[2])
+            return json.dumps(
+                {
+                    "module_has_T": False,
+                    "pair_type_name": "TypeAliasType",
+                    "pair_type_module": "typing",
+                    "pair_type_params": ["T"],
+                    "box_type_params": ["T"],
+                    "first_pair_type_params": ["T"],
+                    "pair_default_present": True,
+                    "box_default_present": True,
+                    "function_default_present": True,
+                    "scope_alias_type_name": "TypeAliasType",
+                    "scope_alias_resolves_nested": True,
+                    "explosive_error": "ZeroDivisionError",
+                    "framework_annotation_consumers": [
+                        "fastapi.Depends",
+                        "fastapi.route_decorator",
+                        "pydantic.BaseModel",
+                        "pydantic.Field",
+                    ],
+                    "framework_annotation_safe": True,
+                }
+            )
+
+        with (
+            tempfile.TemporaryDirectory(prefix="native-target-smoke-test-") as tmp,
+            mock.patch.object(native_target_smoke, "capture", side_effect=fake_capture),
+        ):
+            native_target_smoke.assert_runtime_semantics(pathlib.Path(tmp))
+
+        self.assertEqual(len(captured_probe), 1)
+        self.assertIn("audit_source(framework_audit_source)", captured_probe[0])
+        self.assertNotIn("framework_annotation_audit_summary", captured_probe[0])
 
 
 if __name__ == "__main__":

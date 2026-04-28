@@ -44,9 +44,9 @@ coverage:
 	mkdir -p coverage
 	$(CARGO) llvm-cov clean --workspace
 	$(CARGO) llvm-cov --workspace --all-features --no-report
-	$(CARGO) llvm-cov report --workspace --all-features --lcov --output-path coverage/lcov.info
-	$(CARGO) llvm-cov report --workspace --all-features --text --output-path coverage/coverage.txt --fail-under-lines $(COVERAGE_MIN_LINES)
-	$(CARGO) llvm-cov report --workspace --all-features --html
+	$(CARGO) llvm-cov report --lcov --output-path coverage/lcov.info
+	$(CARGO) llvm-cov report --text --output-path coverage/coverage.txt --fail-under-lines $(COVERAGE_MIN_LINES)
+	$(CARGO) llvm-cov report --html
 
 fuzz-smoke:
 	for target in $(FUZZ_TARGETS); do $(CARGO) +nightly fuzz run $$target -- -max_total_time=$(FUZZ_SMOKE_SECONDS); done

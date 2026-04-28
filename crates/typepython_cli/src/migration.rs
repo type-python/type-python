@@ -748,15 +748,15 @@ fn migration_public_type_debt_entries(
         .public_api_files
         .iter()
         .flat_map(|entry| {
-            entry.incomplete_exports.iter().filter_map(|symbol| {
-                symbol_contains_type_debt_token(symbol, token).then(|| {
-                    MigrationPublicTypeDebtEntry {
-                        path: entry.path.clone(),
-                        symbol: symbol.clone(),
-                        kind: String::from("public-export"),
-                    }
+            entry
+                .incomplete_exports
+                .iter()
+                .filter(|symbol| symbol_contains_type_debt_token(symbol, token))
+                .map(|symbol| MigrationPublicTypeDebtEntry {
+                    path: entry.path.clone(),
+                    symbol: symbol.clone(),
+                    kind: String::from("public-export"),
                 })
-            })
         })
         .collect()
 }

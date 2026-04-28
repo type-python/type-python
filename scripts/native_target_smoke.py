@@ -17,6 +17,17 @@ from typepython.annotation_compat import (
     supported_formats,
 )
 
+FRAMEWORK_ANNOTATION_AUDIT_SOURCE = (
+    "from fastapi import Depends, FastAPI\n"
+    "from pydantic import BaseModel, Field\n\n"
+    "app = FastAPI()\n\n"
+    "class User(BaseModel):\n"
+    "    name: str = Field(alias='user_name')\n\n"
+    "@app.get('/users/{name}')\n"
+    "def read_user(name: str, current: str = Depends()) -> User:\n"
+    "    return User(name=name)\n"
+)
+
 
 def run(command: list[str], cwd: pathlib.Path | None = None) -> None:
     location = f" (cwd={cwd})" if cwd is not None else ""
@@ -67,6 +78,19 @@ def rewrite_target_python(config_path: pathlib.Path, target: str) -> None:
     )
     if count != 1:
         raise SystemExit(f"unable to rewrite target_python in {config_path}")
+    config_path.write_text(rewritten)
+
+
+def rewrite_python_executable(config_path: pathlib.Path, executable: str) -> None:
+    original = config_path.read_text()
+    rewritten, count = re.subn(
+        r'(?m)^python_executable = (?:null|"[^"]*")$',
+        f"python_executable = {json.dumps(executable)}",
+        original,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit(f"unable to rewrite python_executable in {config_path}")
     config_path.write_text(rewritten)
 
 
@@ -126,16 +150,7 @@ def assert_native_outputs(project_dir: pathlib.Path) -> None:
 
 
 def framework_annotation_audit_summary() -> dict[str, object]:
-    audit = audit_source(
-        "from fastapi import Depends, FastAPI\n"
-        "from pydantic import BaseModel, Field\n\n"
-        "app = FastAPI()\n\n"
-        "class User(BaseModel):\n"
-        "    name: str = Field(alias='user_name')\n\n"
-        "@app.get('/users/{name}')\n"
-        "def read_user(name: str, current: str = Depends()) -> User:\n"
-        "    return User(name=name)\n"
-    )
+    audit = audit_source(FRAMEWORK_ANNOTATION_AUDIT_SOURCE)
     return {
         "framework_annotation_consumers": [consumer.value for consumer in audit.consumers],
         "framework_annotation_safe": audit.safe_for_runtime_introspection,
@@ -144,7 +159,8 @@ def framework_annotation_audit_summary() -> dict[str, object]:
 
 def assert_runtime_semantics(project_dir: pathlib.Path) -> None:
     build_root = project_dir / ".typepython" / "build"
-    probe = """
+    probe = (
+        """
 import importlib
 import json
 import pathlib
@@ -153,7 +169,11 @@ import sys
 build_root = pathlib.Path(sys.argv[1])
 sys.path.insert(0, str(build_root))
 module = importlib.import_module("app")
-from typepython.annotation_compat import AnnotationFormat, get_annotations, supported_formats
+from typepython.annotation_compat import AnnotationFormat, audit_source, get_annotations, supported_formats
+
+framework_audit_source = """
+        + repr(FRAMEWORK_ANNOTATION_AUDIT_SOURCE)
+        + """
 
 explosive_error = None
 try:
@@ -161,8 +181,9 @@ try:
 except BaseException as error:
     explosive_error = type(error).__name__
 
-    payload = {
-        "module_has_T": "T" in vars(module),
+framework_audit = audit_source(framework_audit_source)
+payload = {
+    "module_has_T": "T" in vars(module),
     "pair_type_name": type(module.Pair).__name__,
     "pair_type_module": type(module.Pair).__module__,
     "pair_type_params": [param.__name__ for param in module.Pair.__type_params__],
@@ -171,11 +192,12 @@ except BaseException as error:
     "pair_default_present": getattr(module.Pair.__type_params__[0], "__default__", None) is not None,
     "box_default_present": getattr(module.Box.__type_params__[0], "__default__", None) is not None,
     "function_default_present": getattr(module.first_pair.__type_params__[0], "__default__", None) is not None,
-        "scope_alias_type_name": type(module.Scope.Alias).__name__,
-        "scope_alias_resolves_nested": module.Scope.Alias.__value__ is module.Scope.Nested,
-        "explosive_error": explosive_error,
-        **framework_annotation_audit_summary(),
-    }
+    "scope_alias_type_name": type(module.Scope.Alias).__name__,
+    "scope_alias_resolves_nested": module.Scope.Alias.__value__ is module.Scope.Nested,
+    "explosive_error": explosive_error,
+    "framework_annotation_consumers": [consumer.value for consumer in framework_audit.consumers],
+    "framework_annotation_safe": framework_audit.safe_for_runtime_introspection,
+}
 
 if sys.version_info >= (3, 14):
     payload["annotationlib_box_has_value"] = "default_value" in get_annotations(
@@ -188,6 +210,7 @@ if sys.version_info >= (3, 14):
 
 print(json.dumps(payload))
 """
+    )
     rendered = capture([sys.executable, "-c", probe, str(build_root)])
     payload = json.loads(rendered)
 
@@ -278,6 +301,7 @@ def main() -> None:
 
         run([entrypoint, "init", "--dir", "native-project"], cwd=root)
         rewrite_target_python(project_dir / "typepython.toml", args.target_python)
+        rewrite_python_executable(project_dir / "typepython.toml", sys.executable)
         write_native_source(project_dir / "src" / "app" / "__init__.tpy")
 
         run([entrypoint, "check", "--project", "."], cwd=project_dir)

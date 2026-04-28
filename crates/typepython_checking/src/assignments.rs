@@ -1701,9 +1701,10 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
                     &target_type_rendered,
                 )
             })?;
-            let Some(field) = shape.fields.iter().find(|field| field.name == site.field_name) else {
-                return None;
-            };
+            let field = shape
+                .fields
+                .iter()
+                .find(|field| field.name == site.field_name)?;
             if !(shape.frozen || field.frozen) {
                 return None;
             }

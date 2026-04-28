@@ -321,7 +321,7 @@ fn unsupported_typing_extensions_imports(line: &str, target_python: PythonTarget
     };
     imports
         .split(',')
-        .filter_map(|import| import.trim().split_whitespace().next())
+        .filter_map(|import| import.split_whitespace().next())
         .filter(|symbol| !symbol.is_empty())
         .filter(|symbol| !is_known_typing_extensions_symbol(symbol, target_python))
         .count()
