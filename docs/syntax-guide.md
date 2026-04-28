@@ -388,6 +388,10 @@ async def managed() -> None:
         await conn.send(data)
 ```
 
+Future `dual async def` support is a separate design-only code-generation feature for paired sync and
+async APIs. Ordinary authored async semantics are supported today; automatic sync/async pair emission
+is not implemented yet. See [the sync/async dual emit RFC](rfcs/sync-async-dual-emit.md).
+
 ## Lambda Annotations
 
 TypePython allows type annotations on lambda parameters:

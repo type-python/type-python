@@ -724,12 +724,12 @@ Initial unsupported cases:
 
 ### Design TODO
 
-- [ ] Define `dual async def` syntax or decorator form.
-- [ ] Define name generation policy, such as `fetch_user` and `afetch_user`.
-- [ ] Define sync/async type mapping declarations.
-- [ ] Define how `await` is lowered in sync output.
-- [ ] Define how errors are reported when no sync mapping exists.
-- [ ] Define output ordering and stub generation.
+- [x] Define `dual async def` syntax or decorator form.
+- [x] Define name generation policy, such as `fetch_user` and `afetch_user`.
+- [x] Define sync/async type mapping declarations.
+- [x] Define how `await` is lowered in sync output.
+- [x] Define how errors are reported when no sync mapping exists.
+- [x] Define output ordering and stub generation.
 
 ### Implementation TODO
 
