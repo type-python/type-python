@@ -60,6 +60,16 @@
       }
     },
     {
+      "name": "dual-emit-package",
+      "targets": ["3.12"],
+      "expected_stub_fragments": {
+        "3.12": [
+          "def fetch_user(client: Client, user_id: str) -> User: ...",
+          "async def afetch_user(client: AsyncClient, user_id: str) -> User: ..."
+        ]
+      }
+    },
+    {
       "name": "pydantic-like-package",
       "targets": ["3.12"],
       "expected_stub_fragments": {

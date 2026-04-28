@@ -1,0 +1,33 @@
+from typing import Callable
+
+
+def dual_emit[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
+    return fn
+
+
+class User:
+    name: str
+
+
+class Response:
+    content: bytes
+
+
+class Client:
+    def get(self, path: str) -> Response:
+        return Response()
+
+
+class AsyncClient:
+    async def get(self, path: str) -> Response:
+        return Response()
+
+
+def decode_user(payload: bytes) -> User:
+    return User()
+
+
+@dual_emit
+async def fetch_user(client: AsyncClient, user_id: str) -> User:
+    response = await client.get(f"/users/{user_id}")
+    return decode_user(response.content)
