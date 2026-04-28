@@ -661,17 +661,17 @@ The ecosystem needs a constrained adapter model: expressive enough for common ru
 
 ### TODO
 
-- [ ] Design a framework adapter manifest, such as `typepython-framework.toml`.
-- [ ] Define which adapter declarations are allowed:
-  - [ ] class decorator transforms
-  - [ ] base class transforms
-  - [ ] metaclass transforms
-  - [ ] function-to-object decorator transforms
-  - [ ] field collector rules
-  - [ ] constructor synthesis rules
-  - [ ] descriptor-backed attribute rules
-  - [ ] alias/default/frozen metadata mapping
-- [ ] Prohibit arbitrary Python execution in adapter definitions.
+- [x] Design a framework adapter manifest, such as `typepython-framework.toml`.
+- [x] Define which adapter declarations are allowed:
+  - [x] class decorator transforms
+  - [x] base class transforms
+  - [x] metaclass transforms
+  - [x] function-to-object decorator transforms
+  - [x] field collector rules
+  - [x] constructor synthesis rules
+  - [x] descriptor-backed attribute rules
+  - [x] alias/default/frozen metadata mapping
+- [x] Prohibit arbitrary Python execution in adapter definitions.
 - [ ] Add an adapter validation command.
 - [ ] Require adapter golden tests:
   - [ ] input `.tpy`
@@ -679,11 +679,11 @@ The ecosystem needs a constrained adapter model: expressive enough for common ru
   - [ ] emitted `.pyi`
   - [ ] downstream checker expectations
   - [ ] runtime smoke expectations where relevant
-- [ ] Add minimal adapter compatibility metadata for local validation.
-- [ ] Defer a public registry and broad versioning policy until after:
-  - [ ] a Pydantic-like adapter works
-  - [ ] a non-validation framework adapter works
-  - [ ] checker portability reports cover adapter output
+- [x] Add minimal adapter compatibility metadata for local validation.
+- [x] Defer a public registry and broad versioning policy until after:
+  - [x] a Pydantic-like adapter works
+  - [x] a non-validation framework adapter works
+  - [x] checker portability reports cover adapter output
 - [ ] Add documentation for building first-party and third-party adapters.
 - [ ] Add examples for a toy ORM, task queue, and validation model.
 
@@ -951,7 +951,7 @@ Possible later work:
 - [x] Validate generated artifacts with mypy/pyright/ty.
 - [x] Document known unsupported Pydantic features.
 - [x] Add annotation runtime probes for Python 3.14-style deferred annotations.
-- [ ] Sketch the framework adapter manifest only from the toy and Pydantic-like fixtures.
+- [x] Sketch the framework adapter manifest only from the toy and Pydantic-like fixtures.
 
 ### Weeks 11-12: Harden and Publish Direction
 
