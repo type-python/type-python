@@ -402,41 +402,41 @@ The first version should be a conservative surface diff, not a complete semantic
 
 ### TODO
 
-- [ ] Add `typepython api-diff <old> <new>`.
-- [ ] Support inputs:
+- [x] Add `typepython api-diff <old> <new>`.
+- [x] Support inputs:
   - [ ] source directories
-  - [ ] generated build directories
-  - [ ] wheels
-  - [ ] sdists
-  - [ ] `.pyi` trees
-- [ ] Compare public modules, classes, functions, aliases, protocols, and `TypedDict` definitions.
-- [ ] Detect clear type-surface breaking changes:
-  - [ ] removed public symbol
-  - [ ] required parameter added
-  - [ ] parameter annotation changed
-  - [ ] return type widened to `Any` or `Unknown`
-  - [ ] return annotation changed
-  - [ ] overload order or coverage change
-  - [ ] generic parameter arity/default change
-  - [ ] `TypedDict` required/optional/readonly/closed/extra-items change
-  - [ ] protocol member removal or incompatible change
-  - [ ] `py.typed` or partial-stub metadata regression
-- [ ] Classify changes as:
-  - [ ] source-compatible
+  - [x] generated build directories
+  - [x] wheels
+  - [x] sdists
+  - [x] `.pyi` trees
+- [x] Compare public modules, classes, functions, aliases, protocols, and `TypedDict` definitions.
+- [x] Detect clear type-surface breaking changes:
+  - [x] removed public symbol
+  - [x] required parameter added
+  - [x] parameter annotation changed
+  - [x] return type widened to `Any` or `Unknown`
+  - [x] return annotation changed
+  - [x] overload order or coverage change
+  - [x] generic parameter arity/default change
+  - [x] `TypedDict` required/optional/readonly/closed/extra-items change
+  - [x] protocol member removal or incompatible change
+  - [x] `py.typed` or partial-stub metadata regression
+- [x] Classify changes as:
+  - [x] source-compatible
   - [ ] likely type-compatible
-  - [ ] likely type-breaking
-  - [ ] runtime-breaking signal
-  - [ ] unknown risk
-- [ ] Defer full semantic compatibility checks until checker-backed diffing is designed.
-- [ ] Generate release-note snippets.
-- [ ] Add SemVer policy gates.
+  - [x] likely type-breaking
+  - [x] runtime-breaking signal
+  - [x] unknown risk
+- [x] Defer full semantic compatibility checks until checker-backed diffing is designed.
+- [x] Generate release-note snippets.
+- [x] Add SemVer policy gates.
 - [ ] Integrate with `typepython verify` and publication workflow.
 
 ### Acceptance Criteria
 
-- [ ] A library maintainer can compare two artifacts and get a concrete type-compatibility report.
-- [ ] CI can block accidental type-breaking changes in minor or patch releases.
-- [ ] Reports are precise enough to review without reading raw generated stubs.
+- [x] A library maintainer can compare two artifacts and get a concrete type-compatibility report.
+- [x] CI can block accidental type-breaking changes in minor or patch releases.
+- [x] Reports are precise enough to review without reading raw generated stubs.
 
 ## P1: Typed Dependency and Stub Health Supply Chain
 
