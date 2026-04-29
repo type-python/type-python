@@ -2560,6 +2560,111 @@ fn lower_non_transform_typealias_unchanged() {
     assert!(lowered.module.python_source.contains("UserId: TypeAlias = int"));
 }
 
+#[test]
+fn lower_reduces_decidable_type_level_typeif_alias() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("type-level.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from("typealias Name = TypeIf[IsSubtype[int, object], str, bytes]\n"),
+    });
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+
+    assert!(!lowered.diagnostics.has_errors(), "{}", lowered.diagnostics.as_text());
+    assert!(lowered.module.python_source.contains("Name: TypeAlias = str"));
+}
+
+#[test]
+fn lower_reduces_key_set_type_level_aliases() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("type-level-keys.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "from typing import TypedDict\n",
+            "class User(TypedDict):\n",
+            "    id: int\n",
+            "    name: str\n\n",
+            "typealias UserKeys = KeyOf[User]\n",
+            "typealias RequiredUserKeys = RequiredKeys[User]\n",
+        )),
+    });
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+
+    assert!(!lowered.diagnostics.has_errors(), "{}", lowered.diagnostics.as_text());
+    assert!(lowered.module.python_source.contains("from typing import Literal"));
+    assert!(
+        lowered.module.python_source.contains("UserKeys: TypeAlias = Literal[\"id\", \"name\"]")
+    );
+    assert!(
+        lowered
+            .module
+            .python_source
+            .contains("RequiredUserKeys: TypeAlias = Literal[\"id\", \"name\"]")
+    );
+}
+
+#[test]
+fn lower_fail_closes_unreduced_restricted_type_level_aliases() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("type-level-unsupported.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "from typing import Callable, TypedDict\n",
+            "class User(TypedDict):\n",
+            "    id: int\n\n",
+            "typealias Mapped = MapValues[User, Callable]\n",
+        )),
+    });
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+
+    assert!(!lowered.module.python_source.contains("Mapped: TypeAlias = MapValues"));
+    assert!(lowered.module.python_source.contains("Mapped: TypeAlias = object"));
+}
+
+#[test]
+fn lower_expands_map_values_shape_transform() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("type-level-map-values.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "from typing import TypedDict\n",
+            "class User(TypedDict):\n",
+            "    id: int\n\n",
+            "typealias OptionalUser = MapValues[User, Optional]\n",
+        )),
+    });
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+
+    assert!(!lowered.diagnostics.has_errors(), "{}", lowered.diagnostics.as_text());
+    assert!(lowered.module.python_source.contains("from typing import Optional"));
+    assert!(lowered.module.python_source.contains("class OptionalUser(TypedDict):"));
+    assert!(lowered.module.python_source.contains("    id: Optional[int]"));
+}
+
+#[test]
+fn lower_expands_map_values_readonly_shape_transform_with_import() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("type-level-map-values-readonly.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "from typing import TypedDict\n",
+            "class User(TypedDict):\n",
+            "    id: int\n\n",
+            "typealias ReadonlyUser = MapValues[User, Readonly]\n",
+        )),
+    });
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+
+    assert!(!lowered.diagnostics.has_errors(), "{}", lowered.diagnostics.as_text());
+    assert!(lowered.module.python_source.contains("import ReadOnly"));
+    assert!(lowered.module.python_source.contains("class ReadonlyUser(TypedDict):"));
+    assert!(lowered.module.python_source.contains("    id: ReadOnly[int]"));
+}
+
 // ─── Snapshot (golden) tests ────────────────────────────────────────────
 
 #[test]

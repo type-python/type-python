@@ -167,10 +167,25 @@ impl AnalysisHost {
                 if let Some(detail) = projected_shape_hover_detail(workspace, node, declaration) {
                     return detail;
                 }
+                if let Some(effect_summary) =
+                    effect_summary_hover_detail(workspace, node, declaration)
+                {
+                    let rendered = if declaration.owner.is_some() {
+                        render_member_detail(declaration)
+                    } else {
+                        render_declaration_detail(declaration)
+                    };
+                    return format!("{rendered}\n{effect_summary}");
+                }
                 if declaration.owner.is_some() {
                     render_member_detail(declaration)
                 } else {
-                    render_declaration_detail(declaration)
+                    let rendered = render_declaration_detail(declaration);
+                    if let Some(reduced) = reduced_type_level_alias_hover(node, declaration) {
+                        format!("{rendered}\nReduced type-level alias: {reduced}")
+                    } else {
+                        rendered
+                    }
                 }
             })
             .unwrap_or_else(|| symbol.legacy_detail.clone());
@@ -498,7 +513,9 @@ fn projected_shape_hover_detail(
 }
 
 fn hover_explanation(detail: &str) -> &'static str {
-    if detail.starts_with("function ") {
+    if detail.contains("Effect summary:") {
+        "**Type explanation:** callable signature plus TypePython effect summary; effects are author-time facts used for diagnostics while emitted Python stays standard."
+    } else if detail.starts_with("function ") {
         "**Type explanation:** callable signature; parameter annotations describe accepted inputs and the return annotation describes the value produced."
     } else if detail.starts_with("method ") {
         "**Type explanation:** method signature; receiver-specific overload and member resolution chose this callable surface."
@@ -513,6 +530,91 @@ fn hover_explanation(detail: &str) -> &'static str {
     } else {
         "**Type explanation:** resolved symbol surface used by TypePython analysis and editor navigation."
     }
+}
+
+fn effect_summary_hover_detail(
+    workspace: &WorkspaceState,
+    node: &ModuleNode,
+    declaration: &typepython_binding::Declaration,
+) -> Option<String> {
+    if !matches!(
+        declaration.kind,
+        typepython_binding::DeclarationKind::Function
+            | typepython_binding::DeclarationKind::Overload
+    ) {
+        return None;
+    }
+    let document = workspace.queries.documents_by_module_key.get(&node.module_key)?;
+    let decorator_info = typepython_syntax::collect_decorator_transform_module_info(&document.text);
+    let site = decorator_info.callables.iter().find(|site| {
+        site.name == declaration.name
+            && site.owner_type_name.as_deref()
+                == declaration.owner.as_ref().map(|owner| owner.name.as_str())
+    })?;
+    let mut pure = false;
+    let mut effects = BTreeSet::new();
+    for decorator in &site.decorators {
+        let short = if decorator.contains("effect:") {
+            decorator.as_str()
+        } else {
+            decorator.rsplit('.').next().unwrap_or(decorator.as_str())
+        };
+        if let Some(effect) = effect_label_from_decorator(short) {
+            effects.insert(effect);
+            continue;
+        }
+        match short {
+            "effect_pure" | "pure" => pure = true,
+            "effect_unsafe" => {
+                effects.insert("unsafe");
+            }
+            "effect_io_fs" => {
+                effects.insert("io.fs");
+            }
+            "effect_io_net" => {
+                effects.insert("io.net");
+            }
+            "effect_io_proc" => {
+                effects.insert("io.proc");
+            }
+            "effect_time" => {
+                effects.insert("time");
+            }
+            "effect_random" => {
+                effects.insert("random");
+            }
+            "effect_runtime_validation" | "trusted_validator" => {
+                effects.insert("runtime.validation");
+            }
+            "effect_taint_sanitize" | "sanitizer" => {
+                effects.insert("taint.sanitize");
+            }
+            "source" => {
+                effects.insert("taint.source");
+            }
+            "sink" => {
+                effects.insert("taint.sink");
+            }
+            _ => {}
+        }
+    }
+    if !pure && effects.is_empty() {
+        return None;
+    }
+    let row = if effects.is_empty() {
+        String::from("pure")
+    } else {
+        effects.into_iter().collect::<Vec<_>>().join(", ")
+    };
+    Some(format!(
+        "Effect summary: {}",
+        if pure { format!("pure; row [{row}]") } else { format!("row [{row}]") }
+    ))
+}
+
+fn effect_label_from_decorator(decorator: &str) -> Option<&str> {
+    let (target, label) = decorator.split_once(':')?;
+    (target.rsplit('.').next() == Some("effect") && !label.is_empty()).then_some(label)
 }
 
 fn resolve_projected_hover_shape(
@@ -781,6 +883,7 @@ impl AnalysisHost {
         actions.extend(collect_diagnostic_suggestion_code_actions(document, range, params));
         actions.extend(collect_missing_annotation_code_actions(workspace, document, range));
         actions.extend(collect_unsafe_code_actions(document, range, params));
+        actions.extend(collect_effect_declaration_code_actions(document, range, params));
         actions.extend(collect_missing_import_code_actions(workspace, document, range));
         actions.extend(collect_portable_typing_rewrite_code_actions(document, range));
         actions.extend(collect_type_source_code_actions(document, range));

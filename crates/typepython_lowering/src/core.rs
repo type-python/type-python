@@ -418,6 +418,18 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         {
             inserted_lines.emit_required_import(String::from("from typing import TypeAlias"));
         }
+        let type_level_fields = type_level_shape_fields(
+            &typed_dicts_by_name,
+            &data_classes_by_name,
+            options.experimental_shape_transforms,
+        );
+        let needs_literal_import = type_aliases.values().any(|statement| {
+            typepython_syntax::reduce_key_set_alias_text(statement.value.trim(), &type_level_fields)
+                .is_some()
+        });
+        if needs_literal_import && !has_literal_import(&tree.source.text) {
+            inserted_lines.emit_required_import(String::from("from typing import Literal"));
+        }
         if !interfaces.is_empty() && !has_protocol_import(&tree.source.text) {
             inserted_lines.emit_required_import(String::from("from typing import Protocol"));
         }
@@ -453,12 +465,19 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
                 || v == "Mutable[Config]"
                 || v.starts_with("Readonly[")
                 || v.starts_with("Mutable[")
+                || (v.starts_with("MapValues[") && v.contains("Readonly"))
         });
         if needs_readonly_import && !has_readonly_import(&tree.source.text) {
             inserted_lines.emit_required_import(format!(
                 "from {} import ReadOnly",
                 options.target_python.stdlib_owner("ReadOnly").unwrap_or("typing_extensions")
             ));
+        }
+        let needs_optional_import = type_aliases.values().any(|stmt| {
+            stmt.value.trim().starts_with("MapValues[") && stmt.value.contains("Optional")
+        });
+        if needs_optional_import && !has_optional_import(&tree.source.text) {
+            inserted_lines.emit_required_import(String::from("from typing import Optional"));
         }
     }
 
@@ -482,6 +501,9 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
                         statement,
                         options,
                         declaration_type_param_rewrites.get(&line_number),
+                        &typed_dicts_by_name,
+                        &data_classes_by_name,
+                        options.experimental_shape_transforms,
                     )],
                     can_use_native_typealias(statement, options),
                 )
@@ -1691,11 +1713,27 @@ fn rewrite_typealias_line(
     statement: &typepython_syntax::TypeAliasStatement,
     options: &LoweringOptions,
     type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
+    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    experimental_shape_transforms: bool,
 ) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
     let value = apply_type_param_rewrites(&statement.value, type_param_rewrites)
         .unwrap_or_else(|| statement.value.clone());
+    let value = reduce_restricted_type_level_alias_text(
+        &value,
+        typed_dicts,
+        data_classes,
+        experimental_shape_transforms,
+    )
+    .unwrap_or_else(|| {
+        if typepython_syntax::contains_restricted_type_level_alias_text(&value) {
+            String::from("object")
+        } else {
+            value
+        }
+    });
     if can_use_native_typealias(statement, options) {
         format!(
             "{indentation}type {}{} = {}",
@@ -1706,6 +1744,49 @@ fn rewrite_typealias_line(
     } else {
         format!("{indentation}{}: TypeAlias = {}", statement.name, value)
     }
+}
+
+fn reduce_restricted_type_level_alias_text(
+    value: &str,
+    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    experimental_shape_transforms: bool,
+) -> Option<String> {
+    let trimmed = value.trim();
+    let fields = type_level_shape_fields(typed_dicts, data_classes, experimental_shape_transforms);
+    if let Some(keys) = typepython_syntax::reduce_key_set_alias_text(trimmed, &fields) {
+        return Some(format!(
+            "Literal[{}]",
+            keys.into_iter().map(|key| format!("\"{key}\"")).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    typepython_syntax::reduce_typeif_is_subtype_text(trimmed)
+}
+
+fn type_level_shape_fields(
+    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    experimental_shape_transforms: bool,
+) -> Vec<typepython_syntax::TypeLevelShapeField> {
+    let mut shapes = typed_dicts.values().copied().collect::<Vec<_>>();
+    if experimental_shape_transforms {
+        shapes.extend(data_classes.values().copied());
+    }
+    shapes
+        .into_iter()
+        .flat_map(|shape| {
+            shape
+                .members
+                .iter()
+                .filter(|member| member.kind == typepython_syntax::ClassMemberKind::Field)
+                .map(|member| typepython_syntax::TypeLevelShapeField {
+                    owner: shape.name.clone(),
+                    name: member.name.clone(),
+                    annotation: member.annotation.clone(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn rewrite_typevar_line(
@@ -1741,6 +1822,14 @@ fn has_typealias_import(source: &str) -> bool {
         let trimmed = line.trim();
         trimmed == "from typing import TypeAlias"
             || (trimmed.starts_with("from typing import ") && trimmed.contains("TypeAlias"))
+    })
+}
+
+fn has_literal_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from typing import Literal"
+            || (trimmed.starts_with("from typing import ") && trimmed.contains("Literal"))
     })
 }
 
