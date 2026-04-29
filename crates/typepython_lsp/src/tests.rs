@@ -179,6 +179,54 @@ fn hover_renders_projected_typeddict_shape_aliases() {
 }
 
 #[test]
+fn hover_renders_effect_summary_for_decorated_callable() {
+    let config = temp_workspace(
+        "hover_renders_effect_summary_for_decorated_callable",
+        &[(
+            "src/app/__init__.tpy",
+            "from typing import Callable\n\nclass tpy:\n    @staticmethod\n    def effect(label: str):\n        def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n            return fn\n        return wrap\n\n@tpy.effect(\"io.net\")\ndef fetch() -> str:\n    return \"ok\"\n",
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let hover = server
+        .handle_hover(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 10, "character": 5}
+        }))
+        .expect("hover should succeed");
+    let contents = hover["contents"]["value"].as_str().expect("hover contents should be text");
+
+    assert!(contents.contains("function fetch"), "{contents}");
+    assert!(contents.contains("Effect summary: row [io.net]"), "{contents}");
+}
+
+#[test]
+fn hover_renders_restricted_type_level_alias_reduction() {
+    let config = temp_workspace(
+        "hover_renders_restricted_type_level_alias_reduction",
+        &[(
+            "src/app/__init__.tpy",
+            "typealias Name = TypeIf[IsSubtype[int, object], str, bytes]\n",
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let hover = server
+        .handle_hover(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 0, "character": 11}
+        }))
+        .expect("hover should succeed");
+    let contents = hover["contents"]["value"].as_str().expect("hover contents should be text");
+
+    assert!(contents.contains("typealias Name"), "{contents}");
+    assert!(contents.contains("Reduced type-level alias: str"), "{contents}");
+}
+
+#[test]
 fn hover_explains_resolved_value_types() {
     let config = temp_workspace(
         "hover_explains_resolved_value_types",
@@ -1012,6 +1060,86 @@ fn code_actions_offer_unsafe_wrapper_fix() {
     assert_eq!(
         action["edit"]["changes"][uri.as_str()][0]["newText"],
         json!("    unsafe:\n        eval(\"1\")")
+    );
+}
+
+#[test]
+fn code_actions_offer_effect_declaration_fix() {
+    let config = temp_workspace(
+        "code_actions_offer_effect_declaration_fix",
+        &[("src/app/__init__.tpy", "def parse() -> str:\n    return fetch()\n")],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let actions = server
+        .handle_code_action(json!({
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 1, "character": 11},
+                "end": {"line": 1, "character": 18}
+            },
+            "context": {
+                "diagnostics": [{
+                    "code": "TPY4026",
+                    "range": {
+                        "start": {"line": 1, "character": 11},
+                        "end": {"line": 1, "character": 18}
+                    },
+                    "message": "pure function `parse` calls effectful function `fetch` with uncovered effect row `io.net`"
+                }]
+            }
+        }))
+        .expect("code action should succeed");
+    let actions = actions.as_array().expect("code actions should be an array");
+    let action = actions
+        .iter()
+        .find(|action| action["title"] == json!("Add `@effect(\"io.net\")` to caller"))
+        .expect("effect declaration action should be present");
+    assert_eq!(
+        action["edit"]["changes"][uri.as_str()][0]["newText"],
+        json!("@effect(\"io.net\")\n")
+    );
+}
+
+#[test]
+fn code_actions_offer_all_missing_effect_declarations() {
+    let config = temp_workspace(
+        "code_actions_offer_all_missing_effect_declarations",
+        &[("src/app/__init__.tpy", "def parse() -> str:\n    return fetch()\n")],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let actions = server
+        .handle_code_action(json!({
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 1, "character": 11},
+                "end": {"line": 1, "character": 18}
+            },
+            "context": {
+                "diagnostics": [{
+                    "code": "TPY4026",
+                    "range": {
+                        "start": {"line": 1, "character": 11},
+                        "end": {"line": 1, "character": 18}
+                    },
+                    "message": "pure function `parse` calls effectful function `fetch` with uncovered effect row `io.net, time`"
+                }]
+            }
+        }))
+        .expect("code action should succeed");
+    let actions = actions.as_array().expect("code actions should be an array");
+    let action = actions
+        .iter()
+        .find(|action| {
+            action["title"] == json!("Add `@effect(\"io.net\")` + `@effect(\"time\")` to caller")
+        })
+        .expect("multi-effect declaration action should be present");
+    assert_eq!(
+        action["edit"]["changes"][uri.as_str()][0]["newText"],
+        json!("@effect(\"io.net\")\n@effect(\"time\")\n")
     );
 }
 

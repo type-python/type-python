@@ -74,6 +74,400 @@ fn check_reports_unsafe_boundary_with_source_overrides_without_backing_file() {
 }
 
 #[test]
+fn check_warns_when_pure_function_uses_effectful_result() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def effect_io_net[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@effect_io_net\n",
+            "def fetch() -> str:\n",
+            "    return \"payload\"\n\n",
+            "@effect_pure\n",
+            "def parse() -> str:\n",
+            "    value = fetch()\n",
+            "    return value\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4026"), "{rendered}");
+    assert!(rendered.contains("pure function `parse`"), "{rendered}");
+    assert!(rendered.contains("effect row `io.net`"), "{rendered}");
+}
+
+#[test]
+fn check_warns_for_explicit_effect_decorator_surface() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def effect(label: str):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@effect(\"io.net\")\n",
+            "def fetch() -> str:\n",
+            "    return \"payload\"\n\n",
+            "@effect_pure\n",
+            "def parse() -> str:\n",
+            "    return fetch()\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4026"), "{rendered}");
+    assert!(rendered.contains("effect row `io.net`"), "{rendered}");
+}
+
+#[test]
+fn check_warns_for_qualified_explicit_effect_decorator_surface() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "class tpy:\n",
+            "    @staticmethod\n",
+            "    def effect(label: str):\n",
+            "        def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "            return fn\n",
+            "        return wrap\n\n",
+            "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@tpy.effect(\"io.net\")\n",
+            "def fetch() -> str:\n",
+            "    return \"payload\"\n\n",
+            "@effect_pure\n",
+            "def parse() -> str:\n",
+            "    return fetch()\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4026"), "{rendered}");
+    assert!(rendered.contains("effect row `io.net`"), "{rendered}");
+}
+
+#[test]
+fn check_allows_unsafe_effect_inside_unsafe_capability_scope() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def effect_unsafe[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@effect_unsafe\n",
+            "def inspect_dynamic() -> str:\n",
+            "    return \"payload\"\n\n",
+            "@effect_pure\n",
+            "def parse() -> str:\n",
+            "    unsafe:\n",
+            "        value = inspect_dynamic()\n",
+            "        return value\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4026"), "{rendered}");
+}
+
+#[test]
+fn check_rejects_assigning_tainted_value_to_plain_type() {
+    let result = check_temp_typepython_source(concat!(
+        "raw: Tainted[str, \"html\"]\n",
+        "safe: str = raw\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("Tainted[str, \"html\"]"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_explicit_taint_sanitizer_result() {
+    let result = check_temp_typepython_source(concat!(
+        "def escape_html(value: Tainted[str, \"html\"]) -> str:\n",
+        "    return \"safe\"\n\n",
+        "raw: Tainted[str, \"html\"]\n",
+        "safe: str = escape_html(raw)\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_rejects_tainted_value_at_plain_sink() {
+    let result = check_temp_typepython_source(concat!(
+        "def request_body() -> Tainted[str, \"html\"]:\n",
+        "    ...\n\n",
+        "def render_html(value: str) -> None:\n",
+        "    ...\n\n",
+        "render_html(request_body())\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("Tainted[str, \"html\"]"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_tainted_source_after_sanitizer_before_sink() {
+    let result = check_temp_typepython_source(concat!(
+        "def request_body() -> Tainted[str, \"html\"]:\n",
+        "    ...\n\n",
+        "def escape_html(value: Tainted[str, \"html\"]) -> str:\n",
+        "    ...\n\n",
+        "def render_html(value: str) -> None:\n",
+        "    ...\n\n",
+        "render_html(escape_html(request_body()))\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_uses_source_sink_and_sanitizer_decorators_for_taint_slice() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable\n\n",
+        "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+        "    return fn\n\n",
+        "def sink[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+        "    return fn\n\n",
+        "def sanitizer[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+        "    return fn\n\n",
+        "@source\n",
+        "def request_body() -> Tainted[str, \"html\"]:\n",
+        "    ...\n\n",
+        "@sanitizer\n",
+        "def escape_html(value: Tainted[str, \"html\"]) -> str:\n",
+        "    ...\n\n",
+        "@sink\n",
+        "def render_html(value: str) -> None:\n",
+        "    ...\n\n",
+        "render_html(escape_html(request_body()))\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_rejects_decorated_source_flowing_through_local_to_sink() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "def sink[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@source\n",
+            "def request_body() -> str:\n",
+            "    ...\n\n",
+            "@sink\n",
+            "def render_html(value: str) -> None:\n",
+            "    ...\n\n",
+            "raw = request_body()\n",
+            "render_html(raw)\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("tainted source result flows into sink"), "{rendered}");
+}
+
+#[test]
+fn check_does_not_leak_decorated_source_taint_between_functions() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "def sink[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@source\n",
+            "def request_body() -> str:\n",
+            "    ...\n\n",
+            "@sink\n",
+            "def render_html(value: str) -> None:\n",
+            "    ...\n\n",
+            "def collect() -> str:\n",
+            "    raw = request_body()\n",
+            "    return raw\n\n",
+            "def show() -> None:\n",
+            "    raw = \"safe\"\n",
+            "    render_html(raw)\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("tainted source result flows into sink"), "{rendered}");
+}
+
+#[test]
+fn check_uses_framework_adapter_taint_source_and_sink_capabilities() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def framework_transform(**kwargs):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "@framework_transform(kind=\"function_decorator\", capabilities=(\"taint_source\",))\n",
+            "def fastapi_body[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@framework_transform(kind=\"function_decorator\", capabilities=(\"taint_sink\",))\n",
+            "def html_response[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@fastapi_body\n",
+            "def request_body() -> str:\n",
+            "    ...\n\n",
+            "@html_response\n",
+            "def render_html(value: str) -> None:\n",
+            "    ...\n\n",
+            "raw = request_body()\n",
+            "render_html(raw)\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("tainted source result flows into sink"), "{rendered}");
+}
+
+#[test]
+fn check_rejects_decorated_source_passed_directly_to_decorated_sink() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "def sink[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@source\n",
+            "def request_body() -> str:\n",
+            "    ...\n\n",
+            "@sink\n",
+            "def render_html(value: str) -> None:\n",
+            "    ...\n\n",
+            "render_html(request_body())\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("tainted source result flows into sink"), "{rendered}");
+}
+
+#[test]
+fn check_validator_witness_narrows_unknown_in_true_branch() {
+    let result = check_temp_typepython_source(concat!(
+        "class User:\n",
+        "    name: str\n\n",
+        "def trusted_validate_user(value: unknown) -> ValidatorWitness[User]:\n",
+        "    ...\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if trusted_validate_user(value):\n",
+        "        return value.name\n",
+        "    return \"\"\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_validator_witness_does_not_narrow_after_reassignment() {
+    let result = check_temp_typepython_source(concat!(
+        "class User:\n",
+        "    name: str\n\n",
+        "def trusted_validate_user(value: unknown) -> ValidatorWitness[User]:\n",
+        "    ...\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if trusted_validate_user(value):\n",
+        "        value = get_unknown()\n",
+        "        return value.name\n",
+        "    return \"\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_supported_restricted_type_level_shape_aliases() {
+    let result = check_temp_typepython_source(concat!(
+        "class User(TypedDict):\n",
+        "    id: int\n",
+        "    name: str\n\n",
+        "typealias Names = RequiredKeys[User]\n",
+        "typealias PublicUser = Pick[User, Literal[\"id\"]]\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4027"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unsupported_restricted_type_level_alias() {
+    let result = check_temp_typepython_source(concat!(
+        "class User(TypedDict):\n",
+        "    name: str\n\n",
+        "typealias Names = MapValues[User, Callable]\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4027"), "{rendered}");
+    assert!(rendered.contains("unsupported form `MapValues[Callable]`"), "{rendered}");
+}
+
+#[test]
 fn check_warns_for_ignored_must_use_result() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(

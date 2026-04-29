@@ -323,6 +323,17 @@ pub fn collect_unsafe_operation_sites(source: &str) -> Vec<UnsafeOperationSite> 
 }
 
 #[must_use]
+pub fn collect_unsafe_capability_ranges(source: &str) -> Vec<(usize, usize)> {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("<unsafe-ranges>.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: source.to_owned(),
+    });
+    collect_unsafe_block_ranges(source, &tree.statements)
+}
+
+#[must_use]
 pub fn collect_conditional_return_sites(source: &str) -> Vec<ConditionalReturnSite> {
     conditional_return_blocks(source)
         .into_iter()
@@ -802,8 +813,9 @@ pub(super) fn collect_decorated_callable_sites(
                 let decorators = function
                     .decorator_list
                     .iter()
-                    .filter_map(|decorator| decorator_target_name(&decorator.expression))
-                    .map(|name| normalize_imported_name(&name, import_bindings))
+                    .filter_map(|decorator| {
+                        decorator_transform_name(source, &decorator.expression, import_bindings)
+                    })
                     .filter(|name| !is_non_transform_builtin_decorator(name))
                     .collect::<Vec<_>>();
                 if !decorators.is_empty() {
@@ -1044,6 +1056,9 @@ pub(super) fn framework_transform_capability(value: &str) -> Option<FrameworkTra
             Some(FrameworkTransformCapability::FunctionToObjectReplacement)
         }
         "generic_preservation" => Some(FrameworkTransformCapability::GenericPreservation),
+        "taint_source" => Some(FrameworkTransformCapability::TaintSource),
+        "taint_sink" => Some(FrameworkTransformCapability::TaintSink),
+        "taint_sanitizer" => Some(FrameworkTransformCapability::TaintSanitizer),
         _ => None,
     }
 }
@@ -1289,6 +1304,23 @@ pub(super) fn decorator_target_name(expr: &Expr) -> Option<String> {
         Expr::Call(call) => decorator_target_name(call.func.as_ref()),
         _ => None,
     }
+}
+
+fn decorator_transform_name(
+    source: &str,
+    expr: &Expr,
+    import_bindings: &BTreeMap<String, String>,
+) -> Option<String> {
+    let target = decorator_target_name(expr)?;
+    let normalized = normalize_imported_name(&target, import_bindings);
+    if normalized.rsplit('.').next() == Some("effect")
+        && let Expr::Call(call) = expr
+        && let Some(first_arg) = call.arguments.args.first()
+        && let Some(effect) = extract_string_literal_value(source, first_arg)
+    {
+        return Some(format!("{normalized}:{effect}"));
+    }
+    Some(normalized)
 }
 
 pub(super) fn expr_static_bool(expr: &Expr) -> Option<bool> {

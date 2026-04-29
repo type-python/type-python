@@ -1,0 +1,68 @@
+from typing import Callable, Literal, TypedDict
+
+
+def effect(label: str):
+    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
+        return fn
+    return wrap
+
+
+def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
+    return fn
+
+
+def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
+    return fn
+
+
+def sink[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
+    return fn
+
+
+def sanitizer[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
+    return fn
+
+
+class UserRecord(TypedDict):
+    id: int
+    name: str
+    email: str
+
+
+typealias UserKeys = KeyOf[UserRecord]
+typealias FrozenUser = MapValues[UserRecord, Readonly]
+typealias BoundaryKind = TypeIf[IsSubtype[int, object], Literal["trusted"], Literal["rejected"]]
+
+
+@effect("io.net")
+@source
+def load_user() -> Tainted[str, "html"]:
+    ...
+
+
+@sanitizer
+def sanitize_user(raw: Tainted[str, "html"]) -> str:
+    return "safe"
+
+
+@sink
+def render_user(value: str) -> None:
+    ...
+
+
+def validate_user(value: unknown) -> ValidatorWitness[UserRecord, TrustedValidator]:
+    ...
+
+
+@effect_pure
+def display_name(user: UserRecord) -> str:
+    return user["name"]
+
+
+def handle(value: unknown) -> str:
+    if validate_user(value):
+        return display_name(value)
+    raw = load_user()
+    safe = sanitize_user(raw)
+    render_user(safe)
+    return safe

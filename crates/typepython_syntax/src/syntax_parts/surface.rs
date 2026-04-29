@@ -1114,6 +1114,9 @@ pub enum FrameworkTransformCapability {
     MethodSynthesis,
     FunctionToObjectReplacement,
     GenericPreservation,
+    TaintSource,
+    TaintSink,
+    TaintSanitizer,
 }
 
 /// Fallback behavior when a framework transform cannot be fully resolved statically.

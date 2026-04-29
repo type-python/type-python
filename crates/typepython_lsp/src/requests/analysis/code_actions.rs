@@ -312,6 +312,110 @@ pub(crate) fn collect_unsafe_code_actions(
     )]
 }
 
+pub(crate) fn collect_effect_declaration_code_actions(
+    document: &DocumentState,
+    range: LspRange,
+    params: &Value,
+) -> Vec<Value> {
+    let diagnostics = params
+        .get("context")
+        .and_then(|context| context.get("diagnostics"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let effect_labels = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.get("code").and_then(Value::as_str) == Some("TPY4026"))
+        .and_then(|diagnostic| diagnostic.get("message").and_then(Value::as_str))
+        .map(extract_effect_row_labels)
+        .unwrap_or_default();
+    if effect_labels.is_empty() {
+        return Vec::new();
+    }
+    let title_text = effect_decorator_title_text(&effect_labels);
+    let Some((line_index, indent)) = nearest_enclosing_function_line(&document.text, range.start.line)
+    else {
+        return Vec::new();
+    };
+    let decorator_text = effect_decorator_text(&effect_labels, &indent);
+    let previous_line = line_index
+        .checked_sub(1)
+        .and_then(|index| document.text.lines().nth(index as usize));
+    if previous_line.is_some_and(|line| {
+        let trimmed = line.trim();
+        trimmed == "@effect_pure" || trimmed == "@pure"
+    }) {
+        return vec![code_action(
+            format!("Replace pure marker with {title_text}"),
+            &document.uri,
+            vec![LspTextEdit {
+                range: LspRange {
+                    start: LspPosition { line: line_index - 1, character: 0 },
+                    end: LspPosition {
+                        line: line_index - 1,
+                        character: previous_line.unwrap_or_default().chars().count() as u32,
+                    },
+                },
+                new_text: decorator_text,
+            }],
+        )];
+    }
+    vec![code_action(
+        format!("Add {title_text} to caller"),
+        &document.uri,
+        vec![LspTextEdit {
+            range: LspRange {
+                start: LspPosition { line: line_index, character: 0 },
+                end: LspPosition { line: line_index, character: 0 },
+            },
+            new_text: format!("{decorator_text}\n"),
+        }],
+    )]
+}
+
+fn extract_effect_row_labels(message: &str) -> Vec<String> {
+    let Some((_, rest)) = message.split_once("effect row `") else {
+        return Vec::new();
+    };
+    let Some((label, _)) = rest.split_once('`') else {
+        return Vec::new();
+    };
+    label
+        .split(',')
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn effect_decorator_text(labels: &[String], indent: &str) -> String {
+    labels
+        .iter()
+        .map(|label| format!("{indent}@effect(\"{label}\")"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn effect_decorator_title_text(labels: &[String]) -> String {
+    labels
+        .iter()
+        .map(|label| format!("`@effect(\"{label}\")`"))
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+fn nearest_enclosing_function_line(source: &str, diagnostic_line: u32) -> Option<(u32, String)> {
+    let mut nearest = None;
+    for (index, line) in source.lines().take(diagnostic_line as usize + 1).enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("def ") || trimmed.starts_with("async def ") {
+            let indent = line.chars().take_while(|ch| ch.is_whitespace()).collect::<String>();
+            nearest = Some((index as u32, indent));
+        }
+    }
+    nearest
+}
+
 pub(crate) fn collect_missing_import_code_actions(
     workspace: &WorkspaceState,
     document: &DocumentState,

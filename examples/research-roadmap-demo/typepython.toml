@@ -1,0 +1,21 @@
+[project]
+src = ["src"]
+include = ["src/**/*.tpy", "src/**/*.py", "src/**/*.pyi"]
+exclude = [".typepython/**", "dist/**"]
+root_dir = "src"
+out_dir = ".typepython/build"
+cache_dir = ".typepython/cache"
+target_python = "3.12"
+
+[typing]
+profile = "application"
+strict = true
+strict_nulls = true
+imports = "unknown"
+warn_unsafe = true
+
+[emit]
+emit_pyi = true
+write_py_typed = true
+no_emit_on_error = true
+runtime_validators = false

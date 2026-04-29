@@ -1345,4 +1345,8 @@ mod advanced_overloads;
 mod calls;
 mod property_based;
 mod semantic;
+mod semantic_effects;
+mod semantic_taint;
+mod semantic_type_level;
+mod semantic_validator;
 mod typed_dict;

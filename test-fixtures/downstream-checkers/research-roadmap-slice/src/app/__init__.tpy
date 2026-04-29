@@ -1,0 +1,15 @@
+from typing import TypedDict
+
+
+class UserRecord(TypedDict):
+    id: int
+    name: str
+    email: str
+
+
+typealias UserKeys = KeyOf[UserRecord]
+typealias FrozenUser = MapValues[UserRecord, Readonly]
+
+
+def expose_user(user: UserRecord) -> UserRecord:
+    return {"id": user["id"], "name": user["name"], "email": user["email"]}

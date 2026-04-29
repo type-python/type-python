@@ -125,6 +125,8 @@ This is the largest category, covering all type checking rules.
 | `TPY4023` | warning       | Lifecycle-marked resource is not closed or consumed                                                                |
 | `TPY4024` | warning       | Framework-transformed field is missing a type annotation                                                           |
 | `TPY4025` | error         | Unsupported async construct appears inside a `@dual_emit` function                                                |
+| `TPY4026` | warning       | Pure function calls a function with a declared effect row                                                          |
+| `TPY4027` | error         | Restricted type-level alias cannot be evaluated to standard Python typing                                          |
 | `TPY4101` | warning/error | Use of deprecated declaration                                                                                      |
 | `TPY7003` | error         | Framework adapter manifest is invalid                                                                             |
 
@@ -278,6 +280,33 @@ class Config(TypedDict):
 c: Config = {"name": "app"}
 c["name"] = "new"          # TPY4016: Cannot assign to read-only TypedDict key 'name'
 ```
+
+#### TPY4026 -- Effect capability mismatch
+
+In strict `.tpy` checking, decorator-declared effect rows are tracked as author-time facts. A function marked `@effect_pure` warns when it directly returns or assigns the result of a callable with an effect decorator such as `@effect_io_net`, `@effect_io_fs`, `@effect_random`, or a lifecycle obligation.
+
+```python
+@effect_io_net
+def fetch() -> str:
+    return "payload"
+
+@effect_pure
+def parse() -> str:
+value = fetch()       # TPY4026: caller lacks a covering effect row for `io.net`
+    return value
+```
+
+**Fix:** add an effect declaration to the caller, remove `@effect_pure`, or isolate the call behind an explicit capability boundary.
+
+#### TPY4027 -- Restricted type-level alias evaluation failure
+
+Raised when a type-level alias uses a restricted evaluator form that cannot be fully reduced to standard Python typing.
+
+```python
+typealias Names = MapValues[User, Callable]  # TPY4027: unsupported wrapper in the current evaluator slice
+```
+
+**Fix:** use a supported reducible form such as decidable `TypeIf[IsSubtype[...], A, B]`, `KeyOf`, `RequiredKeys`, `OptionalKeys`, `Pick`, `Omit`, or `MapValues` with the built-in `Optional` / `Readonly` wrappers; otherwise materialize the alias as a standard Python type.
 
 #### TPY4101 -- Deprecated usage
 

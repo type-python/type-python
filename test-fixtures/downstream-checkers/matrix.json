@@ -108,6 +108,20 @@
       }
     },
     {
+      "name": "research-roadmap-slice",
+      "targets": ["3.12"],
+      "expected_stub_fragments": {
+        "3.12": [
+          "from typing import Literal",
+          "from typing_extensions import ReadOnly",
+          "class UserRecord(TypedDict):",
+          "UserKeys: TypeAlias = Literal[\"email\", \"id\", \"name\"]",
+          "class FrozenUser(TypedDict):",
+          "id: ReadOnly[int]"
+        ]
+      }
+    },
+    {
       "name": "negative-consumer-package",
       "targets": ["3.10"],
       "expect_checker_failure": true,
