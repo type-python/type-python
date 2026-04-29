@@ -1117,6 +1117,7 @@ pub enum FrameworkTransformCapability {
     TaintSource,
     TaintSink,
     TaintSanitizer,
+    ValidatorWitness,
 }
 
 /// Fallback behavior when a framework transform cannot be fully resolved statically.

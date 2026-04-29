@@ -23,6 +23,12 @@ def sanitizer[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
     return fn
 
 
+def validator[T](target: type[T], trust: str):
+    def wrap[**P](fn: Callable[P, bool]) -> Callable[P, bool]:
+        return fn
+    return wrap
+
+
 class UserRecord(TypedDict):
     id: int
     name: str
@@ -50,7 +56,8 @@ def render_user(value: str) -> None:
     ...
 
 
-def validate_user(value: unknown) -> ValidatorWitness[UserRecord, TrustedValidator]:
+@validator(UserRecord, trust="generated")
+def validate_user(value: unknown) -> bool:
     ...
 
 

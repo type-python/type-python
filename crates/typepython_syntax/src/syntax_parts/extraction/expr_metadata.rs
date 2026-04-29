@@ -799,6 +799,8 @@ pub(in super::super) fn extract_assignment_names(expr: &Expr) -> Vec<String> {
         Expr::Tuple(tuple) => tuple.elts.iter().flat_map(extract_assignment_names).collect(),
         Expr::List(list) => list.elts.iter().flat_map(extract_assignment_names).collect(),
         Expr::Starred(starred) => extract_assignment_names(&starred.value),
+        Expr::Attribute(attribute) => extract_assignment_names(&attribute.value),
+        Expr::Subscript(subscript) => extract_assignment_names(&subscript.value),
         _ => Vec::new(),
     }
 }

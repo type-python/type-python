@@ -407,40 +407,6 @@ fn check_rejects_decorated_source_passed_directly_to_decorated_sink() {
 }
 
 #[test]
-fn check_validator_witness_narrows_unknown_in_true_branch() {
-    let result = check_temp_typepython_source(concat!(
-        "class User:\n",
-        "    name: str\n\n",
-        "def trusted_validate_user(value: unknown) -> ValidatorWitness[User]:\n",
-        "    ...\n\n",
-        "def handle(value: unknown) -> str:\n",
-        "    if trusted_validate_user(value):\n",
-        "        return value.name\n",
-        "    return \"\"\n",
-    ));
-
-    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
-}
-
-#[test]
-fn check_validator_witness_does_not_narrow_after_reassignment() {
-    let result = check_temp_typepython_source(concat!(
-        "class User:\n",
-        "    name: str\n\n",
-        "def trusted_validate_user(value: unknown) -> ValidatorWitness[User]:\n",
-        "    ...\n\n",
-        "def handle(value: unknown) -> str:\n",
-        "    if trusted_validate_user(value):\n",
-        "        value = get_unknown()\n",
-        "        return value.name\n",
-        "    return \"\"\n",
-    ));
-
-    let rendered = result.diagnostics.as_text();
-    assert!(rendered.contains("TPY4003"), "{rendered}");
-}
-
-#[test]
 fn check_accepts_supported_restricted_type_level_shape_aliases() {
     let result = check_temp_typepython_source(concat!(
         "class User(TypedDict):\n",

@@ -280,15 +280,172 @@ pub(super) fn apply_predicate_guard_semantic(
     callee: &str,
     branch_true: bool,
 ) -> SemanticType {
-    let Some((kind, guarded_type)) = parse_guard_return_kind_semantic(node, nodes, callee) else {
+    let Some((kind, guarded_type, trusted_witness)) = parse_guard_return_kind_semantic(node, nodes, callee) else {
         return base_type.clone();
     };
     match (kind.as_str(), branch_true) {
         ("TypeGuard", true) | ("TypeIs", true) => {
             narrow_to_instance_semantic_types(node, nodes, base_type, &[guarded_type])
         }
+        ("ValidatorWitness", true)
+            if trusted_witness
+                && matches!(base_type.strip_annotated(), SemanticType::Name(name) if name == "unknown") =>
+        {
+            guarded_type
+        }
         ("TypeIs", false) => remove_instance_semantic_types(node, nodes, base_type, &[guarded_type]),
         _ => base_type.clone(),
+    }
+}
+
+pub(super) fn validator_witness_trust_boundary_note(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+) -> Option<String> {
+    node.if_guards
+        .iter()
+        .filter(|guard| {
+            guard.owner_name.as_deref() == current_owner_name
+                && guard.owner_type_name.as_deref() == current_owner_type_name
+                && guard.line < current_line
+        })
+        .filter_map(|guard| {
+            let typepython_binding::GuardConditionSite::PredicateCall { name, callee } =
+                guard.guard.as_ref()?
+            else {
+                return None;
+            };
+            if name != value_name {
+                return None;
+            }
+            let (kind, _, trusted_witness) = parse_guard_return_kind_semantic(node, nodes, callee)?;
+            if kind != "ValidatorWitness" {
+                return None;
+            }
+            if !trusted_witness {
+                return Some(format!(
+                    "validator witness `{callee}` crossed an untrusted boundary; add explicit Literal[\"trusted\"]/Literal[\"generated\"] metadata or adapter validator_witness capability before using `{value_name}` as narrowed"
+                ));
+            }
+            name_reassigned_after_line(
+                node,
+                current_owner_name,
+                current_owner_type_name,
+                value_name,
+                guard.line,
+                current_line,
+            )
+            .then(|| {
+                format!(
+                    "validator witness `{callee}` was invalidated by assignment or mutation of `{value_name}` after validation"
+                )
+            })
+        })
+        .next()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn validator_witness_trust_uses_explicit_metadata_arg() {
+        assert!(!validator_witness_return_is_trusted(&[SemanticType::Name(String::from("User"))]));
+        assert!(validator_witness_trust_marker(&SemanticType::Generic {
+            head: String::from("Literal"),
+            args: vec![SemanticType::Name(String::from("\"trusted\""))],
+        }));
+        assert!(!validator_witness_trust_marker(&SemanticType::Name(String::from("User"))));
+    }
+
+    fn validator_test_node(return_type: &str) -> typepython_graph::ModuleNode {
+        typepython_graph::ModuleNode {
+            module_path: PathBuf::from("validator-flow.tpy"),
+            module_key: String::from("validator_flow"),
+            module_kind: SourceKind::TypePython,
+            declarations: vec![Declaration {
+                name: String::from("validate_user"),
+                kind: DeclarationKind::Function,
+                metadata: typepython_binding::DeclarationMetadata::Callable {
+                    signature: typepython_binding::BoundCallableSignature {
+                        params: vec![typepython_syntax::DirectFunctionParamSite {
+                            name: String::from("value"),
+                            annotation: Some(String::from("unknown")),
+                            annotation_expr: typepython_syntax::TypeExpr::parse("unknown"),
+                            has_default: false,
+                            positional_only: false,
+                            keyword_only: false,
+                            variadic: false,
+                            keyword_variadic: false,
+                        }],
+                        returns: Some(typepython_binding::BoundTypeExpr::new(return_type)),
+                    },
+                },
+                value_type_expr: None,
+                method_kind: None,
+                class_kind: None,
+                owner: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                bases: Vec::new(),
+                type_params: Vec::new(),
+            }],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+            summary_fingerprint: 0,
+        }
+    }
+
+    #[test]
+    fn validator_witness_requires_explicit_trust_to_narrow() {
+        let node = validator_test_node("ValidatorWitness[User]");
+        let nodes = vec![node.clone()];
+        let narrowed = apply_predicate_guard_semantic(
+            &node,
+            &nodes,
+            &SemanticType::Name(String::from("unknown")),
+            "validate_user",
+            true,
+        );
+
+        assert_eq!(narrowed, SemanticType::Name(String::from("unknown")));
+    }
+
+    #[test]
+    fn validator_witness_with_explicit_trust_narrows_unknown() {
+        let node = validator_test_node("ValidatorWitness[User, Literal[\"trusted\"]]");
+        let nodes = vec![node.clone()];
+        let narrowed = apply_predicate_guard_semantic(
+            &node,
+            &nodes,
+            &SemanticType::Name(String::from("unknown")),
+            "validate_user",
+            true,
+        );
+
+        assert_eq!(narrowed, SemanticType::Name(String::from("User")));
     }
 }
 
@@ -296,16 +453,121 @@ pub(super) fn parse_guard_return_kind_semantic(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
-) -> Option<(String, SemanticType)> {
+) -> Option<(String, SemanticType, bool)> {
     let function = resolve_direct_function(node, nodes, callee)?;
     let returns = declaration_signature_return_semantic_type(function)?;
+    if let Some(guarded_type) = generated_validator_witness_type(node, function, &returns) {
+        return Some((String::from("ValidatorWitness"), guarded_type, true));
+    }
     if let SemanticType::Generic { head, args } = returns.strip_annotated()
-        && args.len() == 1
-        && matches!(head.as_str(), "TypeGuard" | "TypeIs")
+        && matches!(head.as_str(), "TypeGuard" | "TypeIs" | "ValidatorWitness")
     {
-        return Some((head.clone(), args[0].clone()));
+        if matches!(head.as_str(), "TypeGuard" | "TypeIs") && args.len() == 1 {
+            return Some((head.clone(), args[0].clone(), true));
+        }
+        if head == "ValidatorWitness" && matches!(args.len(), 1 | 2) {
+            let trusted = validator_witness_return_is_trusted(args)
+                || validator_witness_trusted_by_boundary_metadata(node, function);
+            return Some((head.clone(), args[0].clone(), trusted));
+        }
     }
     None
+}
+
+fn generated_validator_witness_type(
+    node: &typepython_graph::ModuleNode,
+    function: &Declaration,
+    returns: &SemanticType,
+) -> Option<SemanticType> {
+    if !matches!(returns.strip_annotated(), SemanticType::Name(name) if name == "bool") {
+        return None;
+    }
+    validator_decorators_for_function(node, function).into_iter().find_map(|decorator| {
+        let metadata = validator_decorator_metadata(&decorator)?;
+        validator_trust_marker(metadata.trust).then(|| lower_type_text_or_name(metadata.target))
+    })
+}
+
+fn validator_witness_trusted_by_boundary_metadata(
+    node: &typepython_graph::ModuleNode,
+    function: &Declaration,
+) -> bool {
+    let provider_names = validator_witness_provider_names(node);
+    validator_decorators_for_function(node, function).into_iter().any(|decorator| {
+        let name = decorator.split_once(':').map_or(decorator.as_str(), |(name, _)| name);
+        provider_names.contains(name)
+    })
+}
+
+struct ValidatorDecoratorMetadata<'a> {
+    target: &'a str,
+    trust: &'a str,
+}
+
+fn validator_decorators_for_function(
+    node: &typepython_graph::ModuleNode,
+    function: &Declaration,
+) -> Vec<String> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return Vec::new();
+    }
+    let Ok(source) = std::fs::read_to_string(&node.module_path) else {
+        return Vec::new();
+    };
+    typepython_syntax::collect_module_surface_metadata(&source)
+        .decorator_transform
+        .callables
+        .into_iter()
+        .find(|site| site.owner_type_name.is_none() && site.name == function.name)
+        .map(|site| site.decorators)
+        .unwrap_or_default()
+}
+
+fn validator_witness_provider_names(node: &typepython_graph::ModuleNode) -> BTreeSet<String> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return BTreeSet::new();
+    }
+    let Ok(source) = std::fs::read_to_string(&node.module_path) else {
+        return BTreeSet::new();
+    };
+    typepython_syntax::collect_module_surface_metadata(&source)
+        .framework_transform
+        .providers
+        .into_iter()
+        .filter(|provider| {
+            provider.provider_kind
+                == Some(typepython_syntax::FrameworkTransformProviderKind::FunctionDecorator)
+                && provider
+                    .capabilities
+                    .contains(&typepython_syntax::FrameworkTransformCapability::ValidatorWitness)
+        })
+        .map(|provider| provider.name)
+        .collect()
+}
+
+fn validator_decorator_metadata(decorator: &str) -> Option<ValidatorDecoratorMetadata<'_>> {
+    let (_, rest) = decorator.split_once(':')?;
+    let (target, trust) = rest.rsplit_once(':')?;
+    (!target.trim().is_empty() && validator_trust_marker(trust.trim())).then_some(
+        ValidatorDecoratorMetadata { target: target.trim(), trust: trust.trim() },
+    )
+}
+
+fn validator_trust_marker(marker: &str) -> bool {
+    matches!(marker, "trusted" | "generated")
+}
+
+fn validator_witness_return_is_trusted(args: &[SemanticType]) -> bool {
+    args.get(1).is_some_and(validator_witness_trust_marker)
+}
+
+fn validator_witness_trust_marker(marker: &SemanticType) -> bool {
+    match marker.strip_annotated() {
+        SemanticType::Generic { head, args } if head == "Literal" && args.len() == 1 => {
+            matches!(render_semantic_type(&args[0]).as_str(), "\"trusted\"" | "\"generated\"")
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn narrow_to_instance_semantic_types(

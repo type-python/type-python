@@ -1059,6 +1059,7 @@ pub(super) fn framework_transform_capability(value: &str) -> Option<FrameworkTra
         "taint_source" => Some(FrameworkTransformCapability::TaintSource),
         "taint_sink" => Some(FrameworkTransformCapability::TaintSink),
         "taint_sanitizer" => Some(FrameworkTransformCapability::TaintSanitizer),
+        "validator_witness" => Some(FrameworkTransformCapability::ValidatorWitness),
         _ => None,
     }
 }
@@ -1319,6 +1320,18 @@ fn decorator_transform_name(
         && let Some(effect) = extract_string_literal_value(source, first_arg)
     {
         return Some(format!("{normalized}:{effect}"));
+    }
+    if let Expr::Call(call) = expr
+        && let Some(first_arg) = call.arguments.args.first()
+        && let Some(target) = decorator_target_name(first_arg)
+        && let Some(trust) = call.arguments.keywords.iter().find_map(|keyword| {
+            (keyword.arg.as_ref().map(|name| name.as_str()) == Some("trust"))
+                .then(|| extract_string_literal_value(source, &keyword.value))
+                .flatten()
+        })
+        && matches!(trust.as_str(), "trusted" | "generated")
+    {
+        return Some(format!("{normalized}:{target}:{trust}"));
     }
     Some(normalized)
 }

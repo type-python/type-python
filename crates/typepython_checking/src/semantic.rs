@@ -385,6 +385,7 @@ fn framework_transform_provider_has_supported_semantics(
                     typepython_syntax::FrameworkTransformCapability::TaintSource
                         | typepython_syntax::FrameworkTransformCapability::TaintSink
                         | typepython_syntax::FrameworkTransformCapability::TaintSanitizer
+                        | typepython_syntax::FrameworkTransformCapability::ValidatorWitness
                 )
             })
         }
@@ -1040,7 +1041,7 @@ pub(super) fn direct_unknown_operation_diagnostics(
 
     for access in &node.member_accesses {
         if name_is_unknown_boundary(context, node, nodes, &access.owner_name) {
-            diagnostics.push(Diagnostic::error(
+            let mut diagnostic = Diagnostic::error(
                 "TPY4003",
                 format!(
                     "member access `{}` in module `{}` is unsupported because `{}` has type `unknown`",
@@ -1048,7 +1049,18 @@ pub(super) fn direct_unknown_operation_diagnostics(
                     node.module_path.display(),
                     access.owner_name
                 ),
-            ));
+            );
+            if let Some(note) = validator_witness_trust_boundary_note(
+                node,
+                nodes,
+                access.current_owner_name.as_deref(),
+                access.current_owner_type_name.as_deref(),
+                access.line,
+                &access.owner_name,
+            ) {
+                diagnostic = diagnostic.with_note(note);
+            }
+            diagnostics.push(diagnostic);
         }
     }
 
@@ -1062,7 +1074,7 @@ pub(super) fn direct_unknown_operation_diagnostics(
             call.line,
             &call.owner_name,
         ) {
-            diagnostics.push(Diagnostic::error(
+            let mut diagnostic = Diagnostic::error(
                 "TPY4003",
                 format!(
                     "method call `{}.{}` in module `{}` is unsupported because `{}` has type `unknown`",
@@ -1071,7 +1083,18 @@ pub(super) fn direct_unknown_operation_diagnostics(
                     node.module_path.display(),
                     call.owner_name
                 ),
-            ));
+            );
+            if let Some(note) = validator_witness_trust_boundary_note(
+                node,
+                nodes,
+                call.current_owner_name.as_deref(),
+                call.current_owner_type_name.as_deref(),
+                call.line,
+                &call.owner_name,
+            ) {
+                diagnostic = diagnostic.with_note(note);
+            }
+            diagnostics.push(diagnostic);
         }
     }
 

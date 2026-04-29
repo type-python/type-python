@@ -1,0 +1,164 @@
+use super::*;
+
+#[test]
+fn check_validator_witness_narrows_unknown_in_true_branch() {
+    let result = check_temp_typepython_source(concat!(
+        "class User:\n",
+        "    name: str\n",
+        "    def greet(self) -> str:\n",
+        "        return self.name\n\n",
+        "from typing import Literal\n\n",
+        "def validate_user(value: unknown) -> ValidatorWitness[User, Literal[\"trusted\"]]:\n",
+        "    ...\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if validate_user(value):\n",
+        "        return value.greet()\n",
+        "    return \"\"\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_trust_metadata_decorator_produces_generated_witness() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable\n\n",
+        "class User:\n",
+        "    name: str\n",
+        "    def greet(self) -> str:\n",
+        "        return self.name\n\n",
+        "def validator[T](target: type[T], trust: str):\n",
+        "    def wrap[**P](fn: Callable[P, bool]) -> Callable[P, bool]:\n",
+        "        return fn\n",
+        "    return wrap\n\n",
+        "@validator(User, trust=\"generated\")\n",
+        "def validate_user(value: unknown) -> bool:\n",
+        "    ...\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if validate_user(value):\n",
+        "        return value.greet()\n",
+        "    return \"\"\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_adapter_declared_validator_witness_trusts_one_arg_witness() {
+    let result = check_temp_typepython_source(concat!(
+        "class User:\n",
+        "    name: str\n",
+        "    def greet(self) -> str:\n",
+        "        return self.name\n\n",
+        "def framework_transform(*args, **kwargs):\n",
+        "    def wrap(obj):\n",
+        "        return obj\n",
+        "    return wrap\n\n",
+        "@framework_transform(kind=\"function_decorator\", capabilities=(\"validator_witness\",))\n",
+        "def trusted_boundary(fn):\n",
+        "    return fn\n\n",
+        "@trusted_boundary\n",
+        "def validate_user(value: unknown) -> ValidatorWitness[User]:\n",
+        "    ...\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if validate_user(value):\n",
+        "        return value.greet()\n",
+        "    return \"\"\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_validator_witness_does_not_narrow_after_reassignment() {
+    let result = check_temp_typepython_source(concat!(
+        "class User:\n",
+        "    name: str\n",
+        "    def greet(self) -> str:\n",
+        "        return self.name\n\n",
+        "from typing import Literal\n\n",
+        "def validate_user(value: unknown) -> ValidatorWitness[User, Literal[\"trusted\"]]:\n",
+        "    ...\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if validate_user(value):\n",
+        "        value = get_unknown()\n",
+        "        return value.greet()\n",
+        "    return \"\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("invalidated by assignment or mutation"), "{rendered}");
+}
+
+#[test]
+fn check_validator_witness_does_not_narrow_after_subscript_mutation() {
+    let result = check_temp_typepython_source(concat!(
+        "class User:\n",
+        "    name: str\n",
+        "    def greet(self) -> str:\n",
+        "        return self.name\n\n",
+        "from typing import Literal\n\n",
+        "def validate_user(value: unknown) -> ValidatorWitness[User, Literal[\"trusted\"]]:\n",
+        "    ...\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if validate_user(value):\n",
+        "        value[\"name\"] = get_unknown()\n",
+        "        return value.greet()\n",
+        "    return \"\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("invalidated by assignment or mutation"), "{rendered}");
+}
+
+#[test]
+fn check_validator_witness_does_not_narrow_after_attribute_mutation() {
+    let result = check_temp_typepython_source(concat!(
+        "class User:\n",
+        "    name: str\n",
+        "    def greet(self) -> str:\n",
+        "        return self.name\n\n",
+        "from typing import Literal\n\n",
+        "def validate_user(value: unknown) -> ValidatorWitness[User, Literal[\"trusted\"]]:\n",
+        "    ...\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if validate_user(value):\n",
+        "        value.name = get_unknown()\n",
+        "        return value.greet()\n",
+        "    return \"\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("invalidated by assignment or mutation"), "{rendered}");
+}
+
+#[test]
+fn check_validator_witness_without_trust_metadata_does_not_narrow() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "class User:\n",
+            "    name: str\n",
+            "    def greet(self) -> str:\n",
+            "        return self.name\n\n",
+            "def validate_user(value: unknown) -> ValidatorWitness[User]:\n",
+            "    ...\n\n",
+            "def handle(value: unknown) -> str:\n",
+            "    if validate_user(value):\n",
+            "        return value.greet()\n",
+            "    return \"\"\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("crossed an untrusted boundary"), "{rendered}");
+}
