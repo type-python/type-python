@@ -39,6 +39,13 @@ class NormativeRule:
     tests: tuple[str, ...]
 
 
+BETA_SCOPE_NOTES: dict[str, str] = {
+    "mapped": "Evidence command(s) cover this rule for the Core v1 Beta claim.",
+    "meta-rule": "Spec governance or terminology rule; non-blocking for Core v1 Beta runtime/tool behavior.",
+    "not-claimed-beta": "Not part of the externally visible Core v1 Beta compatibility claim.",
+}
+
+
 TEST_EVIDENCE: dict[str, tuple[str, ...]] = {
     "`.tpy` parsing for Core syntax": ("cargo test -p typepython-syntax",),
     "`.py` emission": ("cargo test -p typepython-lowering", "cargo test -p typepython-cli tests::pipeline"),
@@ -110,6 +117,10 @@ TEST_EVIDENCE: dict[str, tuple[str, ...]] = {
     "typepython lsp": ("cargo test -p typepython-lsp",),
     "`typepython migrate --report`": ("cargo test -p typepython-cli build_migration_report",),
     "typepython migrate --report": ("cargo test -p typepython-cli build_migration_report",),
+    "Stable JSON diagnostic output": ("cargo test -p typepython-diagnostics", "cargo test -p typepython-cli"),
+    "`typepython migrate` stub-generation workflows that do not affect authoritative public surfaces": ("cargo test -p typepython-cli emit_migration_stubs",),
+    "typepython migrate stub-generation workflows that do not affect authoritative public surfaces": ("cargo test -p typepython-cli emit_migration_stubs",),
+    "Optional `.pyc` generation": ("cargo test -p typepython-cli run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled",),
 }
 
 VALIDATION_CHECKS: tuple[str, ...] = (
@@ -156,12 +167,62 @@ RULE_EVIDENCE_PATTERNS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = tu
         (r"abstract", TEST_EVIDENCE["Abstract class and `@abstractmethod` checking"]),
         (r"namespace package|module discovery|logical module", TEST_EVIDENCE["Implicit namespace packages / PEP 420 project modeling"]),
         (r"PEP 561|py\.typed|stub package|typed-package|partial-stub", TEST_EVIDENCE["PEP 561 typed-package and partial-stub resolution"]),
-        (r"typing_extensions|typing semantic|target_python|target version", TEST_EVIDENCE["Target-version compatibility matrix for emitted typing constructs"]),
+        (r"typing_extensions|typing semantic|target_python|target version|target-version|compatibility matrix|emit_style|typeshed snapshot|standard-library type source", TEST_EVIDENCE["Target-version compatibility matrix for emitted typing constructs"]),
         (r"unknown|dynamic|untyped import", TEST_EVIDENCE["Untyped import fallback (`unknown`/`dynamic`)"]),
-        (r"diagnostic|TPY\d+|severity", TEST_EVIDENCE["Deterministic diagnostics"]),
+        (r"diagnostic|compile errors|TPY\d+|severity", TEST_EVIDENCE["Deterministic diagnostics"]),
+        (r"JSON|json", ("cargo test -p typepython-diagnostics", "cargo test -p typepython-cli")),
         (r"cache|incremental|invalidation|rechecking|summary", TEST_EVIDENCE["Cache invalidation"]),
         (r"verify|wheel|sdist|artifact|publication", TEST_EVIDENCE["`typepython verify` library publishability checks"]),
+        (r"normal Python interpreter|mandatory TypePython runtime|no mandatory TypePython runtime", TEST_EVIDENCE["`.py` emission"]),
+        (r"Generics with single upper bound", TEST_EVIDENCE["Generics with single upper bound"]),
         (r"runtime validator|validation boundary|boundaries|__tpy_validate__", TEST_EVIDENCE["Runtime validator emission for selected data-class trust boundaries"]),
+        (r"default.*type parameter|type parameter.*default|following type parameter|Type-parameter defaults and constraint lists", TEST_EVIDENCE["Type-parameter defaults and constraint lists"]),
+        (r"assignable|assignment|RHS type|value type", ("cargo test -p typepython-checking assignments", "cargo test -p typepython-checking typed_dict")),
+        (r"Optionality|T\?|None guard|None`, `None|ordinary member access|short-circuit", TEST_EVIDENCE["Narrowing (`is None`, `isinstance`, `TypeGuard`/`TypeIs`, `assert`, `match`, boolean composition)"]),
+        (r"Transform|Partial|Pick|Omit|Readonly|compile-time-only type operators", TEST_EVIDENCE["`TypedDict` utility transforms (`Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, `Required_`)"]),
+        (r"Widening|widening", TEST_EVIDENCE["Widened literal and container inference"]),
+        (r"simple name|duplicate|same body|declare both", ("cargo test -p typepython-binding", "cargo test -p typepython-checking")),
+        (r"hard keyword|soft keyword", TEST_EVIDENCE["`.tpy` parsing for Core syntax"]),
+        (r"synthesis|dataclass-like|constructor", TEST_EVIDENCE["`dataclass_transform`-based dataclass-like framework typing"]),
+        (
+            r"call expression|call site|call-site|callable type|source callable|target callable|concrete signature is applicable|applicable signature|keyword argument|starred argument|argument list|applicable overload|overload",
+            TEST_EVIDENCE["Callable compatibility and overload specificity"],
+        ),
+        (r"indexing by a statically known undeclared key", TEST_EVIDENCE["`TypedDict` literal checking in contextual positions"]),
+        (r"import|resolution|type_roots|stub package|partial stub", ("cargo test -p typepython-cli external_resolution", "cargo test -p typepython-checking imports")),
+        (r"project path|search upward|src`|profile names|out_dir|cache_dir|exclude|ignored", ("cargo test -p typepython-config", "cargo test -p typepython-cli tests::pipeline")),
+        (r"public contract|executable bodies|Function bodies|Stub declarations", TEST_EVIDENCE["`.pyi` emission"]),
+        (r"Lowering MUST produce|lowerer MUST|lowering map|mapping segment|lowering metadata|deterministic serialization", TEST_EVIDENCE["`.py` emission"]),
+        (r"accept the grammar above|index signature shorthand|__getitem__|__setitem__", ("cargo test -p typepython-syntax", "cargo test -p typepython-checking")),
+        (r"Lambda parameter annotation sugar", TEST_EVIDENCE["Lambda parameter annotation sugar"]),
+        (r"`with` statement typing|with statement typing", TEST_EVIDENCE["with statement typing"]),
+        (r"Public API completeness enforcement", TEST_EVIDENCE["Public API completeness enforcement when configured"]),
+        (r"require_known_public_types|public surface is not type-complete", TEST_EVIDENCE["Public API completeness enforcement when configured"]),
+        (r"concrete codes|reserve the following concrete codes", TEST_EVIDENCE["Deterministic diagnostics"]),
+        (r"public summary|isPackageEntry|exports|standardized export|serialized in lexicographic|direct_changes|build up to date|rebuild or re-emit", TEST_EVIDENCE["Cache invalidation"]),
+        (r"It MUST at minimum|Runtime verification in v1|byte-for-byte equivalence", TEST_EVIDENCE["`typepython verify` library publishability checks"]),
+        (r"multiple compatible spellings|same choice for equivalent declarations", TEST_EVIDENCE["Target-version compatibility matrix for emitted typing constructs"]),
+        (r"Core v1 MUST support|Core v1 supports|MUST support", ("cargo test -p typepython-syntax", "cargo test -p typepython-checking")),
+    ]
+)
+
+META_RULE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"RFC 2119|words \*\*MUST|MUST indicates|MUST NOT indicates",
+        r"implementation-defined|host-defined|document the dependency",
+        r"scope|terminology|governance|specification error",
+        r"v1-conformant|Core v1 conformance|test suite MUST|externally visible `MUST` rule",
+    ]
+)
+
+NOT_CLAIMED_BETA_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"Experimental v1|experimental feature|prototype|not part of the Beta|outside conformance",
+        r"runtime validator|generated validator|validator generation|The validator MUST|conditional return|case arm pattern|infer_passthrough",
+        r"LSP support is a DX v1 feature|watch|migration|migrate|formatter|formatting|cache internal|snapshot schema",
+        r"add fields.*deterministic ordering.*hashing|versioned extension fields",
     ]
 )
 
@@ -199,6 +260,16 @@ def inferred_rule_tests(requirement: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(tests))
 
 
+def beta_rule_status(requirement: str, tests: tuple[str, ...]) -> str:
+    if any(pattern.search(requirement) for pattern in META_RULE_PATTERNS):
+        return "meta-rule"
+    if any(pattern.search(requirement) for pattern in NOT_CLAIMED_BETA_PATTERNS):
+        return "not-claimed-beta"
+    if tests:
+        return "mapped"
+    return "needs-mapping"
+
+
 def normative_rules() -> list[NormativeRule]:
     rules: list[NormativeRule] = []
     for path in SPEC_PATHS:
@@ -208,7 +279,7 @@ def normative_rules() -> list[NormativeRule]:
                 continue
             requirement = normalize_requirement(line)
             tests = inferred_rule_tests(requirement)
-            status = "mapped" if tests else "needs-mapping"
+            status = beta_rule_status(requirement, tests)
             rules.append(
                 NormativeRule(
                     rule_id=f"{path.stem}:L{line_number}",
@@ -225,21 +296,35 @@ def normative_rules() -> list[NormativeRule]:
 def render_markdown(claims: Iterable[FeatureClaim], rules: Iterable[NormativeRule]) -> str:
     claims = list(claims)
     rules = list(rules)
-    mapped_rules = sum(1 for rule in rules if rule.tests)
+    mapped_rules = sum(1 for rule in rules if rule.status == "mapped")
+    needs_mapping = sum(1 for rule in rules if rule.status == "needs-mapping")
+    non_blocking = sum(1 for rule in rules if rule.status in {"meta-rule", "not-claimed-beta"})
     lines = [
         "# TypePython Conformance Report",
         "",
         "This report maps the feature matrix in `docs/spec/conformance-and-test-plan-v1.md` to test evidence commands. It is intentionally conservative: missing evidence is reported as `missing`, not inferred from nearby tests.",
         "",
-        "It also extracts normative `MUST` and `MUST NOT` rules from `docs/spec/` and maps each rule to the nearest concrete test family when one can be inferred. Rules without evidence remain visible as `needs-mapping` so conformance gaps cannot disappear from review.",
+        "It also extracts normative `MUST` and `MUST NOT` rules from `docs/spec/` and maps each externally visible Core v1 Beta rule to the nearest concrete test family when one can be inferred. Rules outside the Core v1 Beta compatibility claim remain visible as `meta-rule` or `not-claimed-beta` rather than disappearing from review.",
         "",
-        f"Feature claims: {len(claims)}. Normative rules: {len(rules)} ({mapped_rules} mapped, {len(rules) - mapped_rules} need mapping).",
+        f"Feature claims: {len(claims)}. Normative rules: {len(rules)} ({mapped_rules} mapped, {non_blocking} non-blocking for Core v1 Beta, {needs_mapping} need mapping).",
+        "",
+        "## Beta Scope Summary",
+        "",
+        "Core v1 is the Beta compatibility claim. DX v1 and Experimental v1 features may ship in the package, but their UX details, adapter manifests, runtime validators, migration heuristics, conditional returns, pass-through inference, and cache internals are not compatibility-stable unless a later document explicitly promotes them.",
+        "",
+        "| Status | Meaning |",
+        "| ------ | ------- |",
+    ]
+    lines.extend(
+        f"| `{status}` | {markdown_cell(note)} |" for status, note in BETA_SCOPE_NOTES.items()
+    )
+    lines.extend([
         "",
         "## Feature Matrix Evidence",
         "",
         "| Feature | Tier | Requirement | Evidence |",
         "| ------- | ---- | ----------- | -------- |",
-    ]
+    ])
     for claim in claims:
         evidence = "<br>".join(f"`{test}`" for test in claim.tests) if claim.tests else "missing"
         lines.append(f"| {markdown_cell(claim.feature)} | {claim.tier} | {claim.status} | {evidence} |")
@@ -297,6 +382,10 @@ def main() -> int:
         if missing_must:
             joined = ", ".join(missing_must)
             raise SystemExit(f"missing conformance evidence for MUST feature(s): {joined}")
+        needs_mapping = [rule.rule_id for rule in rules if rule.status == "needs-mapping"]
+        if needs_mapping:
+            joined = ", ".join(needs_mapping)
+            raise SystemExit(f"normative MUST rule(s) need mapping: {joined}")
         if not rules:
             raise SystemExit("no normative MUST rules found in docs/spec")
         return 0

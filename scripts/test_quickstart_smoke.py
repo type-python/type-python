@@ -74,6 +74,7 @@ class QuickstartSmokeTests(unittest.TestCase):
                 [entrypoint, "init", "--dir", "my-project"],
                 [entrypoint, "check", "--project", "."],
                 [entrypoint, "build", "--project", "."],
+                [entrypoint, "verify", "--project", "."],
             ],
         )
 

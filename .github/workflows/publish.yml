@@ -6,6 +6,7 @@ on:
       - published
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -46,8 +47,58 @@ jobs:
             exit 1
           fi
 
-  build-sdist:
+  require-beta-release-gate:
     needs: validate-release
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Require successful rust Beta release gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          release_sha="$(git rev-parse HEAD)"
+          run_id="$(
+            gh api --method GET "repos/${REPOSITORY}/actions/workflows/rust.yml/runs" \
+              -f head_sha="${release_sha}" \
+              -f status=completed \
+              --jq '[.workflow_runs[] | select(.conclusion == "success") | .id][0] // ""'
+          )"
+          run_url="$(
+            gh api --method GET "repos/${REPOSITORY}/actions/workflows/rust.yml/runs" \
+              -f head_sha="${release_sha}" \
+              -f status=completed \
+              --jq '[.workflow_runs[] | select(.conclusion == "success") | .html_url][0] // ""'
+          )"
+
+          if [[ -z "${run_id}" ]]; then
+            echo "No successful rust workflow run found for release commit ${release_sha}."
+            echo "Push the release commit to a branch that runs .github/workflows/rust.yml and wait for beta-release-gate to pass before publishing."
+            exit 1
+          fi
+
+          gate_count="$(
+            gh api "repos/${REPOSITORY}/actions/runs/${run_id}/jobs" \
+              --jq '[.jobs[] | select(.name == "beta-release-gate" and .conclusion == "success")] | length'
+          )"
+
+          if [[ "${gate_count}" != "1" ]]; then
+            echo "Rust workflow ${run_url} did not include a successful beta-release-gate job."
+            exit 1
+          fi
+
+          echo "Found successful rust Beta release gate for release commit: ${run_url}"
+
+  build-sdist:
+    needs: require-beta-release-gate
     runs-on: ubuntu-24.04
 
     steps:
@@ -78,7 +129,7 @@ jobs:
           if-no-files-found: error
 
   build-wheels:
-    needs: validate-release
+    needs: require-beta-release-gate
     strategy:
       fail-fast: false
       matrix:
@@ -165,6 +216,7 @@ jobs:
       name: pypi
       url: https://pypi.org/project/type-python/
     permissions:
+      actions: read
       id-token: write
 
     steps:

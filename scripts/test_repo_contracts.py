@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import pathlib
 import re
 import subprocess
@@ -33,6 +34,17 @@ def string_assignment(relative_path: str, key: str) -> str:
     if match is None:
         raise AssertionError(f"{key} was not found in {relative_path}")
     return match.group(1)
+
+
+def load_script_module(relative_path: str, module_name: str):
+    module_path = REPO_ROOT / relative_path
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError(f"unable to import {relative_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 class RepoContractsTests(unittest.TestCase):
@@ -117,6 +129,49 @@ class RepoContractsTests(unittest.TestCase):
             [sys.executable, "scripts/conformance_report.py", "--check"],
             cwd=REPO_ROOT,
             check=True,
+        )
+
+    def test_beta_scope_and_release_gate_are_documented(self) -> None:
+        pyproject = read_text("pyproject.toml")
+        readme = read_text("README.md")
+        pypi_readme = read_text("README-PyPI.md")
+        faq = read_text("docs/faq.md")
+        beta = read_text("docs/beta-readiness.md")
+        workflow = read_text(".github/workflows/rust.yml")
+        makefile = read_text("Makefile")
+
+        self.assertIn("Development Status :: 4 - Beta", pyproject)
+        self.assertIn("Core v1 Beta", readme)
+        self.assertIn("Core v1 Beta", pypi_readme)
+        self.assertIn("not a blanket production-ready claim", faq)
+        self.assertIn("Stable during Beta", beta)
+        self.assertIn("Included but not compatibility-stable", beta)
+        self.assertIn("beta-release-gate", workflow)
+        self.assertIn("require-beta-release-gate", read_text(".github/workflows/publish.yml"))
+        self.assertIn("beta-release-gate:", makefile)
+
+    def test_conformance_beta_scope_classification_is_precise(self) -> None:
+        conformance_report = load_script_module(
+            "scripts/conformance_report.py",
+            "conformance_report_under_test",
+        )
+
+        conditional_rule = (
+            "Conditional return syntax is an Experimental v1 feature. "
+            "If an implementation enables it explicitly, it MUST follow the rules in this subsection."
+        )
+        self.assertEqual(
+            conformance_report.beta_rule_status(
+                conditional_rule,
+                ("cargo test -p typepython-syntax",),
+            ),
+            "not-claimed-beta",
+        )
+        self.assertEqual(
+            conformance_report.inferred_rule_tests(
+                "A name MUST NOT shadow a hard keyword (see Section 7.7.2)."
+            ),
+            ("cargo test -p typepython-syntax",),
         )
 
     def test_diagnostic_coverage_report_is_generated_and_checked(self) -> None:

@@ -27,7 +27,11 @@ TypePython can target Python 3.10 through 3.14 via the `project.target_python` c
 
 ### Is TypePython production-ready?
 
-TypePython aims to track the current Core v1 draft closely, and the repository implements the major Core v1 language and checking features described in this documentation. The DX v1 tier (watch, LSP, migration tools) and Experimental tier (conditional returns, pass-through inference, runtime validators) are also present. Evaluate it against your project's needs and tolerance for draft-spec evolution.
+TypePython is **Core v1 Beta**, not a blanket production-ready claim for every roadmap feature. It is suitable for teams that want to trial `.tpy` Core syntax, standard `.py`/`.pyi` emission, and the `init`/`check`/`build`/`clean`/`verify` CLI path on non-critical packages or with an explicit migration gate.
+
+It is not yet a fit if you need compatibility-stable LSP UX, adapter manifest SDKs, runtime validators, migration heuristics, or cache internals. Those ship for feedback but remain prototype/experimental during Beta.
+
+See [Core v1 Beta Readiness](beta-readiness.md) for the exact stable and unstable surfaces.
 
 ## Language
 

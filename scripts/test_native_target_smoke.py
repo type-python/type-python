@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import tempfile
 import unittest
@@ -123,6 +124,12 @@ class NativeTargetSmokeTests(unittest.TestCase):
         self.assertEqual(len(asserted_outputs), 1)
         self.assertEqual(len(asserted_runtime), 1)
         self.assertEqual(asserted_outputs[0], asserted_runtime[0])
+
+    def test_child_environment_does_not_recurse_through_typepython_bin(self) -> None:
+        with mock.patch.dict(os.environ, {"TYPEPYTHON_BIN": "/tmp/typepython-wrapper"}):
+            child_env = native_target_smoke.child_environment()
+
+        self.assertNotIn("TYPEPYTHON_BIN", child_env)
 
     def test_framework_annotation_audit_summary_detects_expected_consumers(self) -> None:
         payload = native_target_smoke.framework_annotation_audit_summary()

@@ -40,6 +40,7 @@ def main() -> None:
         run([entrypoint, "init", "--dir", "my-project"], cwd=root)
         run([entrypoint, "check", "--project", "."], cwd=project_dir)
         run([entrypoint, "build", "--project", "."], cwd=project_dir)
+        run([entrypoint, "verify", "--project", "."], cwd=project_dir)
 
         expected_files = [
             project_dir / ".typepython" / "build" / "app" / "__init__.py",

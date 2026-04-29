@@ -17,8 +17,10 @@ output runs anywhere CPython runs.
 
 **No custom runtime. No per-checker plugin. No vendor lock-in.**
 
-> Status: **alpha** (v0.3.0). The compiler core, type checker, and LSP are
-> stable; framework adapters and runtime validators are in prototype.
+> Status: **Core v1 Beta** (v0.3.1). Core syntax, config, `init`/`check`/`build`/
+> `clean`/`verify`, diagnostic code identity, and emitted `.py`/`.pyi` compatibility
+> are the stable Beta surfaces. LSP UX, adapter manifests, runtime validators, and
+> migration heuristics remain prototype/experimental.
 > Bug reports and contributions are very welcome.
 
 ## Install
@@ -133,6 +135,7 @@ hazards for frameworks that introspect annotations.
 - [Interoperability](https://github.com/type-python/type-python/blob/main/docs/interop.md)
 - [Migration Guide](https://github.com/type-python/type-python/blob/main/docs/migration-guide.md)
 - [Framework Adapters](https://github.com/type-python/type-python/blob/main/docs/framework-adapters.md)
+- [Beta Readiness](https://github.com/type-python/type-python/blob/main/docs/beta-readiness.md)
 - [Language Spec v1](https://github.com/type-python/type-python/blob/main/docs/spec/language-spec-v1.md)
 
 ## Links

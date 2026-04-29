@@ -265,7 +265,6 @@ jobs:
         run: python scripts/native_target_smoke.py --target-python ${{ matrix.python-version }}
 
   platform-smoke:
-    if: github.event_name == 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -345,3 +344,26 @@ jobs:
 
       - name: Test CLI Verification Suite
         run: 'cargo test -p typepython-cli tests::verification::'
+
+  beta-release-gate:
+    runs-on: ubuntu-latest
+    needs:
+      - workspace-fast
+      - coverage
+      - fuzz-smoke
+      - python-min-supported
+      - msrv-check
+      - python-modern-host
+      - native-target-build-verify
+      - platform-smoke
+      - cli-verification
+    if: always()
+
+    steps:
+      - name: Require Beta release gate jobs to pass
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || "${{ contains(needs.*.result, 'cancelled') }}" == "true" || "${{ contains(needs.*.result, 'skipped') }}" == "true" ]]; then
+            echo "One or more Beta release gate jobs failed, were cancelled, or were skipped."
+            exit 1
+          fi
+          echo "Beta release gate prerequisites passed."

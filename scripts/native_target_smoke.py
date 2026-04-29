@@ -32,7 +32,7 @@ FRAMEWORK_ANNOTATION_AUDIT_SOURCE = (
 def run(command: list[str], cwd: pathlib.Path | None = None) -> None:
     location = f" (cwd={cwd})" if cwd is not None else ""
     print(f"+ {' '.join(command)}{location}")
-    subprocess.run(command, cwd=cwd, check=True)
+    subprocess.run(command, cwd=cwd, check=True, env=child_environment())
 
 
 def capture(command: list[str], cwd: pathlib.Path | None = None) -> str:
@@ -44,8 +44,15 @@ def capture(command: list[str], cwd: pathlib.Path | None = None) -> str:
         check=True,
         text=True,
         capture_output=True,
+        env=child_environment(),
     )
     return completed.stdout
+
+
+def child_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    env.pop("TYPEPYTHON_BIN", None)
+    return env
 
 
 def resolve_entrypoint() -> str:

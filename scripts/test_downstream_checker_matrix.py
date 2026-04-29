@@ -15,10 +15,14 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
         matrix = downstream_checker_smoke.load_fixture_matrix()
 
         self.assertIn("basic-package", matrix)
+        self.assertIn("rich-package", matrix)
         self.assertIn("compat-package", matrix)
+        self.assertIn("pydantic-like-package", matrix)
+        self.assertIn("fastapi-like-package", matrix)
         self.assertIn("negative-consumer-package", matrix)
         self.assertIn("standard-typing-package", matrix)
         self.assertIn("toy-task-package", matrix)
+        self.assertIn("dual-emit-package", matrix)
         for case in matrix.values():
             fixture_dir = downstream_checker_smoke.FIXTURE_ROOT / case.name
             self.assertTrue(fixture_dir.is_dir(), fixture_dir)
@@ -37,6 +41,16 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
             self.assertTrue(case.name.startswith("negative-"))
             consumer_path = downstream_checker_smoke.FIXTURE_ROOT / case.name / "checker-consumer.py"
             self.assertTrue(consumer_path.exists(), consumer_path)
+
+    def test_expected_checker_disagreements_have_reason_and_expiry(self) -> None:
+        payload = downstream_checker_smoke.MATRIX_PATH.read_text(encoding="utf-8")
+        import json
+
+        matrix_payload = json.loads(payload)
+        for raw_case in matrix_payload["fixtures"]:
+            if raw_case.get("expect_checker_failure") or raw_case.get("expected_checker_failures"):
+                self.assertRegex(raw_case.get("allowlist_reason", ""), r"\S")
+                self.assertRegex(raw_case.get("allowlist_expires", ""), r"^20\d{2}-\d{2}-\d{2}$")
 
     def test_expected_stub_fragments_are_keyed_by_declared_target(self) -> None:
         matrix = downstream_checker_smoke.load_fixture_matrix()

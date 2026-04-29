@@ -14,7 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="Python 3.9+" /></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/built%20with-rust-orange.svg" alt="Built with Rust" /></a>
-  <a href="https://github.com/type-python/type-python/issues"><img src="https://img.shields.io/badge/status-alpha-yellow.svg" alt="Alpha" /></a>
+  <a href="https://github.com/type-python/type-python/issues"><img src="https://img.shields.io/badge/status-Core%20v1%20Beta-blue.svg" alt="Core v1 Beta" /></a>
 </p>
 
 <p align="center">
@@ -197,17 +197,23 @@ class BaseModel: ...
 
 ## Project status
 
-TypePython is **alpha** (v0.3.0). The breakdown:
+TypePython is **Core v1 Beta** (v0.3.1). The Beta claim is deliberately scoped: Core syntax,
+configuration, `init`/`check`/`build`/`clean`/`verify`, diagnostic code identity, and emitted
+`.py`/`.pyi` compatibility are the stable surfaces. DX and Experimental features ship for feedback
+but are not compatibility-stable. See [`docs/beta-readiness.md`](docs/beta-readiness.md).
+
+The breakdown:
 
 | Tier             | What's there                                                                                                                                                                                                                                                                                                                                                       |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Stable core**  | `.tpy` / `.py` / `.pyi` parsing and project discovery; checker for the documented Core v1 feature set; `.py` lowering and `.pyi` generation; incremental CLI / LSP cache; `build`, `check`, `verify`, `compat`, `api-diff`, `type-health`, `migrate`; LSP diagnostics, navigation, completion, hover, formatting, code actions.                                    |
-| **Prototype**    | framework transform metadata and `typepython-framework.toml` adapter validation; framework shape synthesis for representative fixture families; boundary validator generation and delegated validator adapters; checker portability profiles and allowlists.                                                                                                      |
-| **Experimental** | shape projection beyond `TypedDict` and dataclass-backed shapes; conditional return syntax; sync/async dual emit paths; notebook ingestion and other deferred research tracks.                                                                                                                                                                                     |
+| **Core v1 Beta** | `.tpy` Core syntax; project discovery and `typepython.toml` Core config; `init`, `check`, `build`, `clean`, `verify`; diagnostic code identity; `.py` lowering and `.pyi` generation with no mandatory TypePython runtime.                                                                           |
+| **DX prototype** | `watch`, LSP UX details, `compat`, `api-diff`, `type-health`, `migrate`, checker portability profiles, type budgets, and migration dashboards.                                                                                                                                                        |
+| **Experimental** | framework adapter manifests, runtime validators, shape projection beyond `TypedDict`, conditional return syntax, sync/async dual emit paths, notebook ingestion, and other deferred research tracks.                                                                                                                                                                  |
 
 Conformance and diagnostic-coverage reports are checked into the repo: [`docs/conformance-report.md`](docs/conformance-report.md), [`docs/diagnostic-test-coverage.md`](docs/diagnostic-test-coverage.md).
 
-> **It's early.** The compiler is one maintainer plus contributors; the spec is a v1 draft. Expect rough edges. Bug reports, design feedback, and PRs all carry weight at this stage.
+> **Beta does not mean all roadmap features are stable.** It means the Core v1 authoring and emit
+> contract is ready for serious trial use while DX and Experimental surfaces continue to evolve.
 
 ## Configuration
 
@@ -280,6 +286,7 @@ Full guide: [`docs/migration-guide.md`](docs/migration-guide.md).
 | You care how the output behaves in mypy/pyright | [Interoperability](docs/interop.md)           |
 | You're adopting it in an existing codebase   | [Migration Guide](docs/migration-guide.md)       |
 | You're a framework author                    | [Framework Adapters](docs/framework-adapters.md) |
+| You're evaluating Beta stability             | [Beta Readiness](docs/beta-readiness.md)         |
 | You want the crate map / pipeline diagram    | [Architecture](docs/architecture.md)             |
 | You're sending a PR                          | [Contributing](docs/contributing.md)             |
 | You have a quick question                    | [FAQ](docs/faq.md)                               |
