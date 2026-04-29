@@ -379,7 +379,14 @@ fn framework_transform_provider_has_supported_semantics(
         Some(typepython_syntax::FrameworkTransformProviderKind::FunctionDecorator) => {
             provider.capabilities.contains(
                 &typepython_syntax::FrameworkTransformCapability::FunctionToObjectReplacement,
-            )
+            ) || provider.capabilities.iter().any(|capability| {
+                matches!(
+                    capability,
+                    typepython_syntax::FrameworkTransformCapability::TaintSource
+                        | typepython_syntax::FrameworkTransformCapability::TaintSink
+                        | typepython_syntax::FrameworkTransformCapability::TaintSanitizer
+                )
+            })
         }
         Some(
             typepython_syntax::FrameworkTransformProviderKind::ClassDecorator

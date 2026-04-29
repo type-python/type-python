@@ -154,10 +154,15 @@ fn direct_semantic_type_is_assignable(
     let actual = actual.strip_annotated().clone();
 
     if expected == actual
+        || is_object_semantic_type(&expected)
         || is_top_assignable_semantic_type(&expected)
         || is_top_assignable_semantic_type(&actual)
     {
         return true;
+    }
+
+    if let Some(result) = taint_qualified_assignability(node, nodes, &expected, &actual) {
+        return result;
     }
 
     let key = (expected.clone(), actual.clone());
@@ -229,6 +234,39 @@ fn is_any_semantic_type(ty: &SemanticType) -> bool {
 
 fn is_top_assignable_semantic_type(ty: &SemanticType) -> bool {
     matches!(ty, SemanticType::Name(name) if matches!(name.as_str(), "Any" | "unknown" | "dynamic"))
+}
+
+fn is_object_semantic_type(ty: &SemanticType) -> bool {
+    matches!(ty, SemanticType::Name(name) if name == "object")
+}
+
+fn taint_qualified_assignability(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &SemanticType,
+    actual: &SemanticType,
+) -> Option<bool> {
+    match (semantic_tainted_parts(expected), semantic_tainted_parts(actual)) {
+        (None, None) => None,
+        (None, Some(_)) | (Some(_), None) => Some(false),
+        (Some((expected_inner, expected_context)), Some((actual_inner, actual_context))) => {
+            Some(
+                render_semantic_type(expected_context) == render_semantic_type(actual_context)
+                    && direct_semantic_type_is_assignable(
+                        node,
+                        nodes,
+                        expected_inner,
+                        actual_inner,
+                        &mut BTreeSet::new(),
+                    ),
+            )
+        }
+    }
+}
+
+fn semantic_tainted_parts(ty: &SemanticType) -> Option<(&SemanticType, &SemanticType)> {
+    let (head, args) = ty.generic_parts()?;
+    (head == "Tainted" && args.len() == 2).then(|| (&args[0], &args[1]))
 }
 
 pub(super) fn nominal_subclass_assignable(
