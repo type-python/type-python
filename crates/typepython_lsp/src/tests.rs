@@ -179,6 +179,71 @@ fn hover_renders_projected_typeddict_shape_aliases() {
 }
 
 #[test]
+fn hover_renders_projected_dataclass_shape_aliases() {
+    let config = temp_workspace(
+        "hover_renders_projected_dataclass_shape_aliases",
+        &[(
+            "src/app/__init__.tpy",
+            "data class User:\n    id: int\n    name: str\n    email: str\n\ntypealias PublicUser = Pick[User, \"name\", \"email\"]\n",
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let hover = server
+        .handle_hover(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 5, "character": 12}
+        }))
+        .expect("hover should succeed");
+    let contents = hover["contents"]["value"].as_str().expect("hover contents should be text");
+
+    assert!(contents.contains("Shape PublicUser"), "{contents}");
+    assert!(contents.contains("name: str"), "{contents}");
+    assert!(contents.contains("email: str"), "{contents}");
+    assert!(!contents.contains("id: int"), "{contents}");
+}
+
+#[test]
+fn hover_renders_projected_framework_shape_aliases() {
+    let config = temp_workspace(
+        "hover_renders_projected_framework_shape_aliases",
+        &[(
+            "src/app/__init__.tpy",
+            concat!(
+                "def framework_transform(*args, **kwargs):\n",
+                "    def wrap(obj):\n",
+                "        return obj\n",
+                "    return wrap\n\n",
+                "@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\", \"alias_handling\"))\n",
+                "class ModelBase:\n",
+                "    pass\n\n",
+                "class User(ModelBase):\n",
+                "    id: int\n",
+                "    name: str\n",
+                "    email: str\n\n",
+                "typealias PublicUser = Omit[User, \"id\"]\n",
+            ),
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let hover = server
+        .handle_hover(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 14, "character": 12}
+        }))
+        .expect("hover should succeed");
+    let contents = hover["contents"]["value"].as_str().expect("hover contents should be text");
+
+    assert!(contents.contains("Shape PublicUser"), "{contents}");
+    assert!(contents.contains("name: str"), "{contents}");
+    assert!(contents.contains("email: str"), "{contents}");
+    assert!(!contents.contains("id: int"), "{contents}");
+}
+
+#[test]
 fn hover_renders_effect_summary_for_decorated_callable() {
     let config = temp_workspace(
         "hover_renders_effect_summary_for_decorated_callable",

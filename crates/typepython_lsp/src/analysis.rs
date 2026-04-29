@@ -424,13 +424,45 @@ impl AnalysisHost {
     }
 }
 
-#[derive(Debug, Clone)]
-struct HoverShapeField {
-    name: String,
-    annotation: String,
-    required: bool,
-    readonly: bool,
+fn reduced_type_level_alias_hover(
+    node: &ModuleNode,
+    declaration: &typepython_binding::Declaration,
+) -> Option<String> {
+    if declaration.kind != typepython_binding::DeclarationKind::TypeAlias {
+        return None;
+    }
+    reduce_restricted_type_level_alias_text(node, &declaration.type_alias_body_text()?)
 }
+
+fn reduce_restricted_type_level_alias_text(node: &ModuleNode, value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let fields = type_level_shape_fields(node);
+    if let Some(keys) = typepython_syntax::reduce_key_set_alias_text(trimmed, &fields) {
+        return Some(format!(
+            "Literal[{}]",
+            keys.into_iter().map(|key| format!("\"{key}\"")).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    typepython_syntax::reduce_typeif_is_subtype_text(trimmed)
+}
+
+fn type_level_shape_fields(node: &ModuleNode) -> Vec<typepython_syntax::TypeLevelShapeField> {
+    node.declarations
+        .iter()
+        .filter_map(|member| {
+            let owner = member.owner.as_ref()?;
+            Some((owner.name.clone(), member))
+        })
+        .filter(|(_, member)| member.kind == typepython_binding::DeclarationKind::Value)
+        .map(|(owner, member)| typepython_syntax::TypeLevelShapeField {
+            owner,
+            name: member.name.clone(),
+            annotation: member.value_annotation().map(typepython_binding::BoundTypeExpr::render),
+        })
+        .collect()
+}
+
+type SharedShapeField = typepython_syntax::ShapeProjectionField;
 
 fn projected_shape_hover_detail(
     workspace: &WorkspaceState,
@@ -452,9 +484,14 @@ fn projected_shape_hover_detail(
             flags.push("readonly");
         }
         if flags.is_empty() {
-            lines.push(format!("  {}: {}", field.name, field.annotation));
+            lines.push(format!("  {}: {}", field.name, field.normalized_annotation()));
         } else {
-            lines.push(format!("  {}: {} | {}", field.name, field.annotation, flags.join(", ")));
+            lines.push(format!(
+                "  {}: {} | {}",
+                field.name,
+                field.normalized_annotation(),
+                flags.join(", ")
+            ));
         }
     }
     Some(lines.join("\n"))
@@ -482,126 +519,151 @@ fn resolve_projected_hover_shape(
     workspace: &WorkspaceState,
     node: &ModuleNode,
     expression: &str,
-) -> Option<Vec<HoverShapeField>> {
+) -> Option<Vec<SharedShapeField>> {
     let expression = expression.trim();
     if let Some(inner) = bracket_inner(expression, "Partial") {
-        return resolve_projected_hover_shape(workspace, node, inner).map(|fields| {
-            fields
-                .into_iter()
-                .map(|mut field| {
-                    field.required = false;
-                    field
-                })
-                .collect()
-        });
+        return resolve_projected_hover_shape(workspace, node, inner)
+            .map(|fields| hover_shape_from_fields("hover", fields).partial().fields);
     }
     if let Some(inner) = bracket_inner(expression, "Required_") {
-        return resolve_projected_hover_shape(workspace, node, inner).map(|fields| {
-            fields
-                .into_iter()
-                .map(|mut field| {
-                    field.required = true;
-                    field
-                })
-                .collect()
-        });
+        return resolve_projected_hover_shape(workspace, node, inner)
+            .map(|fields| hover_shape_from_fields("hover", fields).required_fields().fields);
     }
     if let Some(inner) = bracket_inner(expression, "Readonly") {
-        return resolve_projected_hover_shape(workspace, node, inner).map(|fields| {
-            fields
-                .into_iter()
-                .map(|mut field| {
-                    field.readonly = true;
-                    field
-                })
-                .collect()
-        });
+        return resolve_projected_hover_shape(workspace, node, inner)
+            .map(|fields| hover_shape_from_fields("hover", fields).readonly_fields().fields);
     }
     if let Some(inner) = bracket_inner(expression, "Mutable") {
-        return resolve_projected_hover_shape(workspace, node, inner).map(|fields| {
-            fields
-                .into_iter()
-                .map(|mut field| {
-                    field.readonly = false;
-                    field
-                })
-                .collect()
-        });
+        return resolve_projected_hover_shape(workspace, node, inner)
+            .map(|fields| hover_shape_from_fields("hover", fields).mutable_fields().fields);
     }
     if let Some((target, keys)) = keyed_transform_inner(expression, "Pick") {
-        return resolve_projected_hover_shape(workspace, node, target)
-            .map(|fields| fields.into_iter().filter(|field| keys.contains(&field.name)).collect());
+        return resolve_projected_hover_shape(workspace, node, target).map(|fields| {
+            let keys = keys.iter().map(String::as_str).collect::<Vec<_>>();
+            hover_shape_from_fields("hover", fields).pick(&keys).fields
+        });
     }
     if let Some((target, keys)) = keyed_transform_inner(expression, "Omit") {
         return resolve_projected_hover_shape(workspace, node, target).map(|fields| {
-            fields.into_iter().filter(|field| !keys.contains(&field.name)).collect()
+            let keys = keys.iter().map(String::as_str).collect::<Vec<_>>();
+            hover_shape_from_fields("hover", fields).omit(&keys).fields
         });
     }
-    typed_dict_hover_shape(workspace, node, expression)
+    source_hover_shape(workspace, node, expression)
 }
 
-fn typed_dict_hover_shape(
+fn source_hover_shape(
     workspace: &WorkspaceState,
     node: &ModuleNode,
     type_name: &str,
-) -> Option<Vec<HoverShapeField>> {
+) -> Option<Vec<SharedShapeField>> {
     let document = workspace.queries.documents_by_module_key.get(&node.module_key)?;
-    document.syntax.statements.iter().find_map(|statement| {
-        let SyntaxStatement::ClassDef(class) = statement else {
-            return None;
-        };
-        if class.name != type_name
-            || !class.bases.iter().any(|base| {
-                matches!(
-                    base.as_str(),
-                    "TypedDict" | "typing.TypedDict" | "typing_extensions.TypedDict"
-                )
-            })
+    if let Some(fields) = document.syntax.statements.iter().find_map(|statement| match statement {
+        SyntaxStatement::ClassDef(class)
+            if class.name == type_name
+                && class.bases.iter().any(|base| {
+                    matches!(
+                        base.as_str(),
+                        "TypedDict" | "typing.TypedDict" | "typing_extensions.TypedDict"
+                    )
+                }) =>
         {
-            return None;
+            Some(
+                typepython_syntax::ShapeProjection::from_named_block(
+                    class,
+                    typepython_syntax::ShapeProjectionSourceKind::TypedDict,
+                )
+                .fields,
+            )
         }
-        Some(
-            class
-                .members
-                .iter()
-                .filter(|member| member.kind == typepython_syntax::ClassMemberKind::Field)
-                .filter_map(|member| {
-                    let raw_annotation = member.annotation.clone().or_else(|| {
-                        member.annotation_expr.as_ref().map(typepython_syntax::TypeExpr::render)
-                    })?;
-                    let (annotation, required, readonly) =
-                        normalize_hover_field_annotation(&raw_annotation);
-                    Some(HoverShapeField {
-                        name: member.name.clone(),
-                        annotation,
-                        required,
-                        readonly,
-                    })
-                })
-                .collect(),
-        )
-    })
+        SyntaxStatement::DataClass(class) if class.name == type_name => Some(
+            typepython_syntax::ShapeProjection::from_named_block(
+                class,
+                typepython_syntax::ShapeProjectionSourceKind::DataClass,
+            )
+            .fields,
+        ),
+        SyntaxStatement::ClassDef(class) if class.name == type_name && !class.bases.is_empty() => {
+            Some(
+                typepython_syntax::ShapeProjection::from_named_block(
+                    class,
+                    typepython_syntax::ShapeProjectionSourceKind::FrameworkTransform,
+                )
+                .fields,
+            )
+        }
+        _ => None,
+    }) {
+        return Some(fields);
+    }
+
+    dataclass_or_framework_hover_shape(&document.text, type_name)
 }
 
-fn normalize_hover_field_annotation(annotation: &str) -> (String, bool, bool) {
-    let mut rendered = annotation.trim().to_owned();
-    let mut required = true;
-    let mut readonly = false;
-    loop {
-        if let Some(inner) = bracket_inner(&rendered, "NotRequired") {
-            rendered = inner.trim().to_owned();
-            required = false;
-        } else if let Some(inner) = bracket_inner(&rendered, "Required") {
-            rendered = inner.trim().to_owned();
-            required = true;
-        } else if let Some(inner) = bracket_inner(&rendered, "ReadOnly") {
-            rendered = inner.trim().to_owned();
-            readonly = true;
-        } else {
-            break;
-        }
+fn dataclass_or_framework_hover_shape(
+    source: &str,
+    type_name: &str,
+) -> Option<Vec<SharedShapeField>> {
+    let metadata = typepython_syntax::collect_module_surface_metadata(source);
+    let class =
+        metadata.dataclass_transform.classes.iter().find(|class| class.name == type_name)?;
+    if !class_uses_shape_provider(class, &metadata.framework_transform.providers) {
+        return None;
     }
-    (rendered, required, readonly)
+    Some(
+        class
+            .fields
+            .iter()
+            .filter(|field| !field.is_class_var)
+            .map(|field| typepython_syntax::ShapeProjectionField {
+                name: field.name.clone(),
+                public_alias: field
+                    .field_specifier_alias
+                    .clone()
+                    .unwrap_or_else(|| field.name.clone()),
+                annotation: Some(field.rendered_annotation()),
+                required: !(field.has_default
+                    || field.field_specifier_has_default
+                    || field.field_specifier_has_default_factory),
+                readonly: class.plain_dataclass_frozen
+                    || field.field_specifier_frozen == Some(true),
+                source_kind: typepython_syntax::ShapeProjectionFieldSourceKind::SourceField,
+            })
+            .collect(),
+    )
+}
+
+fn class_uses_shape_provider(
+    class: &typepython_syntax::DataclassTransformClassSite,
+    framework_providers: &[typepython_syntax::FrameworkTransformProviderSite],
+) -> bool {
+    class.plain_dataclass_frozen
+        || class.plain_dataclass_kw_only
+        || !class.decorators.is_empty()
+        || (!class.bases.is_empty() && !framework_providers.is_empty())
+        || framework_providers.iter().any(|provider| match provider.provider_kind {
+            Some(typepython_syntax::FrameworkTransformProviderKind::ClassDecorator) => {
+                class.decorators.iter().any(|decorator| decorator == &provider.name)
+            }
+            Some(typepython_syntax::FrameworkTransformProviderKind::BaseClass) => {
+                class.bases.iter().any(|base| base == &provider.name)
+            }
+            Some(typepython_syntax::FrameworkTransformProviderKind::Metaclass) => {
+                class.metaclass.as_deref() == Some(provider.name.as_str())
+            }
+            _ => false,
+        })
+}
+
+fn hover_shape_from_fields(
+    name: &str,
+    fields: Vec<SharedShapeField>,
+) -> typepython_syntax::ShapeProjection {
+    typepython_syntax::ShapeProjection {
+        name: name.to_owned(),
+        source_kind: typepython_syntax::ShapeProjectionSourceKind::TypedDict,
+        fields,
+    }
 }
 
 fn bracket_inner<'a>(expression: &'a str, transform: &str) -> Option<&'a str> {

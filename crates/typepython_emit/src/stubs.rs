@@ -49,7 +49,9 @@ pub fn generate_typepython_stub_source(
             continue;
         }
 
-        output.push(lines[line - 1].to_owned());
+        if !is_typeddict_transform_provenance_comment(lines[line - 1]) {
+            output.push(lines[line - 1].to_owned());
+        }
         line += 1;
     }
 
@@ -60,6 +62,10 @@ pub fn generate_typepython_stub_source(
         rewritten.push('\n');
     }
     normalize_emitted_stub_intrinsic_types(&rewritten)
+}
+
+fn is_typeddict_transform_provenance_comment(line: &str) -> bool {
+    line.trim_start().starts_with("# tpy:derived ")
 }
 
 /// Generates a best-effort `.pyi` surface for a pass-through Python module.

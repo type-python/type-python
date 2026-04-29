@@ -4,7 +4,9 @@ use super::*;
 
 /// Known TypedDict utility transforms.
 pub(super) const TYPEDICT_TRANSFORMS: &[&str] =
-    &["Partial", "Required_", "Readonly", "Mutable", "Pick", "Omit"];
+    &["Partial", "Required_", "Readonly", "Mutable", "Pick", "Omit", "MapValues"];
+
+type SharedShapeProjection = typepython_syntax::ShapeProjection;
 
 /// If `value` is a TypedDict utility transform, returns the expanded class lines.
 /// Otherwise returns None.
@@ -32,36 +34,37 @@ pub(super) fn try_expand_typeddict_transform(
     } else {
         (args[0], args[1], &args[2..])
     };
+    if transform == "MapValues" && !map_values_wrapper_supported(key_args) {
+        return None;
+    }
 
     // Handle nested transforms: if target_arg is itself a transform, recursively expand it
     // inner_args[0]=transform name, [1]=target TypedDict, [2..]=key args
-    let base_members = if let Some((inner_transform, inner_args)) = parse_transform_expr(target_arg)
-    {
+    let base_shape = if let Some((inner_transform, inner_args)) = parse_transform_expr(target_arg) {
         if TYPEDICT_TRANSFORMS.contains(&inner_transform) && inner_args.len() >= 2 {
-            let inner_target = resolve_transform_members(
+            let inner_target = resolve_transform_shape(
                 inner_args[1],
                 typed_dicts,
                 data_classes,
                 experimental_shape_transforms,
             )?;
-            apply_transform_to_members(inner_transform, &inner_target.1, &inner_args[2..])
+            apply_transform_to_shape(inner_transform, &inner_target, &inner_args[2..])
         } else {
             return None;
         }
     } else {
-        resolve_transform_members(
+        resolve_transform_shape(
             target_arg,
             typed_dicts,
             data_classes,
             experimental_shape_transforms,
         )?
-        .1
     };
 
     let indentation = source_line.len() - source_line.trim_start().len();
     let indent = &source_line[..indentation];
 
-    let members = apply_transform_to_members(transform, &base_members, key_args);
+    let members = apply_transform_to_shape(transform, &base_shape, key_args).materialize_members();
     // Extract alias name from source line: "typealias Name = ..."
     let alias_name = source_line
         .trim_start()
@@ -72,8 +75,7 @@ pub(super) fn try_expand_typeddict_transform(
         .trim()
         .to_owned();
 
-    let mut lines = Vec::with_capacity(2 + members.len());
-    lines.push(format!("{}# tpy:derived {}", indent, value));
+    let mut lines = Vec::with_capacity(1 + members.len());
     lines.push(format!("{}class {}(TypedDict):", indent, alias_name));
     for member in members {
         let ann = member.annotation.as_deref().unwrap_or("object");
@@ -171,111 +173,30 @@ fn find_matching_bracket(s: &str) -> Option<usize> {
     None
 }
 
-/// Apply a TypedDict utility transform to TypedDict field members.
-fn apply_transform_to_members<'a>(
+/// Apply a field-bearing utility transform to the shared syntax shape substrate.
+fn apply_transform_to_shape(
     transform: &str,
-    members: &'a [typepython_syntax::ClassMember],
+    shape: &SharedShapeProjection,
     key_args: &[&str],
-) -> Vec<typepython_syntax::ClassMember> {
-    let fields: Vec<&'a typepython_syntax::ClassMember> =
-        members.iter().filter(|m| m.kind == typepython_syntax::ClassMemberKind::Field).collect();
-
+) -> SharedShapeProjection {
     match transform {
-        "Partial" => fields
-            .into_iter()
-            .map(|m| {
-                let ann = m.annotation.as_deref().unwrap_or("object");
-                let new_ann = if ann.contains("NotRequired[") {
-                    ann.to_owned()
-                } else if ann.starts_with("Required_[") {
-                    ann.replace("Required_[", "NotRequired[").to_owned()
-                } else {
-                    format!("NotRequired[{}]", ann)
-                };
-                let mut m = m.clone();
-                m.annotation = Some(new_ann);
-                m
-            })
-            .collect(),
-        "Required_" => fields
-            .into_iter()
-            .map(|m| {
-                let ann = m.annotation.as_deref().unwrap_or("object");
-                let new_ann = if let Some(inner) =
-                    ann.strip_prefix("NotRequired[").and_then(|inner| inner.strip_suffix(']'))
-                {
-                    inner.trim().to_owned()
-                } else {
-                    ann.to_owned()
-                };
-                let mut m = m.clone();
-                m.annotation = Some(new_ann);
-                m
-            })
-            .collect(),
-        "Readonly" => fields
-            .into_iter()
-            .map(|m| {
-                let ann = m.annotation.as_deref().unwrap_or("object");
-                let new_ann = if ann.contains("ReadOnly[") {
-                    ann.to_owned()
-                } else {
-                    format!("ReadOnly[{}]", ann)
-                };
-                let mut m = m.clone();
-                m.annotation = Some(new_ann);
-                m
-            })
-            .collect(),
-        "Mutable" => fields
-            .into_iter()
-            .map(|m| {
-                let ann = m.annotation.as_deref().unwrap_or("object");
-                let new_ann = strip_readonly(ann);
-                let mut m = m.clone();
-                m.annotation = Some(new_ann);
-                m
-            })
-            .collect(),
+        "Partial" => shape.partial(),
+        "Required_" => shape.required_fields(),
+        "Readonly" => shape.readonly_fields(),
+        "Mutable" => shape.mutable_fields(),
         "Pick" => {
-            let keys: std::collections::BTreeSet<_> = key_args
-                .iter()
-                .map(|s| {
-                    s.trim_matches('"')
-                        .trim_matches('\'')
-                        .trim_end_matches(']')
-                        .trim_end_matches(')')
-                        .trim_end_matches('>')
-                        .to_owned()
-                })
-                .collect();
-            fields.into_iter().filter(|m| keys.contains(&m.name)).cloned().collect()
+            let keys = key_args.iter().map(|s| transform_key_name(s)).collect::<Vec<_>>();
+            let keys = keys.iter().map(String::as_str).collect::<Vec<_>>();
+            shape.pick(&keys)
         }
         "Omit" => {
-            let keys: std::collections::BTreeSet<_> = key_args
-                .iter()
-                .map(|s| {
-                    s.trim_matches('"')
-                        .trim_matches('\'')
-                        .trim_end_matches(']')
-                        .trim_end_matches(')')
-                        .trim_end_matches('>')
-                        .to_owned()
-                })
-                .collect();
-            fields.into_iter().filter(|m| !keys.contains(&m.name)).cloned().collect()
+            let keys = key_args.iter().map(|s| transform_key_name(s)).collect::<Vec<_>>();
+            let keys = keys.iter().map(String::as_str).collect::<Vec<_>>();
+            shape.omit(&keys)
         }
-        _ => fields.into_iter().cloned().collect(),
+        "MapValues" => shape.map_values(key_args.first().copied().unwrap_or_default()),
+        _ => shape.clone(),
     }
-}
-
-/// Strip ReadOnly[...] wrappers from a type string (one level).
-fn strip_readonly(ann: &str) -> String {
-    let ann = ann.trim();
-    if let Some(inner) = ann.strip_prefix("ReadOnly[").and_then(|s| s.strip_suffix(']')) {
-        return inner.to_owned();
-    }
-    ann.to_owned()
 }
 
 pub(super) fn has_notrequired_import(source: &str) -> bool {
@@ -295,6 +216,15 @@ pub(super) fn has_readonly_import(source: &str) -> bool {
             || (trimmed.starts_with("from typing_extensions import ")
                 && trimmed.contains("ReadOnly"))
             || (trimmed.starts_with("from typing import ") && trimmed.contains("ReadOnly"))
+    })
+}
+
+pub(super) fn has_optional_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from typing import Optional"
+            || (trimmed.starts_with("from typing import ") && trimmed.contains("Optional"))
+            || trimmed == "import typing"
     })
 }
 
@@ -433,7 +363,7 @@ fn collect_typed_dict_transform_diagnostics(
 
     let target_arg = args[1];
     let key_args = &args[2..];
-    let (target_name, members) = match resolve_transform_members(
+    let target_shape = match resolve_transform_shape(
         target_arg,
         typed_dicts,
         data_classes,
@@ -458,10 +388,10 @@ fn collect_typed_dict_transform_diagnostics(
         return Vec::new();
     }
 
-    let field_names: BTreeSet<_> = members
+    let field_names: BTreeSet<_> = target_shape
+        .fields
         .iter()
-        .filter(|member| member.kind == typepython_syntax::ClassMemberKind::Field)
-        .map(|member| member.name.as_str())
+        .flat_map(|field| [field.name.as_str(), field.public_alias.as_str()])
         .collect();
     key_args
         .iter()
@@ -473,7 +403,7 @@ fn collect_typed_dict_transform_diagnostics(
                     line,
                     format!(
                         "type transform `{}` references unknown key `{}` on shape source `{}`",
-                        transform, key, target_name
+                        transform, key, target_shape.name
                     ),
                     Some((&key, key_arg, &field_names)),
                 )
@@ -482,34 +412,47 @@ fn collect_typed_dict_transform_diagnostics(
         .collect()
 }
 
-fn resolve_transform_members(
+fn resolve_transform_shape(
     value: &str,
     typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     experimental_shape_transforms: bool,
-) -> Option<(String, Vec<typepython_syntax::ClassMember>)> {
+) -> Option<SharedShapeProjection> {
     if let Some((transform, args)) = parse_transform_expr(value.trim())
         && TYPEDICT_TRANSFORMS.contains(&transform)
         && args.len() >= 2
     {
         let target_arg = args[1];
         let key_args = &args[2..];
-        let (target_name, base_members) = resolve_transform_members(
+        if transform == "MapValues" && !map_values_wrapper_supported(key_args) {
+            return None;
+        }
+        let base_shape = resolve_transform_shape(
             target_arg,
             typed_dicts,
             data_classes,
             experimental_shape_transforms,
         )?;
-        return Some((target_name, apply_transform_to_members(transform, &base_members, key_args)));
+        return Some(apply_transform_to_shape(transform, &base_shape, key_args));
     }
 
     if let Some(target) = typed_dicts.get(value.trim()) {
-        return Some((target.name.clone(), target.members.to_vec()));
+        return Some(SharedShapeProjection::from_named_block(
+            target,
+            typepython_syntax::ShapeProjectionSourceKind::TypedDict,
+        ));
     }
     if experimental_shape_transforms && let Some(target) = data_classes.get(value.trim()) {
-        return Some((target.name.clone(), target.members.to_vec()));
+        return Some(SharedShapeProjection::from_named_block(
+            target,
+            typepython_syntax::ShapeProjectionSourceKind::DataClass,
+        ));
     }
     None
+}
+
+fn map_values_wrapper_supported(key_args: &[&str]) -> bool {
+    matches!(key_args.first().map(|wrapper| wrapper.trim()), Some("Optional" | "Readonly"))
 }
 
 fn transform_key_name(key: &str) -> String {
@@ -687,12 +630,71 @@ mod tests {
         members.iter().map(|member| member.name.clone()).collect()
     }
 
+    fn shape_from_members(members: &[ClassMember]) -> SharedShapeProjection {
+        SharedShapeProjection {
+            name: String::from("Generated"),
+            source_kind: typepython_syntax::ShapeProjectionSourceKind::TypedDict,
+            fields: members
+                .iter()
+                .map(typepython_syntax::ShapeProjectionField::from_class_member)
+                .collect(),
+        }
+    }
+
+    fn apply_members_transform(
+        transform: &str,
+        members: &[ClassMember],
+        key_args: &[&str],
+    ) -> Vec<ClassMember> {
+        apply_transform_to_shape(transform, &shape_from_members(members), key_args)
+            .materialize_members()
+    }
+
+    #[test]
+    fn lowering_shape_transform_operations_preserve_projection_metadata() {
+        let shape =
+            shape_from_members(&[field_member("id", "int", 1), field_member("name", "str", 2)]);
+
+        let projected = apply_transform_to_shape("Partial", &shape, &[]);
+
+        assert_eq!(projected.name, "Generated");
+        assert!(projected.fields.iter().all(|field| !field.required));
+        assert!(projected.fields.iter().all(|field| {
+            field.source_kind
+                == typepython_syntax::ShapeProjectionFieldSourceKind::ProjectionGenerated
+        }));
+        assert_eq!(projected.fields[0].annotation.as_deref(), Some("NotRequired[int]"));
+    }
+
+    #[test]
+    fn lowering_shape_pick_uses_public_aliases() {
+        let mut aliased = typepython_syntax::ShapeProjectionField::from_class_member(
+            &field_member("internal_name", "str", 1),
+        );
+        aliased.public_alias = String::from("externalName");
+        let shape = SharedShapeProjection {
+            name: String::from("Model"),
+            source_kind: typepython_syntax::ShapeProjectionSourceKind::DataClass,
+            fields: vec![
+                aliased,
+                typepython_syntax::ShapeProjectionField::from_class_member(&field_member(
+                    "id", "int", 2,
+                )),
+            ],
+        };
+
+        let projected = apply_transform_to_shape("Pick", &shape, &["\"externalName\""]);
+
+        assert_eq!(projected.fields.len(), 1);
+        assert_eq!(projected.fields[0].name, "internal_name");
+    }
+
     proptest! {
         #[test]
         fn required_after_partial_restores_field_annotations(fields in fields_strategy()) {
             let members = field_members(&fields);
-            let partial = apply_transform_to_members("Partial", &members, &[]);
-            let required = apply_transform_to_members("Required_", &partial, &[]);
+            let partial = apply_members_transform("Partial", &members, &[]);
+            let required = apply_members_transform("Required_", &partial, &[]);
 
             prop_assert_eq!(field_annotations(&required), field_annotations(&members));
         }
@@ -700,8 +702,8 @@ mod tests {
         #[test]
         fn mutable_after_readonly_restores_field_annotations(fields in fields_strategy()) {
             let members = field_members(&fields);
-            let readonly = apply_transform_to_members("Readonly", &members, &[]);
-            let mutable = apply_transform_to_members("Mutable", &readonly, &[]);
+            let readonly = apply_members_transform("Readonly", &members, &[]);
+            let mutable = apply_members_transform("Mutable", &readonly, &[]);
 
             prop_assert_eq!(field_annotations(&mutable), field_annotations(&members));
         }
@@ -709,8 +711,8 @@ mod tests {
         #[test]
         fn pick_and_omit_partition_fields((members, selected) in fields_and_subset_strategy()) {
             let key_args = selected.iter().map(String::as_str).collect::<Vec<_>>();
-            let picked = apply_transform_to_members("Pick", &members, &key_args);
-            let omitted = apply_transform_to_members("Omit", &members, &key_args);
+            let picked = apply_members_transform("Pick", &members, &key_args);
+            let omitted = apply_members_transform("Omit", &members, &key_args);
 
             let expected_picked = members
                 .iter()

@@ -132,6 +132,14 @@ Diagnostics should use shape metadata to report:
 6. Add unknown-key suggestions for shape projection diagnostics.
 7. Gate non-`TypedDict` shape transforms behind an experimental flag before exposing them in source syntax.
 
+### Implemented P1 slice
+
+The implemented slice uses a shared syntax-level `ShapeProjection` / `ShapeProjectionField` substrate for lightweight projection paths that must run outside `typepython_checking`. Lowering and LSP hover both resolve field-bearing sources into that shared projection model before applying `Partial`, `Required_`, `Readonly`, `Mutable`, `Pick`, `Omit`, or supported `MapValues` operations. Lowering then materializes standard `TypedDict` output, while LSP renders the same projected field metadata for `TypedDict`, TypePython `data class`, dataclass-transform, and framework-backed shapes.
+
+Checker-side semantic `Shape` remains the richer internal model for assignability, constructor synthesis, framework transforms, readonly diagnostics, and incremental public summaries. The shared `ShapeProjection` substrate is intentionally narrower: it prevents lowering and LSP from carrying separate ad-hoc field models while preserving the checker as the source of semantic truth.
+
+Incremental public summaries now carry stable `shapeFingerprints` in solver facts. The fingerprint is derived from a field-bearing declaration's exported field/member surface, so shape-affecting changes invalidate downstream summaries without relying on raw source noise.
+
 ## Acceptance criteria
 
 - Existing `TypedDict` transform tests continue to pass unchanged.

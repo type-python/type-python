@@ -120,6 +120,8 @@ pub struct SummaryImportSymbolTarget {
 pub struct ModuleSolverFacts {
     #[serde(rename = "declarationFacts", default)]
     pub declaration_facts: Vec<SummaryDeclarationFact>,
+    #[serde(rename = "shapeFingerprints", default)]
+    pub shape_fingerprints: BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -551,8 +553,70 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
         imports,
         import_targets,
         sealed_roots,
-        solver_facts: ModuleSolverFacts::default(),
+        solver_facts: ModuleSolverFacts {
+            declaration_facts: Vec::new(),
+            shape_fingerprints: shape_fingerprints(&top_level_declarations, &node.declarations),
+        },
     }
+}
+
+fn shape_fingerprints(
+    top_level_declarations: &[&Declaration],
+    declarations: &[Declaration],
+) -> BTreeMap<String, u64> {
+    top_level_declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Class)
+        .filter(|declaration| {
+            declaration.rendered_class_bases().iter().any(|base| {
+                matches!(
+                    base.as_str(),
+                    "TypedDict" | "typing.TypedDict" | "typing_extensions.TypedDict"
+                )
+            }) || declarations.iter().any(|member| {
+                member.owner.as_ref().is_some_and(|owner| owner.name == declaration.name)
+            })
+        })
+        .map(|declaration| {
+            let mut facts = vec![shape_class_fact(declaration)];
+            facts.extend(
+                declarations
+                    .iter()
+                    .filter(|member| {
+                        member.owner.as_ref().is_some_and(|owner| owner.name == declaration.name)
+                    })
+                    .map(|member| {
+                        format!(
+                            "{}:{}:{}",
+                            member.name,
+                            summary_kind(member),
+                            summary_type_repr(member)
+                        )
+                    }),
+            );
+            facts.sort();
+            let serialized = format!("{}|{}", declaration.name, facts.join("|"));
+            (declaration.name.clone(), stable_hash(serialized.as_bytes()))
+        })
+        .collect()
+}
+
+fn shape_class_fact(declaration: &Declaration) -> String {
+    let mut bases = declaration.rendered_class_bases();
+    bases.sort();
+    format!(
+        "class:{}:kind={:?}:bases={}:type_params={}:final_decorator={}",
+        declaration.name,
+        declaration.class_kind,
+        bases.join(","),
+        declaration
+            .type_params
+            .iter()
+            .map(|param| format!("{}:{:?}", param.name, param.kind))
+            .collect::<Vec<_>>()
+            .join(","),
+        declaration.is_final_decorator,
+    )
 }
 
 fn summary_runtime_semantics(
@@ -704,9 +768,13 @@ fn summary_fingerprint(summary: &PublicSummary) -> u64 {
     let Ok(serialized) = serde_json::to_vec(summary) else {
         return 0;
     };
+    stable_hash(&serialized)
+}
+
+fn stable_hash(serialized: &[u8]) -> u64 {
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in serialized {
-        hash ^= u64::from(byte);
+        hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash

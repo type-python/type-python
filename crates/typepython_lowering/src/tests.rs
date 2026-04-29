@@ -1425,7 +1425,7 @@ fn lower_expands_partial_typeddict_transform() {
     });
 
     assert!(lowered.diagnostics.is_empty());
-    assert!(lowered.module.python_source.contains("# tpy:derived Partial[User]"));
+    assert!(!lowered.module.python_source.contains("tpy:derived"));
     assert!(lowered.module.python_source.contains("class UserCreate(TypedDict):"));
     assert!(lowered.module.python_source.contains("id: NotRequired[int]"));
     assert!(lowered.module.python_source.contains("name: NotRequired[str]"));
@@ -1861,7 +1861,7 @@ fn lower_expands_partial_dataclass_shape_transform_when_experimental() {
     assert!(lowered.module.python_source.contains("from dataclasses import dataclass"));
     assert!(lowered.module.python_source.contains("from typing import TypedDict"));
     assert!(lowered.module.python_source.contains("from typing_extensions import NotRequired"));
-    assert!(lowered.module.python_source.contains("# tpy:derived Partial[User]"));
+    assert!(!lowered.module.python_source.contains("tpy:derived"));
     assert!(lowered.module.python_source.contains("class UserPatch(TypedDict):"));
     assert!(lowered.module.python_source.contains("id: NotRequired[int]"));
     assert!(lowered.module.python_source.contains("name: NotRequired[str]"));

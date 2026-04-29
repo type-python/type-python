@@ -17,6 +17,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
+    hash::{Hash, Hasher},
     path::Path,
 };
 
@@ -35,17 +36,20 @@ mod assignments;
 mod calls;
 mod declaration_semantics;
 mod declarations;
+mod effects;
 mod generic_solver;
 mod semantic;
 mod source_facts;
 mod stubs;
 mod type_core;
+mod type_level;
 mod type_system;
 
 pub(crate) use self::assignments::*;
 pub(crate) use self::calls::*;
 pub(crate) use self::declaration_semantics::*;
 pub(crate) use self::declarations::*;
+pub(crate) use self::effects::*;
 pub(crate) use self::generic_solver::*;
 pub(crate) use self::semantic::*;
 pub(crate) use self::source_facts::*;
@@ -286,6 +290,13 @@ impl<'a> CheckerContext<'a> {
         node: &typepython_graph::ModuleNode,
     ) -> Vec<typepython_syntax::UnsafeOperationSite> {
         self.source_facts.unsafe_operation_sites(node)
+    }
+
+    fn load_unsafe_capability_ranges(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Vec<(usize, usize)> {
+        self.source_facts.unsafe_capability_ranges(node)
     }
 
     fn load_conditional_return_sites(
@@ -678,6 +689,8 @@ fn semantic_public_summary(
     declaration_facts
         .sort_by(|left, right| left.name.cmp(&right.name).then_with(|| left.kind.cmp(&right.kind)));
 
+    let shape_fingerprints = semantic_shape_fingerprints(context, node, &top_level_declarations);
+
     PublicSummary {
         module: node.module_key.clone(),
         is_package_entry: is_package_entry_path(&node.module_path),
@@ -685,8 +698,104 @@ fn semantic_public_summary(
         imports,
         import_targets,
         sealed_roots,
-        solver_facts: ModuleSolverFacts { declaration_facts },
+        solver_facts: ModuleSolverFacts { declaration_facts, shape_fingerprints },
     }
+}
+
+fn semantic_shape_fingerprints(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    top_level_declarations: &[&Declaration],
+) -> BTreeMap<String, u64> {
+    let typed_dict_metadata = context.load_typed_dict_class_metadata(node);
+    top_level_declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Class)
+        .filter(|declaration| {
+            declaration.rendered_class_bases().iter().any(|base| {
+                matches!(
+                    base.as_str(),
+                    "TypedDict" | "typing.TypedDict" | "typing_extensions.TypedDict"
+                )
+            }) || node.declarations.iter().any(|member| {
+                member.owner.as_ref().is_some_and(|owner| owner.name == declaration.name)
+            })
+        })
+        .map(|declaration| {
+            let mut facts = vec![semantic_shape_class_fact(
+                declaration,
+                typed_dict_metadata.get(&declaration.name),
+            )];
+            facts.extend(
+                node.declarations
+                    .iter()
+                    .filter(|member| {
+                        member.owner.as_ref().is_some_and(|owner| owner.name == declaration.name)
+                    })
+                    .map(|member| {
+                        format!(
+                            "{}:{}:{}",
+                            member.name,
+                            summary_kind_string(member),
+                            semantic_shape_member_type_repr(member)
+                        )
+                    }),
+            );
+            facts.sort();
+            let serialized = format!("{}|{}", declaration.name, facts.join("|"));
+            (declaration.name.clone(), stable_summary_hash(serialized.as_bytes()))
+        })
+        .collect()
+}
+
+fn semantic_shape_class_fact(
+    declaration: &Declaration,
+    typed_dict_metadata: Option<&typepython_syntax::TypedDictClassMetadata>,
+) -> String {
+    let mut bases = declaration.rendered_class_bases();
+    bases.sort();
+    let metadata = typed_dict_metadata
+        .map(|metadata| {
+            format!(
+                "total={:?};closed={:?};extra_items={}",
+                metadata.total,
+                metadata.closed,
+                metadata
+                    .extra_items
+                    .as_ref()
+                    .map(typepython_syntax::TypedDictExtraItemsMetadata::rendered_annotation)
+                    .unwrap_or_else(|| String::from("<none>")),
+            )
+        })
+        .unwrap_or_else(|| String::from("typed_dict_metadata=<none>"));
+    format!(
+        "class:{}:kind={:?}:bases={}:type_params={}:final_decorator={}:{}",
+        declaration.name,
+        declaration.class_kind,
+        bases.join(","),
+        declaration
+            .type_params
+            .iter()
+            .map(|param| format!("{}:{:?}", param.name, param.kind))
+            .collect::<Vec<_>>()
+            .join(","),
+        declaration.is_final_decorator,
+        metadata,
+    )
+}
+
+fn semantic_shape_member_type_repr(declaration: &Declaration) -> String {
+    declaration
+        .value_annotation()
+        .map(typepython_binding::BoundTypeExpr::render)
+        .or_else(|| declaration.inferred_value_type_semantic_text())
+        .unwrap_or_default()
+}
+
+fn stable_summary_hash(bytes: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn semantic_summary_export(
@@ -1150,6 +1259,11 @@ fn collect_node_semantic_diagnostics(
         unclosed_lifecycle_resource_diagnostics(context, node, options.strict),
     );
     push_diagnostics(diagnostics, unsupported_dual_emit_async_construct_diagnostics(context, node));
+    push_diagnostics(diagnostics, effect_capability_diagnostics(context, node, options.strict));
+    push_diagnostics(
+        diagnostics,
+        type_level::restricted_type_level_alias_diagnostics(context, node, context.nodes),
+    );
     push_diagnostics(
         diagnostics,
         unsafe_boundary_diagnostics(context, node, options.strict, options.warn_unsafe),

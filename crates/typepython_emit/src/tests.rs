@@ -803,7 +803,7 @@ fn generate_typepython_stub_source_preserves_detailed_sealed_metadata_comments()
 }
 
 #[test]
-fn generate_typepython_stub_source_preserves_typeddict_transform_provenance_comment() {
+fn generate_typepython_stub_source_drops_typeddict_transform_provenance_comment() {
     let module = LoweredModule {
         source_path: PathBuf::from("src/app/__init__.tpy"),
         source_kind: SourceKind::TypePython,
@@ -825,7 +825,7 @@ fn generate_typepython_stub_source_preserves_typeddict_transform_provenance_comm
     let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
         .expect("TypedDict provenance stub should generate");
 
-    assert!(stub.contains("# tpy:derived Partial[User]"));
+    assert!(!stub.contains("tpy:derived"));
     assert!(stub.contains("class UserCreate(TypedDict):"));
 }
 
