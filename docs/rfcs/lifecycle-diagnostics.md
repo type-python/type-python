@@ -1,21 +1,21 @@
 # RFC: Must-Use, Must-Await, and Must-Close Diagnostics
 
-**Status:** design only; implementation deferred  
+**Status:** implemented local checker slice  
 **Strategic source:** `docs/strategic-todo.md` P2 Must-Use, Must-Await, and Must-Close Diagnostics  
 **Scope:** lightweight intra-procedural lifecycle checks, not full typestate
 
 ## Summary
 
-TypePython should eventually catch common lifecycle mistakes such as ignored task handles,
-un-awaited coroutine-like objects, resources opened but never closed, and response streams that are
-never consumed. The first version should be opt-in, intra-procedural, and conservative.
+TypePython catches common lifecycle mistakes such as ignored task handles, un-awaited
+coroutine-like objects, resources opened but never closed, and response streams that are never
+consumed. The first implemented version is opt-in, intra-procedural, and conservative.
 
 This feature is intentionally separate from full typestate. It does not model arbitrary state
 machines or cross-function ownership transfer until simple local diagnostics prove useful.
 
 ## Opt-in annotations
 
-The prototype surface should use decorators or adapter metadata with these meanings:
+The implemented surface uses decorators or adapter metadata with these meanings:
 
 | Marker | Applies to | Obligation |
 | --- | --- | --- |
@@ -24,12 +24,13 @@ The prototype surface should use decorators or adapter metadata with these meani
 | `@must_close` | resource class or factory | the value must be closed, used in `with`/`async with`, or intentionally escaped |
 | `@must_consume` | stream/response class | the value must be iterated, read, closed, or intentionally escaped |
 
-Framework adapters can attach the same obligations to known resources without requiring source-level
-decorators on third-party classes.
+Framework adapters can attach related obligations to known resources without requiring source-level
+decorators on third-party classes; lifecycle markers also feed `resource.lifecycle` effect facts so
+imports, summaries, and LSP hover can explain the obligation.
 
 ## Diagnostic behavior
 
-The first analysis pass should stay intra-procedural and local-variable based:
+The first analysis pass stays intra-procedural and local-variable based:
 
 - ignored return value: report when a marked call is used only as an expression statement
 - assigned-but-never-used resource: report when a marked value is bound locally and neither consumed
@@ -81,7 +82,6 @@ resource behavior.
 
 ## Acceptance boundary
 
-The design is complete when marker meanings, diagnostics, escape hatches, adapter targets, and
-non-goals are documented. Implementation acceptance remains separate: TypePython still needs checker
-code that can catch ignored coroutine/task-like results and unclosed annotated resources without
-blocking normal Python patterns.
+The implemented slice is complete for local marker meanings, diagnostics, escape hatches, adapter
+targets, and non-goals. Future work remains inter-procedural ownership, richer transfer helpers,
+and framework-specific resource adapters beyond the shared effect/capability vocabulary.
