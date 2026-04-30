@@ -2149,6 +2149,7 @@ fn collect_intrinsic_type_replacements(
                 {
                     replacements.push((returns.range(), replacement));
                 }
+                collect_intrinsic_type_replacements(source, &function.body, replacements);
             }
             Stmt::AnnAssign(assign) => {
                 if let Some(replacement) = normalize_intrinsic_type_text(
@@ -2215,39 +2216,7 @@ fn collect_parameter_intrinsic_type_replacements(
 }
 
 fn normalize_intrinsic_type_text(text: &str) -> Option<String> {
-    let mut normalized = String::new();
-    let mut token = String::new();
-    let mut changed = false;
-
-    let flush_token = |token: &mut String, normalized: &mut String, changed: &mut bool| {
-        if token.is_empty() {
-            return;
-        }
-        match token.as_str() {
-            "unknown" => {
-                normalized.push_str("object");
-                *changed = true;
-            }
-            "dynamic" => {
-                normalized.push_str("Any");
-                *changed = true;
-            }
-            _ => normalized.push_str(token),
-        }
-        token.clear();
-    };
-
-    for character in text.chars() {
-        if character.is_ascii_alphanumeric() || character == '_' {
-            token.push(character);
-        } else {
-            flush_token(&mut token, &mut normalized, &mut changed);
-            normalized.push(character);
-        }
-    }
-    flush_token(&mut token, &mut normalized, &mut changed);
-
-    changed.then_some(normalized)
+    typepython_syntax::normalize_checker_only_type_text(text)
 }
 
 fn has_typing_any_import(source: &str) -> bool {

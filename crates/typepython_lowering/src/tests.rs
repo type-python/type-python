@@ -639,6 +639,37 @@ fn lower_normalizes_intrinsic_boundary_types_for_runtime_output() {
 }
 
 #[test]
+fn lower_erases_checker_only_taint_and_witness_types_for_runtime_output() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("checker-only-types.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "from typing import Literal\n\n",
+            "class User:\n",
+            "    ...\n\n",
+            "typealias HtmlText = Tainted[str, \"html\"]\n\n",
+            "def request_body() -> Tainted[str, \"html\"]:\n",
+            "    ...\n\n",
+            "def validate_user(value: unknown) -> ValidatorWitness[User, Literal[\"trusted\"]]:\n",
+            "    ...\n\n",
+            "def local() -> str:\n",
+            "    raw: Tainted[str, \"html\"] = request_body()\n",
+            "    return raw\n",
+        )),
+    });
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+
+    assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+    assert!(lowered.module.python_source.contains("HtmlText: TypeAlias = str"));
+    assert!(lowered.module.python_source.contains("def request_body() -> str:"));
+    assert!(lowered.module.python_source.contains("def validate_user(value: object) -> bool:"));
+    assert!(lowered.module.python_source.contains("raw: str = request_body()"));
+    assert!(!lowered.module.python_source.contains("Tainted"));
+    assert!(!lowered.module.python_source.contains("ValidatorWitness"));
+}
+
+#[test]
 fn lower_rewrites_sealed_class_with_existing_bases() {
     let lowered = lower(&SyntaxTree {
         source: SourceFile {

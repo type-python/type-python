@@ -891,6 +891,44 @@ fn generate_typepython_stub_source_normalizes_intrinsic_boundary_types() {
 }
 
 #[test]
+fn generate_typepython_stub_source_erases_checker_only_taint_and_witness_types() {
+    let module = LoweredModule {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(concat!(
+            "from typing import Literal, TypeAlias\n\n",
+            "class User:\n",
+            "    ...\n\n",
+            "HtmlText: TypeAlias = Tainted[str, \"html\"]\n\n",
+            "def request_body() -> Tainted[str, \"html\"]:\n",
+            "    ...\n\n",
+            "def validate_user(value: unknown) -> ValidatorWitness[User, Literal[\"trusted\"]]:\n",
+            "    ...\n",
+        )),
+        source_map: vec![
+            SourceMapEntry { original_line: 1, lowered_line: 1 },
+            SourceMapEntry { original_line: 3, lowered_line: 3 },
+            SourceMapEntry { original_line: 6, lowered_line: 6 },
+            SourceMapEntry { original_line: 8, lowered_line: 8 },
+            SourceMapEntry { original_line: 11, lowered_line: 11 },
+        ],
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    };
+
+    let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+        .expect("checker-only type normalization should succeed");
+
+    assert!(stub.contains("# tpy:unknown validate_user"));
+    assert!(stub.contains("HtmlText: TypeAlias = str"));
+    assert!(stub.contains("def request_body() -> str: ..."));
+    assert!(stub.contains("def validate_user(value: object) -> bool: ..."));
+    assert!(!stub.contains("Tainted"));
+    assert!(!stub.contains("ValidatorWitness"));
+}
+
+#[test]
 fn generate_typepython_stub_source_drops_runtime_control_flow_and_rewrites_assignments() {
     let module = LoweredModule {
         source_path: PathBuf::from("src/app/__init__.tpy"),

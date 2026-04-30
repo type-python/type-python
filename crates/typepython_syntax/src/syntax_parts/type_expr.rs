@@ -323,6 +323,61 @@ impl CallableParamExpr {
     }
 }
 
+pub fn normalize_checker_only_type_text(text: &str) -> Option<String> {
+    let expr = TypeExpr::parse(text.trim())?;
+    let normalized = normalize_checker_only_type_expr(expr);
+    let rendered = normalized.render();
+    (rendered != normalize_type_text(text)).then_some(rendered)
+}
+
+fn normalize_checker_only_type_expr(expr: TypeExpr) -> TypeExpr {
+    match expr {
+        TypeExpr::Name(name) if name == "unknown" => TypeExpr::Name(String::from("object")),
+        TypeExpr::Name(name) if name == "dynamic" => TypeExpr::Name(String::from("Any")),
+        TypeExpr::Name(name) => TypeExpr::Name(name),
+        TypeExpr::Generic { head, mut args } if head == "Tainted" && !args.is_empty() => {
+            normalize_checker_only_type_expr(args.remove(0))
+        }
+        TypeExpr::Generic { head, .. } if head == "ValidatorWitness" => {
+            TypeExpr::Name(String::from("bool"))
+        }
+        TypeExpr::Generic { head, args } => TypeExpr::Generic {
+            head,
+            args: args.into_iter().map(normalize_checker_only_type_expr).collect(),
+        },
+        TypeExpr::Callable { params, return_type } => TypeExpr::Callable {
+            params: Box::new(normalize_checker_only_callable_params(*params)),
+            return_type: Box::new(normalize_checker_only_type_expr(*return_type)),
+        },
+        TypeExpr::Union { branches, style } => TypeExpr::Union {
+            branches: branches.into_iter().map(normalize_checker_only_type_expr).collect(),
+            style,
+        },
+        TypeExpr::Annotated { value, metadata } => TypeExpr::Annotated {
+            value: Box::new(normalize_checker_only_type_expr(*value)),
+            metadata,
+        },
+        TypeExpr::Unpack(inner) => {
+            TypeExpr::Unpack(Box::new(normalize_checker_only_type_expr(*inner)))
+        }
+    }
+}
+
+fn normalize_checker_only_callable_params(params: CallableParamExpr) -> CallableParamExpr {
+    match params {
+        CallableParamExpr::Ellipsis => CallableParamExpr::Ellipsis,
+        CallableParamExpr::ParamList(params) => CallableParamExpr::ParamList(
+            params.into_iter().map(normalize_checker_only_type_expr).collect(),
+        ),
+        CallableParamExpr::Concatenate(params) => CallableParamExpr::Concatenate(
+            params.into_iter().map(normalize_checker_only_type_expr).collect(),
+        ),
+        CallableParamExpr::Single(param) => {
+            CallableParamExpr::Single(Box::new(normalize_checker_only_type_expr(*param)))
+        }
+    }
+}
+
 pub fn parse_callable_annotation(text: &str) -> Option<(Option<Vec<String>>, String)> {
     let (params, return_type) = parse_callable_annotation_parts(text)?;
     if params == "..." {
@@ -722,9 +777,10 @@ mod type_expr_tests {
     use super::{
         CallableParamExpr, ClassMember, ClassMemberKind, NamedBlockStatement, ShapeProjection,
         ShapeProjectionFieldSourceKind, ShapeProjectionSourceKind, TypeExpr, TypeLevelShapeField,
-        UnionStyle, annotated_inner, normalize_callable_param_expr, normalize_type_text,
-        parse_callable_annotation_parts, reduce_key_set_alias_text, reduce_typeif_is_subtype_text,
-        type_expr_is_assignable_text, union_branches,
+        UnionStyle, annotated_inner, normalize_callable_param_expr,
+        normalize_checker_only_type_text, normalize_type_text, parse_callable_annotation_parts,
+        reduce_key_set_alias_text, reduce_typeif_is_subtype_text, type_expr_is_assignable_text,
+        union_branches,
     };
 
     #[test]
@@ -805,6 +861,20 @@ mod type_expr_tests {
         assert!(type_expr_is_assignable_text("object", "int"));
         assert!(type_expr_is_assignable_text("int | str", "int"));
         assert!(!type_expr_is_assignable_text("int", "object"));
+    }
+
+    #[test]
+    fn normalize_checker_only_type_text_erases_author_time_qualifiers() {
+        assert_eq!(
+            normalize_checker_only_type_text("Tainted[list[unknown], \"html\"]"),
+            Some(String::from("list[object]"))
+        );
+        assert_eq!(
+            normalize_checker_only_type_text(
+                "Callable[[Tainted[str, \"html\"]], ValidatorWitness[User, Literal[\"trusted\"]]]"
+            ),
+            Some(String::from("Callable[[str], bool]"))
+        );
     }
 
     #[test]
