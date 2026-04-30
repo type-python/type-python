@@ -1310,6 +1310,7 @@ pub(super) fn resolve_direct_type_alias<'a>(
 }
 
 pub(super) fn direct_return_type_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -1388,6 +1389,7 @@ pub(super) fn direct_return_type_diagnostics(
             );
             diagnostics.push(attach_missing_none_return_suggestion(
                 diagnostic,
+                context,
                 node,
                 nodes,
                 return_site,

@@ -1,7 +1,9 @@
 pub(super) fn direct_member_access_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
+    let source = context.load_source_text(node);
     node.member_accesses
         .iter()
         .filter_map(|access| {
@@ -47,8 +49,12 @@ pub(super) fn direct_member_access_diagnostics(
                         access.member
                     ),
                 );
-                if let Some((span, replacement)) =
-                    union_member_guard_suggestion(&node.module_path, access, &available)
+                if let Some((span, replacement)) = union_member_guard_suggestion(
+                    source.as_deref(),
+                    &node.module_path,
+                    access,
+                    &available,
+                )
                 {
                     diagnostic = diagnostic.with_suggestion(
                         format!(
@@ -131,6 +137,7 @@ pub(super) fn type_has_readable_member(
 }
 
 pub(super) fn union_member_guard_suggestion(
+    source: Option<&str>,
     module_path: &std::path::Path,
     access: &typepython_binding::MemberAccessSite,
     available_branches: &[String],
@@ -142,7 +149,7 @@ pub(super) fn union_member_guard_suggestion(
     if guard_types.is_empty() {
         return None;
     }
-    let source = fs::read_to_string(module_path).ok()?;
+    let source = source?;
     let line_text = source.lines().nth(access.line.checked_sub(1)?)?;
     let indent = leading_space_count(line_text);
     let guard = if guard_types.len() == 1 {

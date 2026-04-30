@@ -285,6 +285,12 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         declaration_semantic_facts(declaration)
     }
 
+    pub(super) fn source_text(&self, node: &ModuleNode) -> Option<String> {
+        self.with_module_facts(node, |facts| {
+            facts.source_text(node, self.source_overrides).map(str::to_owned)
+        })
+    }
+
     pub(super) fn typed_dict_class_metadata(
         &self,
         node: &ModuleNode,

@@ -341,6 +341,7 @@ pub(super) fn apply_guard_condition_semantic_with_context(
     }
 }
 
+#[cfg(test)]
 pub(super) fn apply_predicate_guard_semantic(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],

@@ -190,15 +190,12 @@ pub(super) fn method_override_incompatibility(
 }
 
 pub(super) fn missing_override_diagnostics<'a>(
+    context: &CheckerContext<'_>,
     node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
     let declarations = &node.declarations;
-    let source = if node.module_path.to_string_lossy().starts_with('<') {
-        None
-    } else {
-        fs::read_to_string(&node.module_path).ok()
-    };
+    let source = context.load_source_text(node);
     let mut diagnostics = Vec::new();
 
     for declaration in declarations.iter().filter(|declaration| {
@@ -506,9 +503,11 @@ pub(super) fn resolve_direct_base<'a>(
 }
 
 pub(super) fn sealed_match_exhaustiveness_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
+    let source = context.load_source_text(node);
     node.matches
         .iter()
         .filter_map(|match_site| {
@@ -567,6 +566,7 @@ pub(super) fn sealed_match_exhaustiveness_diagnostics(
                 .collect::<Vec<_>>();
             Some(attach_match_case_suggestion(
                 diagnostic,
+                source.as_deref(),
                 &node.module_path,
                 match_site,
                 &rendered_cases,
@@ -576,9 +576,11 @@ pub(super) fn sealed_match_exhaustiveness_diagnostics(
 }
 
 pub(super) fn enum_match_exhaustiveness_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
+    let source = context.load_source_text(node);
     node.matches
         .iter()
         .filter_map(|match_site| {
@@ -648,6 +650,7 @@ pub(super) fn enum_match_exhaustiveness_diagnostics(
                 .collect::<Vec<_>>();
             Some(attach_match_case_suggestion(
                 diagnostic,
+                source.as_deref(),
                 &node.module_path,
                 match_site,
                 &rendered_cases,
@@ -657,9 +660,11 @@ pub(super) fn enum_match_exhaustiveness_diagnostics(
 }
 
 pub(super) fn literal_match_exhaustiveness_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
+    let source = context.load_source_text(node);
     node.matches
         .iter()
         .filter_map(|match_site| {
@@ -707,6 +712,7 @@ pub(super) fn literal_match_exhaustiveness_diagnostics(
                 missing.iter().map(|value| format!("case {value}:\n    ...")).collect::<Vec<_>>();
             Some(attach_match_case_suggestion(
                 diagnostic,
+                source.as_deref(),
                 &node.module_path,
                 match_site,
                 &rendered_cases,
@@ -717,13 +723,14 @@ pub(super) fn literal_match_exhaustiveness_diagnostics(
 
 pub(super) fn attach_match_case_suggestion(
     diagnostic: Diagnostic,
+    source: Option<&str>,
     module_path: &std::path::Path,
     match_site: &typepython_binding::MatchSite,
     rendered_cases: &[String],
 ) -> Diagnostic {
-    let Some((span, replacement)) =
-        match_case_insertion_edit(module_path, match_site, rendered_cases)
-    else {
+    let Some((span, replacement)) = source.and_then(|source| {
+        match_case_insertion_edit(source, module_path, match_site, rendered_cases)
+    }) else {
         return diagnostic;
     };
     diagnostic.with_suggestion(
@@ -735,6 +742,7 @@ pub(super) fn attach_match_case_suggestion(
 }
 
 pub(super) fn match_case_insertion_edit(
+    source: &str,
     module_path: &std::path::Path,
     match_site: &typepython_binding::MatchSite,
     rendered_cases: &[String],
@@ -742,7 +750,6 @@ pub(super) fn match_case_insertion_edit(
     if rendered_cases.is_empty() {
         return None;
     }
-    let source = fs::read_to_string(module_path).ok()?;
     let lines = source.lines().collect::<Vec<_>>();
     let match_line = *lines.get(match_site.line.checked_sub(1)?)?;
     let match_indent = leading_space_count(match_line);

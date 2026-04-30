@@ -1014,6 +1014,233 @@ fn check_reports_conditional_return_with_source_overrides_without_backing_file()
 }
 
 #[test]
+fn check_missing_override_suggestion_uses_source_overrides_without_backing_file() {
+    let source_text = concat!(
+        "class Base:\n",
+        "    def run(self) -> None:\n",
+        "        ...\n\n",
+        "class Child(Base):\n",
+        "    def run(self) -> None:\n",
+        "        ...\n",
+    );
+    let path = PathBuf::from("virtual/app.tpy");
+    let tree = parse_with_options(
+        SourceFile {
+            path: path.clone(),
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let source_overrides = BTreeMap::from([(path.display().to_string(), source_text.to_owned())]);
+    let result = check_with_source_overrides(
+        &graph,
+        true,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+        ImportFallback::Unknown,
+        Some(&source_overrides),
+    );
+
+    let diagnostic = result
+        .diagnostics
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "TPY4005")
+        .expect("missing override diagnostic should be present");
+    assert_eq!(diagnostic.suggestions.len(), 1);
+    assert_eq!(diagnostic.suggestions[0].replacement, "@override\n");
+}
+
+#[test]
+fn check_match_case_suggestion_uses_source_overrides_without_backing_file() {
+    let result = check_virtual_source_with_overrides(
+        concat!(
+            "from typing import Literal\n\n",
+            "def describe(value: Literal[\"a\", \"b\"]) -> int:\n",
+            "    match value:\n",
+            "        case \"a\":\n",
+            "            return 1\n",
+        ),
+        ParseOptions::default(),
+        false,
+        false,
+    );
+
+    let diagnostic = result
+        .diagnostics
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "TPY4009")
+        .expect("non-exhaustive match diagnostic should be present");
+    assert_eq!(diagnostic.suggestions.len(), 1);
+    assert!(diagnostic.suggestions[0].replacement.contains("case \"b\":"));
+}
+
+#[test]
+fn check_missing_none_return_suggestion_uses_source_overrides_without_backing_file() {
+    let result = check_virtual_source_with_overrides(
+        concat!(
+            "def maybe(flag: bool) -> int:\n",
+            "    if flag:\n",
+            "        return 1\n",
+            "    return None\n",
+        ),
+        ParseOptions::default(),
+        false,
+        false,
+    );
+
+    let diagnostic = result
+        .diagnostics
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "TPY4001")
+        .expect("return type diagnostic should be present");
+    assert_eq!(diagnostic.suggestions.len(), 1);
+    assert_eq!(diagnostic.suggestions[0].replacement, "int | None");
+}
+
+#[test]
+fn check_union_member_guard_suggestion_uses_source_overrides_without_backing_file() {
+    let source_text = concat!("value = None\n", "value.name\n");
+    let path = PathBuf::from("virtual/app.tpy");
+    let source_overrides = BTreeMap::from([(path.display().to_string(), source_text.to_owned())]);
+    let result = check_with_source_overrides(
+        &ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: path,
+                module_key: String::from("app"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    declaration! {
+                        name: String::from("A"),
+                        kind: DeclarationKind::Class,
+                        metadata: Default::default(),
+                        value_type_expr: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    declaration! {
+                        name: String::from("name"),
+                        kind: DeclarationKind::Value,
+                        metadata: Default::default(),
+                        value_type_expr: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("A"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    declaration! {
+                        name: String::from("B"),
+                        kind: DeclarationKind::Class,
+                        metadata: Default::default(),
+                        value_type_expr: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    declaration! {
+                        name: String::from("value"),
+                        kind: DeclarationKind::Value,
+                        metadata: value_metadata("A | B"),
+                        value_type_expr: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                returns: Vec::new(),
+                member_accesses: vec![typepython_binding::MemberAccessSite {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
+                    owner_name: String::from("value"),
+                    member: String::from("name"),
+                    through_instance: false,
+                    line: 2,
+                }],
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        },
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+        ImportFallback::Unknown,
+        Some(&source_overrides),
+    );
+
+    let diagnostic = result
+        .diagnostics
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "TPY4002")
+        .expect("union member diagnostic should be present");
+    assert_eq!(diagnostic.suggestions.len(), 1);
+    assert!(diagnostic.suggestions[0].replacement.contains("assert isinstance(value, A)"));
+}
+
+#[test]
 fn check_accepts_source_authored_concatenate_forwarding_call() {
     let result = check_temp_typepython_source(concat!(
         "from typing import Callable\n\n",

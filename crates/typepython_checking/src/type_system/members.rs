@@ -359,6 +359,7 @@ pub(super) fn override_insertion_span(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn attach_missing_none_return_suggestion(
     diagnostic: Diagnostic,
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     return_site: &typepython_binding::ReturnSite,
@@ -383,11 +384,11 @@ pub(super) fn attach_missing_none_return_suggestion(
     if node.module_path.to_string_lossy().starts_with('<') {
         return diagnostic;
     }
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
+    let Some(source) = context.load_source_text(node) else {
         return diagnostic;
     };
     let Some(mut span) = single_line_return_annotation_span(
-        &source,
+        source.as_str(),
         return_site.owner_type_name.as_deref(),
         &return_site.owner_name,
     ) else {

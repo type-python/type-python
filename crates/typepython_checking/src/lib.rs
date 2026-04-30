@@ -16,7 +16,6 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
     hash::{Hash, Hasher},
     path::Path,
 };
@@ -262,6 +261,10 @@ impl<'a> CheckerContext<'a> {
 
     fn load_declaration_semantics(&self, declaration: &Declaration) -> SemanticDeclarationFacts {
         self.source_facts.declaration_semantics(declaration)
+    }
+
+    fn load_source_text(&self, node: &typepython_graph::ModuleNode) -> Option<String> {
+        self.source_facts.source_text(node)
     }
 
     fn load_typed_dict_literal_sites(
@@ -1256,7 +1259,7 @@ fn collect_node_semantic_diagnostics(
         direct_unknown_operation_diagnostics(context, node, context.nodes),
     );
     push_diagnostics(diagnostics, unresolved_import_diagnostics(node, context.nodes));
-    push_diagnostics(diagnostics, direct_member_access_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, direct_member_access_diagnostics(context, node, context.nodes));
     push_diagnostics(
         diagnostics,
         ignored_lifecycle_result_diagnostics(context, node, options.strict),
@@ -1280,7 +1283,7 @@ fn collect_node_semantic_diagnostics(
         deprecated_use_diagnostics(node, context.nodes, options.report_deprecated),
     );
     push_diagnostics(diagnostics, direct_method_call_diagnostics(context, node, context.nodes));
-    push_diagnostics(diagnostics, direct_return_type_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, direct_return_type_diagnostics(context, node, context.nodes));
     push_diagnostics(diagnostics, direct_yield_type_diagnostics(node, context.nodes));
     push_diagnostics(diagnostics, for_loop_target_diagnostics(node, context.nodes));
     push_diagnostics(diagnostics, destructuring_assignment_diagnostics(node, context.nodes));
@@ -1369,7 +1372,7 @@ fn collect_node_declaration_diagnostics(
         untyped_framework_field_diagnostics(context, node, context.nodes, options.strict),
     );
     if options.require_explicit_overrides && node.module_kind == SourceKind::TypePython {
-        push_diagnostics(diagnostics, missing_override_diagnostics(node, context.nodes));
+        push_diagnostics(diagnostics, missing_override_diagnostics(context, node, context.nodes));
     }
     push_diagnostics(diagnostics, final_decorator_diagnostics(node, context.nodes));
     push_diagnostics(diagnostics, final_override_diagnostics(node, context.nodes));
@@ -1377,11 +1380,17 @@ fn collect_node_declaration_diagnostics(
     push_diagnostics(diagnostics, abstract_instantiation_diagnostics(node, context.nodes));
     push_diagnostics(diagnostics, interface_implementation_diagnostics(node, context.nodes));
     if options.enable_sealed_exhaustiveness {
-        push_diagnostics(diagnostics, sealed_match_exhaustiveness_diagnostics(node, context.nodes));
-        push_diagnostics(diagnostics, enum_match_exhaustiveness_diagnostics(node, context.nodes));
         push_diagnostics(
             diagnostics,
-            literal_match_exhaustiveness_diagnostics(node, context.nodes),
+            sealed_match_exhaustiveness_diagnostics(context, node, context.nodes),
+        );
+        push_diagnostics(
+            diagnostics,
+            enum_match_exhaustiveness_diagnostics(context, node, context.nodes),
+        );
+        push_diagnostics(
+            diagnostics,
+            literal_match_exhaustiveness_diagnostics(context, node, context.nodes),
         );
     }
     push_diagnostics(
