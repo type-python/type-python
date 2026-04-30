@@ -178,17 +178,8 @@ pub(super) fn ignored_lifecycle_result_diagnostics(
         return Vec::new();
     }
 
-    let Some(info) = context.load_decorator_transform_module_info(node) else {
-        return Vec::new();
-    };
-    let marked_callables = info
-        .callables
-        .into_iter()
-        .filter_map(|site| {
-            let obligation = lifecycle_obligation(&site.decorators)?;
-            site.owner_type_name.is_none().then_some((site.name, obligation))
-        })
-        .collect::<Vec<_>>();
+    let marked_callables =
+        visible_lifecycle_result_callables(context, node).into_iter().collect::<Vec<_>>();
 
     if marked_callables.is_empty() {
         return Vec::new();
@@ -228,17 +219,8 @@ pub(super) fn unclosed_lifecycle_resource_diagnostics(
         return Vec::new();
     }
 
-    let Some(info) = context.load_decorator_transform_module_info(node) else {
-        return Vec::new();
-    };
-    let marked_factories = info
-        .callables
-        .into_iter()
-        .filter_map(|site| {
-            let obligation = lifecycle_resource_obligation(&site.decorators)?;
-            site.owner_type_name.is_none().then_some((site.name, obligation))
-        })
-        .collect::<Vec<_>>();
+    let marked_factories =
+        visible_lifecycle_resource_factories(context, node).into_iter().collect::<Vec<_>>();
 
     if marked_factories.is_empty() {
         return Vec::new();
@@ -320,41 +302,124 @@ struct LifecycleObligation {
 }
 
 fn lifecycle_obligation(decorators: &[String]) -> Option<LifecycleObligation> {
-    decorators.iter().find_map(|decorator| {
-        let short = decorator.rsplit('.').next().unwrap_or(decorator);
-        match short {
-            "must_use" => Some(LifecycleObligation {
-                marker: "@must_use",
-                action: "used, assigned, returned, or passed onward",
-                note: "assign the result, return it, pass it to another function, or bind it to `_` intentionally",
-            }),
-            "must_await" => Some(LifecycleObligation {
-                marker: "@must_await",
-                action: "awaited or returned from an async function",
-                note: "await the result, return it from the async function, or bind it to `_` intentionally",
-            }),
-            _ => None,
-        }
-    })
+    decorators
+        .iter()
+        .find_map(|decorator| lifecycle_obligation_from_marker(lifecycle_marker_name(decorator)))
 }
 
 fn lifecycle_resource_obligation(decorators: &[String]) -> Option<LifecycleObligation> {
     decorators.iter().find_map(|decorator| {
-        let short = decorator.rsplit('.').next().unwrap_or(decorator);
-        match short {
-            "must_close" => Some(LifecycleObligation {
-                marker: "@must_close",
-                action: "closed",
-                note: "call `.close()` on the resource, use it in a `with` block, return it, or pass it onward intentionally",
-            }),
-            "must_consume" => Some(LifecycleObligation {
-                marker: "@must_consume",
-                action: "consumed",
-                note: "consume the stream, close it, return it, or pass it onward intentionally",
-            }),
-            _ => None,
-        }
+        lifecycle_resource_obligation_from_marker(lifecycle_marker_name(decorator))
     })
+}
+
+fn visible_lifecycle_result_callables(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<String, LifecycleObligation> {
+    visible_lifecycle_facts(context, node, lifecycle_obligation, lifecycle_obligation_from_marker)
+}
+
+fn visible_lifecycle_resource_factories(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<String, LifecycleObligation> {
+    visible_lifecycle_facts(
+        context,
+        node,
+        lifecycle_resource_obligation,
+        lifecycle_resource_obligation_from_marker,
+    )
+}
+
+fn visible_lifecycle_facts(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    local_obligation: fn(&[String]) -> Option<LifecycleObligation>,
+    summary_obligation: fn(&str) -> Option<LifecycleObligation>,
+) -> BTreeMap<String, LifecycleObligation> {
+    let mut facts = BTreeMap::new();
+    if let Some(info) = context.load_decorator_transform_module_info(node) {
+        for site in info.callables {
+            if site.owner_type_name.is_some() {
+                continue;
+            }
+            if let Some(obligation) = local_obligation(&site.decorators) {
+                facts.insert(site.name, obligation);
+            }
+        }
+    }
+    facts.extend(imported_lifecycle_facts(context, node, summary_obligation));
+    facts
+}
+
+fn imported_lifecycle_facts(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    summary_obligation: fn(&str) -> Option<LifecycleObligation>,
+) -> BTreeMap<String, LifecycleObligation> {
+    node.declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_none())
+        .filter(|declaration| declaration.kind == DeclarationKind::Import)
+        .filter_map(|declaration| {
+            let target = resolve_imported_symbol_semantic_target_from_declaration(
+                context.nodes,
+                declaration,
+            )?;
+            let target_declaration = target.declaration_target()?;
+            if target_declaration.owner.is_some()
+                || target_declaration.kind != DeclarationKind::Function
+            {
+                return None;
+            }
+            let fact =
+                collect_effect_summary_facts(context, target.provider_node).into_iter().find(
+                    |fact| fact.owner_type_name.is_none() && fact.name == target_declaration.name,
+                )?;
+            let obligation = fact
+                .sources
+                .iter()
+                .find_map(|source| summary_obligation(lifecycle_marker_name(source)))?;
+            Some((declaration.name.clone(), obligation))
+        })
+        .collect()
+}
+
+fn lifecycle_marker_name(source: &str) -> &str {
+    source.trim_start_matches('@').rsplit('.').next().unwrap_or(source)
+}
+
+fn lifecycle_obligation_from_marker(marker: &str) -> Option<LifecycleObligation> {
+    match marker {
+        "must_use" => Some(LifecycleObligation {
+            marker: "@must_use",
+            action: "used, assigned, returned, or passed onward",
+            note: "assign the result, return it, pass it to another function, or bind it to `_` intentionally",
+        }),
+        "must_await" => Some(LifecycleObligation {
+            marker: "@must_await",
+            action: "awaited or returned from an async function",
+            note: "await the result, return it from the async function, or bind it to `_` intentionally",
+        }),
+        _ => None,
+    }
+}
+
+fn lifecycle_resource_obligation_from_marker(marker: &str) -> Option<LifecycleObligation> {
+    match marker {
+        "must_close" => Some(LifecycleObligation {
+            marker: "@must_close",
+            action: "closed",
+            note: "call `.close()` on the resource, use it in a `with` block, return it, or pass it onward intentionally",
+        }),
+        "must_consume" => Some(LifecycleObligation {
+            marker: "@must_consume",
+            action: "consumed",
+            note: "consume the stream, close it, return it, or pass it onward intentionally",
+        }),
+        _ => None,
+    }
 }
 
 fn lifecycle_resource_is_satisfied(

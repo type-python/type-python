@@ -380,6 +380,129 @@ fn check_warns_when_pure_function_calls_imported_effectful_function() {
 }
 
 #[test]
+fn check_warns_for_imported_ignored_must_use_result() {
+    let root = create_temp_typepython_root();
+    let lib_path = root.join("lib.tpy");
+    let app_path = root.join("app.tpy");
+    let lib_source = concat!(
+        "from typing import Callable\n\n",
+        "def must_use[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+        "    return fn\n\n",
+        "@must_use\n",
+        "def start_job() -> str:\n",
+        "    return \"job\"\n",
+    );
+    let app_source =
+        concat!("from lib import start_job\n\n", "def run() -> None:\n", "    start_job()\n",);
+    fs::write(&lib_path, lib_source).expect("temp source should be written");
+    fs::write(&app_path, app_source).expect("temp source should be written");
+
+    let trees = [
+        parse_with_options(
+            SourceFile {
+                path: lib_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("lib"),
+                text: lib_source.to_owned(),
+            },
+            ParseOptions::default(),
+        ),
+        parse_with_options(
+            SourceFile {
+                path: app_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app"),
+                text: app_source.to_owned(),
+            },
+            ParseOptions::default(),
+        ),
+    ];
+    let bindings = trees.iter().map(bind).collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let result = check_with_binding_metadata(
+        &graph,
+        &bindings,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+        ImportFallback::Unknown,
+        None,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4022"), "{rendered}");
+    assert!(rendered.contains("result of `start_job` call is ignored"), "{rendered}");
+    assert!(rendered.contains("@must_use"), "{rendered}");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn check_warns_for_imported_unclosed_lifecycle_resource() {
+    let root = create_temp_typepython_root();
+    let lib_path = root.join("lib.tpy");
+    let app_path = root.join("app.tpy");
+    let lib_source = concat!(
+        "from typing import Callable\n\n",
+        "def must_close[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+        "    return fn\n\n",
+        "@must_close\n",
+        "def open_resource() -> object:\n",
+        "    return object()\n",
+    );
+    let app_source = concat!(
+        "from lib import open_resource\n\n",
+        "def run() -> None:\n",
+        "    resource = open_resource()\n",
+    );
+    fs::write(&lib_path, lib_source).expect("temp source should be written");
+    fs::write(&app_path, app_source).expect("temp source should be written");
+
+    let trees = [
+        parse_with_options(
+            SourceFile {
+                path: lib_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("lib"),
+                text: lib_source.to_owned(),
+            },
+            ParseOptions::default(),
+        ),
+        parse_with_options(
+            SourceFile {
+                path: app_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app"),
+                text: app_source.to_owned(),
+            },
+            ParseOptions::default(),
+        ),
+    ];
+    let bindings = trees.iter().map(bind).collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let result = check_with_binding_metadata(
+        &graph,
+        &bindings,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+        ImportFallback::Unknown,
+        None,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4023"), "{rendered}");
+    assert!(rendered.contains("resource `resource` created by `open_resource`"), "{rendered}");
+    assert!(rendered.contains("not closed before scope exit"), "{rendered}");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn check_uses_framework_adapter_effect_capabilities() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(
