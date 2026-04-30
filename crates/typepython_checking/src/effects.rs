@@ -59,6 +59,14 @@ impl EffectRow {
         self.effects.iter().map(EffectKind::label).collect()
     }
 
+    fn from_labels(labels: impl IntoIterator<Item = String>) -> Self {
+        let mut row = Self::empty();
+        for label in labels {
+            row.insert(effect_kind_from_label(&label));
+        }
+        row
+    }
+
     fn covers(&self, required: &EffectRow) -> bool {
         required.effects.iter().all(|effect| self.effects.contains(effect))
     }
@@ -101,17 +109,13 @@ pub(super) fn effect_capability_diagnostics(
     }
 
     let mut diagnostics = taint_source_sink_diagnostics(context, node);
-    let summaries = collect_effect_summaries(context, node);
+    let summaries = collect_visible_effect_summaries(context, node);
     let capability_scopes = collect_capability_scopes(context, node);
     if summaries.is_empty() {
         return diagnostics;
     }
 
-    let effectful_by_name = summaries
-        .iter()
-        .filter(|summary| !summary.row.is_empty())
-        .map(|summary| (summary.callable.clone(), summary))
-        .collect::<BTreeMap<_, _>>();
+    let effectful_by_name = effectful_summaries_by_name(&summaries);
     if effectful_by_name.is_empty() {
         return diagnostics;
     }
@@ -187,6 +191,94 @@ pub(super) fn effect_capability_diagnostics(
         }
     }
     diagnostics
+}
+
+pub(super) fn collect_effect_summary_facts(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> Vec<SummaryEffectFact> {
+    let mut facts = collect_effect_summaries(context, node)
+        .into_iter()
+        .map(|summary| SummaryEffectFact {
+            name: summary.callable,
+            owner_type_name: summary.owner_type_name,
+            pure: summary.pure,
+            effects: summary.row.labels(),
+            sources: summary
+                .sources
+                .into_iter()
+                .map(|source| match source {
+                    EffectSource::Decorator(name) => name,
+                    EffectSource::Lifecycle(name) => name,
+                    EffectSource::UnsafeBlock => String::from("unsafe:"),
+                })
+                .collect(),
+            line: summary.line,
+        })
+        .collect::<Vec<_>>();
+    facts.sort_by(|left, right| {
+        left.owner_type_name
+            .cmp(&right.owner_type_name)
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.line.cmp(&right.line))
+    });
+    facts
+}
+
+fn collect_visible_effect_summaries(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> Vec<EffectSummary> {
+    let mut summaries = collect_effect_summaries(context, node);
+    summaries.extend(collect_imported_effect_summaries(context, node));
+    summaries
+}
+
+fn effectful_summaries_by_name(summaries: &[EffectSummary]) -> BTreeMap<String, &EffectSummary> {
+    let mut by_name = BTreeMap::new();
+    for summary in summaries.iter().filter(|summary| !summary.row.is_empty()) {
+        by_name.entry(summary.callable.clone()).or_insert(summary);
+    }
+    by_name
+}
+
+fn collect_imported_effect_summaries(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> Vec<EffectSummary> {
+    node.declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_none())
+        .filter(|declaration| declaration.kind == DeclarationKind::Import)
+        .filter_map(|declaration| {
+            let target = resolve_imported_symbol_semantic_target_from_declaration(
+                context.nodes,
+                declaration,
+            )?;
+            let target_declaration = target.declaration_target()?;
+            if target_declaration.owner.is_some()
+                || target_declaration.kind != DeclarationKind::Function
+            {
+                return None;
+            }
+            let fact =
+                collect_effect_summary_facts(context, target.provider_node).into_iter().find(
+                    |fact| fact.owner_type_name.is_none() && fact.name == target_declaration.name,
+                )?;
+            Some(effect_summary_from_fact(declaration.name.clone(), fact))
+        })
+        .collect()
+}
+
+fn effect_summary_from_fact(local_name: String, fact: SummaryEffectFact) -> EffectSummary {
+    EffectSummary {
+        callable: local_name,
+        owner_type_name: fact.owner_type_name,
+        pure: fact.pure,
+        row: EffectRow::from_labels(fact.effects),
+        sources: fact.sources.into_iter().map(EffectSource::Decorator).collect(),
+        line: fact.line,
+    }
 }
 
 fn caller_effect_row_allows(caller: Option<&EffectSummary>, required: &EffectRow) -> bool {

@@ -26,8 +26,9 @@ use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionAppli
 use typepython_graph::ModuleGraph;
 use typepython_incremental::{
     IncrementalState, ModuleSolverFacts, PublicSummary, SealedRootSummary, SnapshotMetadata,
-    SummaryCallableSignature, SummaryDeclarationFact, SummaryExport, SummaryImportSymbolTarget,
-    SummaryImportTarget, SummarySignatureParam, SummaryTypeParam, snapshot_with_summaries,
+    SummaryCallableSignature, SummaryDeclarationFact, SummaryEffectFact, SummaryExport,
+    SummaryImportSymbolTarget, SummaryImportTarget, SummarySignatureParam, SummaryTypeParam,
+    snapshot_with_summaries,
 };
 use typepython_syntax::SourceKind;
 use typepython_target::{RuntimeFeature, RuntimeTypingForm, RuntimeTypingSemantics};
@@ -700,6 +701,7 @@ fn semantic_public_summary(
         .sort_by(|left, right| left.name.cmp(&right.name).then_with(|| left.kind.cmp(&right.kind)));
 
     let shape_fingerprints = semantic_shape_fingerprints(context, node, &top_level_declarations);
+    let effect_summaries = collect_effect_summary_facts(context, node);
 
     PublicSummary {
         module: node.module_key.clone(),
@@ -708,7 +710,7 @@ fn semantic_public_summary(
         imports,
         import_targets,
         sealed_roots,
-        solver_facts: ModuleSolverFacts { declaration_facts, shape_fingerprints },
+        solver_facts: ModuleSolverFacts { declaration_facts, shape_fingerprints, effect_summaries },
     }
 }
 

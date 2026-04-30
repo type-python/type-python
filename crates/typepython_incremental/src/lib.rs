@@ -122,6 +122,22 @@ pub struct ModuleSolverFacts {
     pub declaration_facts: Vec<SummaryDeclarationFact>,
     #[serde(rename = "shapeFingerprints", default)]
     pub shape_fingerprints: BTreeMap<String, u64>,
+    #[serde(rename = "effectSummaries", default, skip_serializing_if = "Vec::is_empty")]
+    pub effect_summaries: Vec<SummaryEffectFact>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SummaryEffectFact {
+    pub name: String,
+    #[serde(rename = "ownerTypeName", default)]
+    pub owner_type_name: Option<String>,
+    #[serde(default)]
+    pub pure: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<String>,
+    pub line: usize,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -556,6 +572,7 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
         solver_facts: ModuleSolverFacts {
             declaration_facts: Vec::new(),
             shape_fingerprints: shape_fingerprints(&top_level_declarations, &node.declarations),
+            effect_summaries: Vec::new(),
         },
     }
 }

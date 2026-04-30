@@ -242,3 +242,139 @@ fn check_allows_unsafe_effect_inside_unsafe_capability_scope() {
     let rendered = result.diagnostics.as_text();
     assert!(!rendered.contains("TPY4026"), "{rendered}");
 }
+
+#[test]
+fn semantic_incremental_summary_records_effect_rows() {
+    let root = create_temp_typepython_root();
+    let path = root.join("lib.tpy");
+    let source_text = concat!(
+        "from typing import Callable\n\n",
+        "def effect(label: str):\n",
+        "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+        "        return fn\n",
+        "    return wrap\n\n",
+        "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+        "    return fn\n\n",
+        "@effect(\"io.net\")\n",
+        "@effect(\"time\")\n",
+        "def fetch() -> str:\n",
+        "    return \"payload\"\n\n",
+        "@effect_pure\n",
+        "def parse(text: str) -> dict[str, object]:\n",
+        "    return {}\n",
+    );
+    fs::write(&path, source_text).expect("temp source should be written");
+
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("lib"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let bindings = vec![bind(&tree)];
+    let graph = build(&bindings);
+    let summary = semantic_incremental_state_with_binding_metadata(
+        &graph,
+        &bindings,
+        ImportFallback::Unknown,
+        None,
+        None,
+        typepython_incremental::SnapshotMetadata::default(),
+    )
+    .summaries
+    .into_iter()
+    .find(|summary| summary.module == "lib")
+    .expect("summary should exist");
+
+    let fetch = summary
+        .solver_facts
+        .effect_summaries
+        .iter()
+        .find(|fact| fact.name == "fetch")
+        .expect("fetch effect summary should exist");
+    let parse = summary
+        .solver_facts
+        .effect_summaries
+        .iter()
+        .find(|fact| fact.name == "parse")
+        .expect("parse effect summary should exist");
+
+    assert_eq!(fetch.effects, vec![String::from("io.net"), String::from("time")]);
+    assert!(!fetch.pure);
+    assert!(parse.effects.is_empty());
+    assert!(parse.pure);
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn check_warns_when_pure_function_calls_imported_effectful_function() {
+    let root = create_temp_typepython_root();
+    let lib_path = root.join("lib.tpy");
+    let app_path = root.join("app.tpy");
+    let lib_source = concat!(
+        "from typing import Callable\n\n",
+        "def effect(label: str):\n",
+        "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+        "        return fn\n",
+        "    return wrap\n\n",
+        "@effect(\"io.net\")\n",
+        "def fetch() -> str:\n",
+        "    return \"payload\"\n",
+    );
+    let app_source = concat!(
+        "from typing import Callable\n",
+        "from lib import fetch\n\n",
+        "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+        "    return fn\n\n",
+        "@effect_pure\n",
+        "def parse() -> str:\n",
+        "    return fetch()\n",
+    );
+    fs::write(&lib_path, lib_source).expect("temp source should be written");
+    fs::write(&app_path, app_source).expect("temp source should be written");
+
+    let trees = [
+        parse_with_options(
+            SourceFile {
+                path: lib_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("lib"),
+                text: lib_source.to_owned(),
+            },
+            ParseOptions::default(),
+        ),
+        parse_with_options(
+            SourceFile {
+                path: app_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app"),
+                text: app_source.to_owned(),
+            },
+            ParseOptions::default(),
+        ),
+    ];
+    let bindings = trees.iter().map(bind).collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let result = check_with_binding_metadata(
+        &graph,
+        &bindings,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+        ImportFallback::Unknown,
+        None,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4026"), "{rendered}");
+    assert!(rendered.contains("pure function `parse`"), "{rendered}");
+    assert!(rendered.contains("effect row `io.net`"), "{rendered}");
+
+    let _ = fs::remove_dir_all(&root);
+}
