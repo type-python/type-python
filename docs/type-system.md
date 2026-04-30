@@ -547,7 +547,14 @@ default, and TypePython does not require throws annotations for imported Python 
 | `@deprecated("msg")`   | Marks as deprecated; usage generates warnings       |
 | `@abstractmethod`      | Abstract method (must be implemented by subclasses) |
 | `@dataclass_transform` | Framework-level dataclass behavior                  |
+| `@must_use`            | Result must be used, returned, assigned, or passed onward |
+| `@must_await`          | Result must be awaited or returned from an async function |
+| `@must_close`          | Resource factory result must be closed, escaped, or used as a resource |
+| `@must_consume`        | Stream-like result must be consumed, closed, or intentionally escaped |
 
-Future lifecycle decorators such as `@must_use`, `@must_await`, `@must_close`, and `@must_consume`
-are design-only and not enforced yet. See [the lifecycle diagnostics RFC](rfcs/lifecycle-diagnostics.md)
-for the conservative analysis boundary and false-positive escape hatches.
+Lifecycle decorators are enforced in strict TypePython checking as lightweight intra-procedural
+diagnostics. They also feed the effect/capability fact channel as `resource.lifecycle`, so imports,
+LSP hover, and cached summaries can explain the same obligation without changing emitted Python.
+See [the lifecycle diagnostics RFC](rfcs/lifecycle-diagnostics.md) and
+[the effect/capability rows RFC](rfcs/effect-capability-rows.md) for the conservative analysis
+boundary and false-positive escape hatches.
