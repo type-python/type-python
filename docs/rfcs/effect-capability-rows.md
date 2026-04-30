@@ -25,7 +25,7 @@ Strict checking reports `TPY4026` when a function consumes an effectful result w
 
 Public summaries persist effect rows as solver facts. Importers can therefore diagnose pure functions that call an effectful function imported from another TypePython module without reopening the provider source. Lifecycle decorators are part of that same summary channel: an imported `@must_use` function can still trigger ignored-result diagnostics, and an imported `@must_close` / `@must_consume` factory can still trigger resource diagnostics. CLI cache persistence also writes `.typepython/cache/effects.json`, a compact sidecar for tools that want effect/capability facts without decoding the full incremental snapshot.
 
-LSP hover displays a callable's effect summary next to its signature so users can understand why a diagnostic was produced without inspecting checker internals.
+LSP hover displays a callable's effect summary next to its signature, including decorator-declared effects, framework adapter effect capabilities, and lifecycle/resource facts such as `resource.lifecycle`, so users can understand why a diagnostic was produced without inspecting checker internals.
 
 ## Portability boundary
 

@@ -591,6 +591,10 @@ fn effect_summary_hover_detail(
             "effect_taint_sanitize" | "sanitizer" => {
                 effects.insert("taint.sanitize");
             }
+            "must_use" | "must_call" | "must_close" | "must_dispose" | "must_await"
+            | "must_consume" => {
+                effects.insert("resource.lifecycle");
+            }
             "source" => {
                 effects.insert("taint.source");
             }

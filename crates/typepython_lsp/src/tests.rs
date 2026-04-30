@@ -304,6 +304,37 @@ fn hover_renders_effect_summary_for_adapter_declared_callable() {
 }
 
 #[test]
+fn hover_renders_lifecycle_effect_summary() {
+    let config = temp_workspace(
+        "hover_renders_lifecycle_effect_summary",
+        &[(
+            "src/app/__init__.tpy",
+            concat!(
+                "from typing import Callable\n\n",
+                "def must_close[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+                "    return fn\n\n",
+                "@must_close\n",
+                "def open_resource() -> object:\n",
+                "    return object()\n",
+            ),
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let hover = server
+        .handle_hover(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 6, "character": 5}
+        }))
+        .expect("hover should succeed");
+    let contents = hover["contents"]["value"].as_str().expect("hover contents should be text");
+
+    assert!(contents.contains("function open_resource"), "{contents}");
+    assert!(contents.contains("Effect summary: row [resource.lifecycle]"), "{contents}");
+}
+
+#[test]
 fn hover_renders_restricted_type_level_alias_reduction() {
     let config = temp_workspace(
         "hover_renders_restricted_type_level_alias_reduction",
