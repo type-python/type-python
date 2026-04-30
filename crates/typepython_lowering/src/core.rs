@@ -454,6 +454,12 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
                 || v == "Required_[UserUpdate]"
                 || v.starts_with("Partial[")
                 || v.starts_with("Required_[")
+                || transform_generates_notrequired(
+                    v,
+                    &typed_dicts_by_name,
+                    &data_classes_by_name,
+                    options.experimental_shape_transforms,
+                )
         });
         if needs_notrequired_import && !has_notrequired_import(&tree.source.text) {
             inserted_lines.emit_required_import(rewrite_notrequired_import_line(options));
@@ -1738,25 +1744,47 @@ fn type_level_shape_fields(
     data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     experimental_shape_transforms: bool,
 ) -> Vec<typepython_syntax::TypeLevelShapeField> {
-    let mut shapes = typed_dicts.values().copied().collect::<Vec<_>>();
+    let mut fields = typed_dicts
+        .values()
+        .copied()
+        .flat_map(|shape| type_level_shape_fields_for_block(shape, typed_dict_total_default(shape)))
+        .collect::<Vec<_>>();
     if experimental_shape_transforms {
-        shapes.extend(data_classes.values().copied());
+        fields.extend(
+            data_classes
+                .values()
+                .copied()
+                .flat_map(|shape| type_level_shape_fields_for_block(shape, true)),
+        );
     }
-    shapes
-        .into_iter()
-        .flat_map(|shape| {
-            shape
-                .members
-                .iter()
-                .filter(|member| member.kind == typepython_syntax::ClassMemberKind::Field)
-                .map(|member| typepython_syntax::TypeLevelShapeField {
-                    owner: shape.name.clone(),
-                    name: member.name.clone(),
-                    annotation: member.annotation.clone(),
-                })
-                .collect::<Vec<_>>()
+    fields
+}
+
+fn type_level_shape_fields_for_block(
+    shape: &typepython_syntax::NamedBlockStatement,
+    total_default: bool,
+) -> Vec<typepython_syntax::TypeLevelShapeField> {
+    shape
+        .members
+        .iter()
+        .filter(|member| member.kind == typepython_syntax::ClassMemberKind::Field)
+        .map(|member| {
+            let annotation = member.annotation.clone();
+            typepython_syntax::TypeLevelShapeField {
+                owner: shape.name.clone(),
+                name: member.name.clone(),
+                required: typepython_syntax::type_level_shape_field_required(
+                    annotation.as_deref(),
+                    total_default,
+                ),
+                annotation,
+            }
         })
         .collect()
+}
+
+fn typed_dict_total_default(shape: &typepython_syntax::NamedBlockStatement) -> bool {
+    typepython_syntax::typed_dict_total_default_from_header_suffix(&shape.header_suffix)
 }
 
 fn rewrite_typevar_line(

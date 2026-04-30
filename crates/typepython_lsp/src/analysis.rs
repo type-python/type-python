@@ -469,10 +469,18 @@ fn type_level_shape_fields(node: &ModuleNode) -> Vec<typepython_syntax::TypeLeve
             Some((owner.name.clone(), member))
         })
         .filter(|(_, member)| member.kind == typepython_binding::DeclarationKind::Value)
-        .map(|(owner, member)| typepython_syntax::TypeLevelShapeField {
-            owner,
-            name: member.name.clone(),
-            annotation: member.value_annotation().map(typepython_binding::BoundTypeExpr::render),
+        .map(|(owner, member)| {
+            let annotation =
+                member.value_annotation().map(typepython_binding::BoundTypeExpr::render);
+            typepython_syntax::TypeLevelShapeField {
+                owner,
+                name: member.name.clone(),
+                required: typepython_syntax::type_level_shape_field_required(
+                    annotation.as_deref(),
+                    true,
+                ),
+                annotation,
+            }
         })
         .collect()
 }
@@ -723,13 +731,7 @@ fn source_hover_shape(
                     )
                 }) =>
         {
-            Some(
-                typepython_syntax::ShapeProjection::from_named_block(
-                    class,
-                    typepython_syntax::ShapeProjectionSourceKind::TypedDict,
-                )
-                .fields,
-            )
+            Some(typepython_syntax::ShapeProjection::from_typed_dict_block(class).fields)
         }
         SyntaxStatement::DataClass(class) if class.name == type_name => Some(
             typepython_syntax::ShapeProjection::from_named_block(

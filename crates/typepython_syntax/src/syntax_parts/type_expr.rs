@@ -29,6 +29,7 @@ pub struct TypeLevelShapeField {
     pub owner: String,
     pub name: String,
     pub annotation: Option<String>,
+    pub required: bool,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
@@ -63,14 +64,26 @@ pub struct ShapeProjection {
 
 impl ShapeProjectionField {
     pub fn from_class_member(member: &ClassMember) -> Self {
+        Self::from_class_member_with_total_default(member, true)
+    }
+
+    pub fn from_class_member_with_total_default(member: &ClassMember, total_default: bool) -> Self {
         let annotation = member
             .annotation
             .clone()
             .or_else(|| member.annotation_expr.as_ref().map(TypeExpr::render));
+        let required = type_level_shape_field_required(annotation.as_deref(), total_default);
+        let annotation = annotation.map(|annotation| {
+            if !required && type_level_shape_field_required(Some(&annotation), true) {
+                format!("NotRequired[{annotation}]")
+            } else {
+                annotation
+            }
+        });
         Self {
             name: member.name.clone(),
             public_alias: member.name.clone(),
-            required: !annotation.as_deref().is_some_and(shape_annotation_is_notrequired),
+            required,
             readonly: annotation.as_deref().is_some_and(shape_annotation_is_readonly),
             annotation,
             source_kind: ShapeProjectionFieldSourceKind::SourceField,
@@ -106,6 +119,22 @@ impl ShapeProjection {
         block: &NamedBlockStatement,
         source_kind: ShapeProjectionSourceKind,
     ) -> Self {
+        Self::from_named_block_with_total_default(block, source_kind, true)
+    }
+
+    pub fn from_typed_dict_block(block: &NamedBlockStatement) -> Self {
+        Self::from_named_block_with_total_default(
+            block,
+            ShapeProjectionSourceKind::TypedDict,
+            typed_dict_total_default_from_header_suffix(&block.header_suffix),
+        )
+    }
+
+    pub fn from_named_block_with_total_default(
+        block: &NamedBlockStatement,
+        source_kind: ShapeProjectionSourceKind,
+        total_default: bool,
+    ) -> Self {
         Self {
             name: block.name.clone(),
             source_kind,
@@ -113,7 +142,12 @@ impl ShapeProjection {
                 .members
                 .iter()
                 .filter(|member| member.kind == ClassMemberKind::Field)
-                .map(ShapeProjectionField::from_class_member)
+                .map(|member| {
+                    ShapeProjectionField::from_class_member_with_total_default(
+                        member,
+                        total_default,
+                    )
+                })
                 .collect(),
         }
     }
@@ -255,12 +289,27 @@ impl ShapeProjection {
     }
 }
 
-fn shape_annotation_is_notrequired(annotation: &str) -> bool {
-    annotation.trim_start().starts_with("NotRequired[")
+pub fn type_level_shape_field_required(annotation: Option<&str>, total_default: bool) -> bool {
+    match annotation.and_then(annotation_wrapper_head) {
+        Some("Required" | "Required_") => true,
+        Some("NotRequired") => false,
+        _ => total_default,
+    }
 }
 
 fn shape_annotation_is_readonly(annotation: &str) -> bool {
-    annotation.trim_start().starts_with("ReadOnly[")
+    annotation_wrapper_head(annotation) == Some("ReadOnly")
+}
+
+fn annotation_wrapper_head(annotation: &str) -> Option<&str> {
+    let trimmed = annotation.trim();
+    let (head, _) = trimmed.split_once('[')?;
+    trimmed.ends_with(']').then(|| head.rsplit('.').next().unwrap_or(head).trim())
+}
+
+pub fn typed_dict_total_default_from_header_suffix(header_suffix: &str) -> bool {
+    let compact = header_suffix.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+    !compact.contains("total=False")
 }
 
 fn bracket_inner<'a>(expression: &'a str, transform: &str) -> Option<&'a str> {
@@ -478,14 +527,8 @@ pub fn reduce_key_set_alias_text(
         .iter()
         .filter(|field| field.owner == owner)
         .filter(|field| match head.as_str() {
-            "RequiredKeys" => !field
-                .annotation
-                .as_deref()
-                .is_some_and(|ann| ann.trim_start().starts_with("NotRequired[")),
-            "OptionalKeys" => field
-                .annotation
-                .as_deref()
-                .is_some_and(|ann| ann.trim_start().starts_with("NotRequired[")),
+            "RequiredKeys" => field.required,
+            "OptionalKeys" => !field.required,
             _ => true,
         })
         .map(|field| field.name.clone())
@@ -892,11 +935,13 @@ mod type_expr_tests {
                 owner: String::from("User"),
                 name: String::from("id"),
                 annotation: Some(String::from("int")),
+                required: true,
             },
             TypeLevelShapeField {
                 owner: String::from("User"),
                 name: String::from("nickname"),
                 annotation: Some(String::from("NotRequired[str]")),
+                required: false,
             },
         ];
 

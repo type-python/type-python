@@ -2636,6 +2636,32 @@ fn lower_reduces_key_set_type_level_aliases() {
 }
 
 #[test]
+fn lower_reduces_total_false_required_and_optional_key_aliases() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("type-level-total-false-keys.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "from typing import Required, TypedDict\n",
+            "class Patch(TypedDict, total=False):\n",
+            "    id: int\n",
+            "    name: Required[str]\n\n",
+            "typealias RequiredPatchKeys = RequiredKeys[Patch]\n",
+            "typealias OptionalPatchKeys = OptionalKeys[Patch]\n",
+        )),
+    });
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+
+    assert!(!lowered.diagnostics.has_errors(), "{}", lowered.diagnostics.as_text());
+    assert!(
+        lowered.module.python_source.contains("RequiredPatchKeys: TypeAlias = Literal[\"name\"]")
+    );
+    assert!(
+        lowered.module.python_source.contains("OptionalPatchKeys: TypeAlias = Literal[\"id\"]")
+    );
+}
+
+#[test]
 fn lower_expands_literal_key_shape_transforms() {
     let tree = parse(SourceFile {
         path: PathBuf::from("type-level-literal-keys.tpy"),
@@ -2674,6 +2700,28 @@ fn lower_expands_literal_key_shape_transforms() {
     assert!(!lowered.module.python_source[without_email_start..].contains("email: str"));
     assert!(!lowered.module.python_source.contains("PublicUser: TypeAlias = Pick"));
     assert!(!lowered.module.python_source.contains("UserWithoutEmail: TypeAlias = Omit"));
+}
+
+#[test]
+fn lower_preserves_total_false_requiredness_in_shape_transforms() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("type-level-total-false-transform.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "from typing import Literal, TypedDict\n",
+            "class Patch(TypedDict, total=False):\n",
+            "    id: int\n",
+            "    name: str\n\n",
+            "typealias PublicPatch = Pick[Patch, Literal[\"id\"]]\n",
+        )),
+    });
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+
+    assert!(!lowered.diagnostics.has_errors(), "{}", lowered.diagnostics.as_text());
+    assert!(lowered.module.python_source.contains("from typing_extensions import NotRequired"));
+    assert!(lowered.module.python_source.contains("class PublicPatch(TypedDict):"));
+    assert!(lowered.module.python_source.contains("    id: NotRequired[int]"));
 }
 
 #[test]

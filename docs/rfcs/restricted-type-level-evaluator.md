@@ -14,7 +14,7 @@ TypePython needs a small, terminating type-level evaluator before conditional or
 - `TypeIf[Cond, A, B]` evaluates one branch when `Cond` is a decidable boolean form.
 - `KeyOf[ShapeLike]` can read keys from the existing internal `Shape` resolver.
 - `Pick[ShapeLike, Literal[...]]` and `Omit[ShapeLike, Literal[...]]` project a known Shape's key set through the shared shape operations.
-- `RequiredKeys[ShapeLike]` and `OptionalKeys[ShapeLike]` partition a known Shape by requiredness.
+- `RequiredKeys[ShapeLike]` and `OptionalKeys[ShapeLike]` partition a known Shape by requiredness, including `TypedDict(total=False)` defaults and explicit `Required[...]` / `NotRequired[...]` wrappers.
 - `MapValues[ShapeLike, F]` accepts the initial built-in wrapper set (`Optional`, `Readonly`) and fails closed for unsupported wrappers.
 - `Pick` / `Omit` accept both legacy quoted-key arguments and `Literal[...]` key sets, so checker examples such as `Pick[User, Literal["id"]]` lower through the same standard TypedDict materialization path.
 

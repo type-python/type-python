@@ -259,6 +259,23 @@ pub(super) fn transform_targets_data_class(
         && transform_expression_reaches_data_class(args[1], data_classes)
 }
 
+pub(super) fn transform_generates_notrequired(
+    value: &str,
+    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    experimental_shape_transforms: bool,
+) -> bool {
+    resolve_transform_shape(value.trim(), typed_dicts, data_classes, experimental_shape_transforms)
+        .is_some_and(|shape| {
+            shape.fields.iter().any(|field| {
+                field
+                    .annotation
+                    .as_deref()
+                    .is_some_and(|annotation| annotation.trim_start().starts_with("NotRequired["))
+            })
+        })
+}
+
 fn transform_expression_reaches_data_class(
     value: &str,
     data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
@@ -443,10 +460,7 @@ fn resolve_transform_shape(
     }
 
     if let Some(target) = typed_dicts.get(value.trim()) {
-        return Some(SharedShapeProjection::from_named_block(
-            target,
-            typepython_syntax::ShapeProjectionSourceKind::TypedDict,
-        ));
+        return Some(SharedShapeProjection::from_typed_dict_block(target));
     }
     if experimental_shape_transforms && let Some(target) = data_classes.get(value.trim()) {
         return Some(SharedShapeProjection::from_named_block(
