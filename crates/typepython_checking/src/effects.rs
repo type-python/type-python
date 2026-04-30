@@ -270,7 +270,7 @@ fn taint_source_sink_diagnostics(
             {
                 diagnostics.push(
                     Diagnostic::error(
-                        "TPY4001",
+                        "TPY4028",
                         format!(
                             "tainted source result flows into sink `{}` without a sanitizer",
                             call.callee

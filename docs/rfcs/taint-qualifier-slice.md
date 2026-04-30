@@ -14,7 +14,7 @@ This slice models taint as a real TypePython author-time qualifier without chang
 - `Tainted[T, C]` is not assignable to plain `T`.
 - Plain `T` is not assignable to `Tainted[T, C]`.
 - `@source`, `@sink`, and `@sanitizer` decorators are recognized as TypePython effect facts for the vertical slice.
-- Passing a direct `@source` result to a direct `@sink` call is rejected even when both signatures use plain runtime types; local assignments carry that taint forward inside the module slice, and assigning through a `@sanitizer` callable clears the source-to-sink diagnostic.
+- Passing a direct `@source` result to a direct `@sink` call is rejected with `TPY4028` even when both signatures use plain runtime types; local assignments carry that taint forward inside the module slice, and assigning through a `@sanitizer` callable clears the source-to-sink diagnostic.
 - Top-like checker escape hatches (`Any`, `unknown`, `dynamic`) keep their existing behavior.
 
 ## Example
@@ -31,8 +31,8 @@ def render_html(value: str) -> None: ...
 raw: Tainted[str, "html"] = body()
 safe: str = raw                 # TPY4001
 safe = escape_html(body())      # accepted
-render_html(body())             # TPY4001
-render_html(raw)                # TPY4001
+render_html(body())             # TPY4001 or TPY4028, depending on whether the flow is type-qualified or decorator-only
+render_html(raw)                # TPY4001 or TPY4028, depending on whether the flow is type-qualified or decorator-only
 render_html(escape_html(body())) # accepted
 ```
 

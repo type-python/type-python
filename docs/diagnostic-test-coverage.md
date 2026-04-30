@@ -2,7 +2,7 @@
 
 This generated report maps every documented `TPYxxxx` diagnostic code to implementation files and Rust test files that mention the code. It is a traceability audit: `needs-test` means the code is emitted by implementation code but no Rust test currently names that diagnostic code directly.
 
-Tracked codes: 41 (41 covered, 0 need tests, 0 reserved).
+Tracked codes: 42 (42 covered, 0 need tests, 0 reserved).
 
 | Code | Severity | Status | Description | Implementation evidence | Test evidence |
 | ---- | -------- | ------ | ----------- | ----------------------- | ------------- |
@@ -39,6 +39,7 @@ Tracked codes: 41 (41 covered, 0 need tests, 0 reserved).
 | `TPY4025` | error | covered | Unsupported async construct appears inside a `@dual_emit` function | `crates/typepython_checking/src/semantic.rs`<br>`crates/typepython_lsp/src/requests/protocol.rs` | `crates/typepython_checking/src/tests/semantic.rs` |
 | `TPY4026` | warning | covered | Pure function calls a function with a declared effect row | `crates/typepython_checking/src/effects.rs` | `crates/typepython_checking/src/tests/semantic_effects.rs` |
 | `TPY4027` | error | covered | Restricted type-level alias cannot be evaluated to standard Python typing | `crates/typepython_checking/src/type_level.rs` | `crates/typepython_checking/src/tests/semantic_type_level.rs` |
+| `TPY4028` | error | covered | Tainted source result reaches a sink without a sanitizer | `crates/typepython_checking/src/effects.rs` | `crates/typepython_checking/src/tests/semantic_taint.rs` |
 | `TPY4101` | warning/error | covered | Use of deprecated declaration | `crates/typepython_checking/src/calls/reporting.rs` | `crates/typepython_checking/src/tests/advanced.rs` |
 | `TPY7003` | error | covered | Framework adapter manifest is invalid | `crates/typepython_cli/src/adapter.rs` | `crates/typepython_cli/src/tests/adapter.rs` |
 | `TPY5001` | error | covered | Stub (`.pyi`) generation failure | `crates/typepython_cli/src/pipeline.rs`<br>`crates/typepython_emit/src/runtime.rs` | `crates/typepython_emit/src/tests.rs` |

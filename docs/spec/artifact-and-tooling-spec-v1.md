@@ -786,6 +786,9 @@ At minimum, a Core v1 implementation MUST reserve the following concrete codes w
 | `TPY4016` | Mutation of read-only `TypedDict` item                                  |
 | `TPY4017` | Invalid type transform argument (unknown field, unsupported input type) |
 | `TPY4018` | Incomplete conditional return type coverage                             |
+| `TPY4026` | Effect capability mismatch in TypePython author-time checking           |
+| `TPY4027` | Restricted type-level alias cannot be reduced to standard typing        |
+| `TPY4028` | Tainted source result reaches a sink without a sanitizer                |
 | `TPY4101` | Use of deprecated declaration                                           |
 | `TPY5001` | `.pyi` generation failure                                               |
 | `TPY5002` | Best-effort emit blocked by `no_emit_on_error` after semantic errors     |
@@ -805,6 +808,9 @@ The following mappings are normative where the corresponding rule is triggered:
 - Exported declaration surface containing `dynamic` or unresolved `unknown` while `typing.require_known_public_types = true`: `TPY4015`
 - Assignment to, augmented assignment through, or deletion of a known read-only `TypedDict` item: `TPY4016`
 - Incomplete experimental conditional-return coverage: `TPY4018`
+- TypePython author-time effect capability mismatch: `TPY4026`
+- Restricted type-level alias evaluation failure: `TPY4027`
+- TypePython author-time taint source-to-sink violation: `TPY4028`
 - Use of a deprecated declaration when `typing.report_deprecated` is not `ignore`: `TPY4101`
 - `typepython verify` detecting a structural or runtime-assisted public-surface mismatch against the authoritative type surface: `TPY5003`
 

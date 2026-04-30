@@ -106,6 +106,7 @@ fn check_rejects_decorated_source_flowing_through_local_to_sink() {
     );
 
     let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4028"), "{rendered}");
     assert!(rendered.contains("tainted source result flows into sink"), "{rendered}");
 }
 
@@ -176,6 +177,7 @@ fn check_uses_framework_adapter_taint_source_and_sink_capabilities() {
     );
 
     let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4028"), "{rendered}");
     assert!(rendered.contains("tainted source result flows into sink"), "{rendered}");
 }
 
@@ -205,5 +207,6 @@ fn check_rejects_decorated_source_passed_directly_to_decorated_sink() {
     );
 
     let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4028"), "{rendered}");
     assert!(rendered.contains("tainted source result flows into sink"), "{rendered}");
 }

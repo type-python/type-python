@@ -127,6 +127,7 @@ This is the largest category, covering all type checking rules.
 | `TPY4025` | error         | Unsupported async construct appears inside a `@dual_emit` function                                                |
 | `TPY4026` | warning       | Pure function calls a function with a declared effect row                                                          |
 | `TPY4027` | error         | Restricted type-level alias cannot be evaluated to standard Python typing                                          |
+| `TPY4028` | error         | Tainted source result reaches a sink without a sanitizer                                                          |
 | `TPY4101` | warning/error | Use of deprecated declaration                                                                                      |
 | `TPY7003` | error         | Framework adapter manifest is invalid                                                                             |
 
@@ -307,6 +308,23 @@ typealias Names = MapValues[User, Callable]  # TPY4027: unsupported wrapper in t
 ```
 
 **Fix:** use a supported reducible form such as decidable `TypeIf[IsSubtype[...], A, B]`, `KeyOf`, `RequiredKeys`, `OptionalKeys`, `Pick`, `Omit`, or `MapValues` with the built-in `Optional` / `Readonly` wrappers; otherwise materialize the alias as a standard Python type.
+
+#### TPY4028 -- Tainted source reaches sink
+
+Raised when the checker can see a direct source-to-sink taint flow that does not pass through an explicit sanitizer.
+
+```python
+@source
+def request_body() -> str: ...
+
+@sink
+def render_html(value: str) -> None: ...
+
+raw = request_body()
+render_html(raw)  # TPY4028: tainted source result flows into sink
+```
+
+**Fix:** pass the value through a callable marked `@sanitizer`, or change the source/sink declarations if the flow is intentionally trusted.
 
 #### TPY4101 -- Deprecated usage
 
