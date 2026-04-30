@@ -342,7 +342,7 @@ Fingerprint-based incremental build tracking.
 - Implementation-only change (public summary fingerprint same): dependents NOT rechecked
 - Public summary change (fingerprint differs): direct and transitive dependents rechecked
 
-**Persistence:** JSON-encoded with schema versioning, stored in `.typepython/cache/snapshot.json`. CLI frontends also persist module-diagnostic reuse state and, when outputs are materialized, a build-manifest describing the emitted artifact set.
+**Persistence:** JSON-encoded with schema versioning, stored in `.typepython/cache/snapshot.json`. CLI frontends also persist module-diagnostic reuse state, effect/capability sidecar metadata in `.typepython/cache/effects.json`, and, when outputs are materialized, a build-manifest describing the emitted artifact set.
 
 ### typepython_cli
 
@@ -359,7 +359,7 @@ User-facing binary implementing all commands.
 7. `lower_with_options()` -- lower only the project modules whose diagnostics or materialized outputs need refresh
 8. `plan_emits_for_sources()` -- plan output paths for the full project source set
 9. `write_runtime_outputs()` -- materialize only the affected runtime and stub outputs, then clean stale outputs that disappeared from the plan
-10. `write_incremental_snapshot()` / `analysis-cache.json` / `build-manifest.json` -- persist semantic summaries, module diagnostics, and the last materialized artifact set
+10. `write_incremental_snapshot()` / `analysis-cache.json` / `effects.json` / `build-manifest.json` -- persist semantic summaries, module diagnostics, effect metadata, and the last materialized artifact set
 
 **Incremental note:** one-shot CLI commands still rediscover, parse, and bind the current workspace each invocation. The selective behavior starts at dependency-driven recheck/lower/emit, while `typepython watch` and `typepython lsp` keep additional in-memory state across edits.
 

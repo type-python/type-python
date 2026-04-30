@@ -118,6 +118,7 @@ Given a `.tpy` source file, the build produces:
 - A `.pyi` file (type stub for external tools)
 - A `py.typed` marker (PEP 561 compliance)
 - A `snapshot.json` (incremental build state)
+- An `effects.json` sidecar for author-time effect/capability facts
 
 ### Can I use TypePython alongside existing Python tools?
 
@@ -139,7 +140,7 @@ TypePython computes a fingerprint (FNV-1a hash) for each module's public API. On
 
 The CLI still reparses and rebinds the current workspace on each invocation, but it now rechecks, relowers, and rematerializes only the affected project modules. `typepython check` updates the semantic cache, while `typepython build` / `verify` also track which build outputs were actually materialized so stale artifacts can be cleaned deterministically.
 
-State is persisted under `.typepython/cache/`, including `snapshot.json`, `analysis-cache.json`, and `build-manifest.json` when outputs are materialized.
+State is persisted under `.typepython/cache/`, including `snapshot.json`, `analysis-cache.json`, `effects.json`, and `build-manifest.json` when outputs are materialized.
 
 ### How do I set up editor support?
 

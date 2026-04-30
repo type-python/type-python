@@ -81,6 +81,7 @@ struct AnalyzedPipelineState {
 
 const MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION: u32 = 1;
 const ANALYSIS_CACHE_SCHEMA_VERSION: u32 = 1;
+const EFFECT_METADATA_SIDECAR_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 struct CachedEmitArtifact {
@@ -115,6 +116,19 @@ struct AnalysisCache {
     incremental: IncrementalState,
     metadata: AnalysisCacheMetadata,
     module_diagnostics: BTreeMap<String, Vec<Diagnostic>>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+struct EffectMetadataSidecar {
+    schema_version: u32,
+    modules: Vec<EffectMetadataModule>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+struct EffectMetadataModule {
+    module: String,
+    #[serde(rename = "effectSummaries")]
+    effect_summaries: Vec<typepython_incremental::SummaryEffectFact>,
 }
 
 pub(crate) fn should_emit_build_outputs(
@@ -276,12 +290,17 @@ pub(crate) fn materialize_build_outputs(
         &snapshot.incremental,
     )?;
     let manifest_path = write_materialized_build_manifest(config, snapshot)?;
+    let effect_metadata_path = write_effect_metadata_sidecar(
+        &config.resolve_relative_path(&config.config.project.cache_dir),
+        &snapshot.incremental,
+    )?;
     notes.push(format!(
         "cached {} module fingerprint(s) at {}",
         snapshot.incremental.fingerprints.len(),
         snapshot_path.display()
     ));
     notes.push(format!("recorded materialized build manifest at {}", manifest_path.display()));
+    notes.push(format!("recorded effect metadata at {}", effect_metadata_path.display()));
     Ok(notes)
 }
 
@@ -1037,6 +1056,29 @@ pub(crate) fn write_incremental_snapshot(
     Ok(snapshot_path)
 }
 
+fn write_effect_metadata_sidecar(cache_dir: &Path, snapshot: &IncrementalState) -> Result<PathBuf> {
+    fs::create_dir_all(cache_dir)
+        .with_context(|| format!("unable to create cache directory {}", cache_dir.display()))?;
+    let sidecar_path = cache_dir.join("effects.json");
+    let modules = snapshot
+        .summaries
+        .iter()
+        .filter(|summary| !summary.solver_facts.effect_summaries.is_empty())
+        .map(|summary| EffectMetadataModule {
+            module: summary.module.clone(),
+            effect_summaries: summary.solver_facts.effect_summaries.clone(),
+        })
+        .collect();
+    let payload = serde_json::to_string_pretty(&EffectMetadataSidecar {
+        schema_version: EFFECT_METADATA_SIDECAR_SCHEMA_VERSION,
+        modules,
+    })
+    .context("unable to serialize effect metadata sidecar")?;
+    fs::write(&sidecar_path, payload)
+        .with_context(|| format!("unable to write {}", sidecar_path.display()))?;
+    Ok(sidecar_path)
+}
+
 pub(crate) fn persist_pipeline_analysis_state(
     config: &ConfigHandle,
     snapshot: &PipelineSnapshot,
@@ -1046,6 +1088,7 @@ pub(crate) fn persist_pipeline_analysis_state(
     }
     let cache_dir = config.resolve_relative_path(&config.config.project.cache_dir);
     let snapshot_path = write_incremental_snapshot(&cache_dir, &snapshot.incremental)?;
+    let _effect_metadata_path = write_effect_metadata_sidecar(&cache_dir, &snapshot.incremental)?;
     let analysis_path = write_analysis_cache(
         config,
         &analysis_cache_metadata(config, &snapshot.incremental.metadata),

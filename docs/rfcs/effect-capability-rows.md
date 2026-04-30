@@ -23,7 +23,7 @@ The MVP intentionally uses decorators and existing syntax rather than new effect
 
 Strict checking reports `TPY4026` when a function consumes an effectful result without declaring a covering effect row or isolating that effect. Capability scopes are consulted before reporting; an `unsafe:` scope grants the local `unsafe` row for calls on that line, while other effect rows still require a declaration or refactor. Diagnostic notes include the source decorator, framework capability, or lifecycle fact.
 
-Public summaries persist effect rows as solver facts. Importers can therefore diagnose pure functions that call an effectful function imported from another TypePython module without reopening the provider source.
+Public summaries persist effect rows as solver facts. Importers can therefore diagnose pure functions that call an effectful function imported from another TypePython module without reopening the provider source. CLI cache persistence also writes `.typepython/cache/effects.json`, a compact sidecar for tools that want effect/capability facts without decoding the full incremental snapshot.
 
 LSP hover displays a callable's effect summary next to its signature so users can understand why a diagnostic was produced without inspecting checker internals.
 

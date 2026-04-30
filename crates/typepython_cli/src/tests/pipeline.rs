@@ -309,16 +309,61 @@ fn run_with_pipeline_check_persists_analysis_cache_without_materializing_outputs
             exit_code,
             project_dir.join(".typepython/cache/snapshot.json").exists(),
             project_dir.join(".typepython/cache/analysis-cache.json").exists(),
+            project_dir.join(".typepython/cache/effects.json").exists(),
             project_dir.join(".typepython/cache/build-manifest.json").exists(),
         )
     };
     remove_temp_project_dir(&project_dir);
 
-    let (exit_code, snapshot_exists, analysis_exists, manifest_exists) = result;
+    let (exit_code, snapshot_exists, analysis_exists, effects_exists, manifest_exists) = result;
     assert_eq!(exit_code, ExitCode::SUCCESS);
     assert!(snapshot_exists);
     assert!(analysis_exists);
+    assert!(effects_exists);
     assert!(!manifest_exists);
+}
+
+#[test]
+fn run_with_pipeline_check_persists_effect_metadata_sidecar() {
+    let project_dir = temp_project_dir("run_with_pipeline_check_persists_effect_metadata_sidecar");
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.tpy"),
+            concat!(
+                "from typing import Callable\n\n",
+                "def effect_io_net[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+                "    return fn\n\n",
+                "@effect_io_net\n",
+                "def fetch() -> str:\n",
+                "    return \"ok\"\n",
+            ),
+        )
+        .expect("test setup should succeed");
+
+        let exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("check should run to completion");
+        let rendered = fs::read_to_string(project_dir.join(".typepython/cache/effects.json"))
+            .expect("effect sidecar should be written");
+
+        (exit_code, rendered)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let (exit_code, rendered) = result;
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(rendered.contains("\"schema_version\""), "{rendered}");
+    assert!(rendered.contains("\"module\": \"app\""), "{rendered}");
+    assert!(rendered.contains("\"name\": \"fetch\""), "{rendered}");
+    assert!(rendered.contains("\"effects\""), "{rendered}");
+    assert!(rendered.contains("io.net"), "{rendered}");
 }
 
 #[test]

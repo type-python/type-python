@@ -299,6 +299,7 @@ Output files go to `.typepython/build/` by default:
       py.typed             # PEP 561 marker
   cache/
     snapshot.json          # Incremental state
+    effects.json           # Effect/capability sidecar metadata
 ```
 
 ### Watch (rebuild on changes)
