@@ -153,6 +153,34 @@ fn check_warns_when_pure_function_uses_bare_effectful_call_statement() {
 }
 
 #[test]
+fn check_warns_for_effectful_bare_call_statement_with_source_overrides_without_backing_file() {
+    let result = check_virtual_source_with_overrides(
+        concat!(
+            "from typing import Callable\n\n",
+            "def effect(label: str):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@effect(\"io.net\")\n",
+            "def send_metric() -> None:\n",
+            "    ...\n\n",
+            "@effect_pure\n",
+            "def render() -> None:\n",
+            "    send_metric()\n",
+        ),
+        ParseOptions::default(),
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4026"), "{rendered}");
+    assert!(rendered.contains("pure function `render`"), "{rendered}");
+}
+
+#[test]
 fn check_warns_for_qualified_explicit_effect_decorator_surface() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(

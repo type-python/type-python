@@ -168,7 +168,7 @@ pub(super) fn effect_capability_diagnostics(
             ));
         }
     }
-    for call_site in direct_call_context_sites(node) {
+    for call_site in context.load_direct_call_context_sites(node) {
         let Some(owner) = call_site.owner_name.as_deref() else {
             continue;
         };
@@ -191,18 +191,6 @@ pub(super) fn effect_capability_diagnostics(
 
 fn caller_effect_row_allows(caller: Option<&EffectSummary>, required: &EffectRow) -> bool {
     caller.is_some_and(|summary| !summary.pure && summary.row.covers(required))
-}
-
-fn direct_call_context_sites(
-    node: &typepython_graph::ModuleNode,
-) -> Vec<typepython_syntax::DirectCallContextSite> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return Vec::new();
-    }
-    let Ok(source) = std::fs::read_to_string(&node.module_path) else {
-        return Vec::new();
-    };
-    typepython_syntax::collect_direct_call_context_sites(&source)
 }
 
 fn capability_scopes_allow(scopes: &[CapabilityScope], line: usize, row: &EffectRow) -> bool {

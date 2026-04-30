@@ -292,6 +292,13 @@ impl<'a> CheckerContext<'a> {
         self.source_facts.unsafe_operation_sites(node)
     }
 
+    fn load_direct_call_context_sites(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Vec<typepython_syntax::DirectCallContextSite> {
+        self.source_facts.direct_call_context_sites(node)
+    }
+
     fn load_unsafe_capability_ranges(
         &self,
         node: &typepython_graph::ModuleNode,
@@ -1290,7 +1297,7 @@ fn collect_node_call_diagnostics(
     push_diagnostics(diagnostics, direct_call_keyword_diagnostics(context, node, context.nodes));
     push_diagnostics(
         diagnostics,
-        direct_unresolved_paramspec_call_diagnostics(node, context.nodes),
+        direct_unresolved_paramspec_call_diagnostics(context, node, context.nodes),
     );
 }
 

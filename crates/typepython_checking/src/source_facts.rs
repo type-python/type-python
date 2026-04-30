@@ -4,9 +4,9 @@ use typepython_binding::{Declaration, ModuleSurfaceFacts};
 use typepython_graph::ModuleNode;
 use typepython_syntax::{
     ConditionalReturnSite, DataclassTransformModuleInfo, DecoratorTransformModuleInfo,
-    DirectFunctionParamSite, DirectMethodSignatureSite, FrameworkTransformModuleInfo,
-    FrozenFieldMutationSite, ModuleSurfaceMetadata, SourceFile, TypedDictClassMetadata,
-    TypedDictLiteralSite, TypedDictMutationSite, UnsafeOperationSite,
+    DirectCallContextSite, DirectFunctionParamSite, DirectMethodSignatureSite,
+    FrameworkTransformModuleInfo, FrozenFieldMutationSite, ModuleSurfaceMetadata, SourceFile,
+    TypedDictClassMetadata, TypedDictLiteralSite, TypedDictMutationSite, UnsafeOperationSite,
     UnsupportedDualEmitAsyncConstructSite,
 };
 
@@ -27,6 +27,7 @@ struct FallbackModuleSourceFacts {
     typed_dict_mutation_sites: Option<Vec<TypedDictMutationSite>>,
     frozen_field_mutation_sites: Option<Vec<FrozenFieldMutationSite>>,
     unsafe_operation_sites: Option<Vec<UnsafeOperationSite>>,
+    direct_call_context_sites: Option<Vec<DirectCallContextSite>>,
     unsafe_capability_ranges: Option<Vec<(usize, usize)>>,
     conditional_return_sites: Option<Vec<ConditionalReturnSite>>,
     unsupported_dual_emit_async_construct_sites: Option<Vec<UnsupportedDualEmitAsyncConstructSite>>,
@@ -131,6 +132,22 @@ impl FallbackModuleSourceFacts {
         }
 
         self.unsafe_operation_sites.as_deref().unwrap_or(&[])
+    }
+
+    fn direct_call_context_sites(
+        &mut self,
+        node: &ModuleNode,
+        source_overrides: Option<&BTreeMap<String, String>>,
+    ) -> &[DirectCallContextSite] {
+        if self.direct_call_context_sites.is_none() {
+            self.direct_call_context_sites = Some(
+                self.source_text(node, source_overrides)
+                    .map(typepython_syntax::collect_direct_call_context_sites)
+                    .unwrap_or_default(),
+            );
+        }
+
+        self.direct_call_context_sites.as_deref().unwrap_or(&[])
     }
 
     fn unsafe_capability_ranges(
@@ -388,6 +405,15 @@ impl<'a> CheckerSourceFactsProvider<'a> {
     pub(super) fn unsafe_operation_sites(&self, node: &ModuleNode) -> Vec<UnsafeOperationSite> {
         self.with_module_facts(node, |facts| {
             facts.unsafe_operation_sites(node, self.source_overrides).to_vec()
+        })
+    }
+
+    pub(super) fn direct_call_context_sites(
+        &self,
+        node: &ModuleNode,
+    ) -> Vec<DirectCallContextSite> {
+        self.with_module_facts(node, |facts| {
+            facts.direct_call_context_sites(node, self.source_overrides).to_vec()
         })
     }
 

@@ -1627,18 +1627,12 @@ pub(super) fn dataclass_transform_constructor_keyword_diagnostics(
 }
 
 pub(super) fn direct_unresolved_paramspec_call_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return Vec::new();
-    }
-
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return Vec::new();
-    };
-
-    typepython_syntax::collect_direct_call_context_sites(&source)
+    context
+        .load_direct_call_context_sites(node)
         .into_iter()
         .filter_map(|call_site| {
             if let Some((_, function)) = resolve_function_provider_with_node(nodes, node, &call_site.callee)
