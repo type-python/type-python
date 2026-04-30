@@ -135,6 +135,7 @@ fn validate_transform(transform: &AdapterTransform, report: &mut DiagnosticRepor
         "base_class",
         "metaclass",
         "function_to_object_decorator",
+        "function_decorator",
     ]);
     let allowed_targets = BTreeSet::from(["class", "function", "method"]);
     let allowed_capabilities = BTreeSet::from([
@@ -147,6 +148,18 @@ fn validate_transform(transform: &AdapterTransform, report: &mut DiagnosticRepor
         "method_synthesis",
         "function_to_object_replacement",
         "generic_preservation",
+        "taint_source",
+        "taint_sink",
+        "taint_sanitizer",
+        "validator_witness",
+        "effect_unsafe",
+        "effect_io_fs",
+        "effect_io_net",
+        "effect_io_proc",
+        "effect_time",
+        "effect_random",
+        "effect_runtime_validation",
+        "effect_taint_sanitize",
     ]);
     if transform.provider.trim().is_empty() {
         report.push(Diagnostic::error("TPY7003", "adapter transform is missing provider"));

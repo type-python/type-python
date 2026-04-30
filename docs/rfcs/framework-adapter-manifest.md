@@ -60,6 +60,13 @@ preserve_paramspec = true
 preserve_return_type = true
 fallback = "strict_diagnostic"
 
+[[transforms]]
+provider = "toy.http.remote_call"
+kind = "function_decorator"
+target = "function"
+capabilities = ["effect_io_net", "effect_time"]
+fallback = "strict_diagnostic"
+
 [[golden_tests]]
 name = "pydantic-like-package"
 input = "test-fixtures/downstream-checkers/pydantic-like-package/src/app/__init__.tpy"

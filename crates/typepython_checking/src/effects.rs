@@ -51,6 +51,10 @@ impl EffectRow {
         self.effects.insert(effect);
     }
 
+    fn extend(&mut self, other: &EffectRow) {
+        self.effects.extend(other.effects.iter().cloned());
+    }
+
     fn is_empty(&self) -> bool {
         self.effects.is_empty()
     }
@@ -421,6 +425,70 @@ fn adapter_taint_decorators(
         .collect()
 }
 
+fn adapter_effect_rows(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<String, (EffectRow, EffectSource)> {
+    let Some(info) = context.load_framework_transform_module_info(node) else {
+        return BTreeMap::new();
+    };
+    info.providers
+        .into_iter()
+        .filter(|provider| {
+            provider.provider_kind
+                == Some(typepython_syntax::FrameworkTransformProviderKind::FunctionDecorator)
+        })
+        .filter_map(|provider| {
+            let mut row = EffectRow::empty();
+            for capability in &provider.capabilities {
+                if let Some(effect) = framework_capability_effect_kind(capability) {
+                    row.insert(effect);
+                }
+            }
+            (!row.is_empty()).then(|| {
+                (
+                    provider.name.clone(),
+                    (
+                        row,
+                        EffectSource::Decorator(format!(
+                            "framework_transform capability on `{}`",
+                            provider.name
+                        )),
+                    ),
+                )
+            })
+        })
+        .collect()
+}
+
+fn framework_capability_effect_kind(
+    capability: &typepython_syntax::FrameworkTransformCapability,
+) -> Option<EffectKind> {
+    match capability {
+        typepython_syntax::FrameworkTransformCapability::EffectUnsafe => Some(EffectKind::Unsafe),
+        typepython_syntax::FrameworkTransformCapability::EffectIoFs => Some(EffectKind::IoFs),
+        typepython_syntax::FrameworkTransformCapability::EffectIoNet => Some(EffectKind::IoNet),
+        typepython_syntax::FrameworkTransformCapability::EffectIoProc => Some(EffectKind::IoProc),
+        typepython_syntax::FrameworkTransformCapability::EffectTime => Some(EffectKind::Time),
+        typepython_syntax::FrameworkTransformCapability::EffectRandom => Some(EffectKind::Random),
+        typepython_syntax::FrameworkTransformCapability::EffectRuntimeValidation
+        | typepython_syntax::FrameworkTransformCapability::ValidatorWitness => {
+            Some(EffectKind::RuntimeValidation)
+        }
+        typepython_syntax::FrameworkTransformCapability::EffectTaintSanitize
+        | typepython_syntax::FrameworkTransformCapability::TaintSanitizer => {
+            Some(EffectKind::TaintSanitize)
+        }
+        typepython_syntax::FrameworkTransformCapability::TaintSource => {
+            Some(EffectKind::Declared(String::from("taint.source")))
+        }
+        typepython_syntax::FrameworkTransformCapability::TaintSink => {
+            Some(EffectKind::Declared(String::from("taint.sink")))
+        }
+        _ => None,
+    }
+}
+
 fn argument_is_unsanitized_source(
     arg: &typepython_syntax::DirectExprMetadata,
     decorated: &BTreeMap<String, BTreeSet<String>>,
@@ -540,6 +608,7 @@ fn collect_effect_summaries(
     let Some(info) = context.load_decorator_transform_module_info(node) else {
         return Vec::new();
     };
+    let adapter_effects = adapter_effect_rows(context, node);
     info.callables
         .into_iter()
         .filter_map(|site| {
@@ -557,6 +626,12 @@ fn collect_effect_summaries(
                 } else if lifecycle_effect_decorator(short) {
                     row.insert(EffectKind::Declared(String::from("resource.lifecycle")));
                     sources.push(EffectSource::Lifecycle(decorator.clone()));
+                }
+                if let Some((adapter_row, adapter_source)) =
+                    adapter_effects.get(short).or_else(|| adapter_effects.get(decorator.as_str()))
+                {
+                    row.extend(adapter_row);
+                    sources.push(adapter_source.clone());
                 }
             }
             (pure || !row.is_empty()).then_some(EffectSummary {

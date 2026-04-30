@@ -284,7 +284,7 @@ c["name"] = "new"          # TPY4016: Cannot assign to read-only TypedDict key '
 
 #### TPY4026 -- Effect capability mismatch
 
-In strict `.tpy` checking, decorator-declared effect rows are tracked as author-time facts. A function marked `@effect_pure` warns when it directly returns or assigns the result of a callable with an effect decorator such as `@effect_io_net`, `@effect_io_fs`, `@effect_random`, or a lifecycle obligation.
+In strict `.tpy` checking, decorator-declared and adapter-declared effect rows are tracked as author-time facts. A function marked `@effect_pure` warns when it directly returns or assigns the result of a callable with an effect decorator such as `@effect_io_net`, `@effect_io_fs`, `@effect_random`, a function-decorator adapter capability such as `effect_io_net`, or a lifecycle obligation.
 
 ```python
 @effect_io_net
@@ -293,7 +293,7 @@ def fetch() -> str:
 
 @effect_pure
 def parse() -> str:
-value = fetch()       # TPY4026: caller lacks a covering effect row for `io.net`
+    value = fetch()       # TPY4026: caller lacks a covering effect row for `io.net`
     return value
 ```
 

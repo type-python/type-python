@@ -126,6 +126,13 @@ field_collector = "annotated_class_fields"
 constructor = "fields"
 fallback = "strict_diagnostic"
 
+[[transforms]]
+provider = "toy.validation.remote_call"
+kind = "function_decorator"
+target = "function"
+capabilities = ["effect_io_net", "effect_time"]
+fallback = "strict_diagnostic"
+
 [[golden_tests]]
 name = "pydantic-like-package"
 input = "test-fixtures/downstream-checkers/pydantic-like-package/src/app/__init__.tpy"

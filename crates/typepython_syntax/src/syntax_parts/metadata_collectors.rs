@@ -1060,6 +1060,14 @@ pub(super) fn framework_transform_capability(value: &str) -> Option<FrameworkTra
         "taint_sink" => Some(FrameworkTransformCapability::TaintSink),
         "taint_sanitizer" => Some(FrameworkTransformCapability::TaintSanitizer),
         "validator_witness" => Some(FrameworkTransformCapability::ValidatorWitness),
+        "effect_unsafe" => Some(FrameworkTransformCapability::EffectUnsafe),
+        "effect_io_fs" => Some(FrameworkTransformCapability::EffectIoFs),
+        "effect_io_net" => Some(FrameworkTransformCapability::EffectIoNet),
+        "effect_io_proc" => Some(FrameworkTransformCapability::EffectIoProc),
+        "effect_time" => Some(FrameworkTransformCapability::EffectTime),
+        "effect_random" => Some(FrameworkTransformCapability::EffectRandom),
+        "effect_runtime_validation" => Some(FrameworkTransformCapability::EffectRuntimeValidation),
+        "effect_taint_sanitize" => Some(FrameworkTransformCapability::EffectTaintSanitize),
         _ => None,
     }
 }

@@ -507,7 +507,7 @@ typepython adapter validate PATH [OPTIONS]
 | `PATH`             | Adapter manifest to validate        |
 | `--format FORMAT`  | Output format: `text` or `json`     |
 
-The validator accepts only the prototype-safe transform families described in the framework adapter manifest RFC: class decorator, base class, metaclass, function-to-object decorator, field collection, constructor synthesis, descriptor-backed attributes, and literal alias/default/frozen metadata mapping. It rejects unsupported transform kinds, unsafe capabilities, missing compatibility metadata, and golden-test inputs that cannot be found locally.
+The validator accepts only the prototype-safe transform families described in the framework adapter manifest RFC: class decorator, base class, metaclass, function decorator, function-to-object decorator, field collection, constructor synthesis, descriptor-backed attributes, literal alias/default/frozen metadata mapping, taint facts, validator witnesses, and effect/capability facts. It rejects unsupported transform kinds, arbitrary runtime capabilities, missing compatibility metadata, and golden-test inputs that cannot be found locally.
 
 **Example:**
 

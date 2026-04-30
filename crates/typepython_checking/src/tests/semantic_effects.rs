@@ -378,3 +378,38 @@ fn check_warns_when_pure_function_calls_imported_effectful_function() {
 
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn check_uses_framework_adapter_effect_capabilities() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def framework_transform(**kwargs):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "@framework_transform(kind=\"function_decorator\", capabilities=(\"effect_io_net\", \"effect_time\"))\n",
+            "def remote_call[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@remote_call\n",
+            "def fetch() -> str:\n",
+            "    return \"payload\"\n\n",
+            "@effect_pure\n",
+            "def parse() -> str:\n",
+            "    return fetch()\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4026"), "{rendered}");
+    assert!(rendered.contains("effect row `io.net, time`"), "{rendered}");
+    assert!(rendered.contains("framework_transform capability on `remote_call`"), "{rendered}");
+}

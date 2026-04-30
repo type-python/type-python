@@ -95,14 +95,14 @@ The exact parser syntax may evolve, but the metadata model below is the compatib
 
 ## Implementation status
 
-The compiler now has a framework transform metadata channel alongside the existing `dataclass_transform` and callable-decorator transform metadata. `FrameworkTransformModuleInfo` records provider declarations through `FrameworkTransformProviderSite`, `FrameworkTransformProviderKind`, `FrameworkTransformCapability`, and `FrameworkTransformFallback`; binding summaries preserve that channel so later phases can consume provider metadata without reopening source files. Parser collection currently recognizes standard-Python provider decorators such as `@framework_transform(kind="function_to_object_decorator", capabilities=(...), fallback="non_strict_degrade")`. Function-to-object providers that also have ordinary callable signatures can reuse the existing decorated-callable semantic and stub path; broader transform application is intentionally still future work.
+The compiler now has a framework transform metadata channel alongside the existing `dataclass_transform` and callable-decorator transform metadata. `FrameworkTransformModuleInfo` records provider declarations through `FrameworkTransformProviderSite`, `FrameworkTransformProviderKind`, `FrameworkTransformCapability`, and `FrameworkTransformFallback`; binding summaries preserve that channel so later phases can consume provider metadata without reopening source files. Parser collection currently recognizes standard-Python provider decorators such as `@framework_transform(kind="function_to_object_decorator", capabilities=(...), fallback="non_strict_degrade")` and function-decorator effect providers such as `@framework_transform(kind="function_decorator", capabilities=("effect_io_net",))`. Function-to-object providers that also have ordinary callable signatures can reuse the existing decorated-callable semantic and stub path; function-decorator effect providers feed the effect/capability summary path.
 
 ## Minimal metadata model
 
 Every transform provider records:
 
 - provider qualified name and module identity
-- provider kind (`function_to_object_decorator`, `class_decorator`, `base_class`, `metaclass`, `function_callable_transform`)
+- provider kind (`function_decorator`, `function_to_object_decorator`, `class_decorator`, `base_class`, `metaclass`)
 - target declaration kind (`function`, `method`, `class`)
 - static application constraints, including decorator order and generic parameter preservation
 - source span for provider metadata, so diagnostics can point to the declaration that made a claim

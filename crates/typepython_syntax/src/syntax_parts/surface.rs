@@ -166,6 +166,27 @@ mod tests {
         );
         assert_eq!(info.providers[0].fallback, FrameworkTransformFallback::NonStrictDegrade);
     }
+
+    #[test]
+    fn framework_transform_collector_reads_effect_capabilities() {
+        let info = crate::collect_framework_transform_module_info(
+            "@framework_transform(kind=\"function_decorator\", capabilities=(\"effect_io_net\", \"effect_time\"))\ndef remote_call(fn):\n    return fn\n",
+        );
+
+        assert_eq!(info.providers.len(), 1);
+        assert_eq!(info.providers[0].name, "remote_call");
+        assert_eq!(
+            info.providers[0].provider_kind,
+            Some(FrameworkTransformProviderKind::FunctionDecorator),
+        );
+        assert_eq!(
+            info.providers[0].capabilities,
+            vec![
+                FrameworkTransformCapability::EffectIoNet,
+                FrameworkTransformCapability::EffectTime,
+            ],
+        );
+    }
 }
 
 /// Parser output for a source file.
@@ -1118,6 +1139,14 @@ pub enum FrameworkTransformCapability {
     TaintSink,
     TaintSanitizer,
     ValidatorWitness,
+    EffectUnsafe,
+    EffectIoFs,
+    EffectIoNet,
+    EffectIoProc,
+    EffectTime,
+    EffectRandom,
+    EffectRuntimeValidation,
+    EffectTaintSanitize,
 }
 
 /// Fallback behavior when a framework transform cannot be fully resolved statically.

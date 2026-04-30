@@ -386,6 +386,14 @@ fn framework_transform_provider_has_supported_semantics(
                         | typepython_syntax::FrameworkTransformCapability::TaintSink
                         | typepython_syntax::FrameworkTransformCapability::TaintSanitizer
                         | typepython_syntax::FrameworkTransformCapability::ValidatorWitness
+                        | typepython_syntax::FrameworkTransformCapability::EffectUnsafe
+                        | typepython_syntax::FrameworkTransformCapability::EffectIoFs
+                        | typepython_syntax::FrameworkTransformCapability::EffectIoNet
+                        | typepython_syntax::FrameworkTransformCapability::EffectIoProc
+                        | typepython_syntax::FrameworkTransformCapability::EffectTime
+                        | typepython_syntax::FrameworkTransformCapability::EffectRandom
+                        | typepython_syntax::FrameworkTransformCapability::EffectRuntimeValidation
+                        | typepython_syntax::FrameworkTransformCapability::EffectTaintSanitize
                 )
             })
         }
