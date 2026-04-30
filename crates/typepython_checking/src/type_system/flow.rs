@@ -1,4 +1,6 @@
-pub(super) fn apply_guard_narrowing_semantic(
+#[allow(clippy::too_many_arguments)]
+pub(super) fn apply_guard_narrowing_semantic_with_context(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     current_owner_name: Option<&str>,
@@ -41,8 +43,15 @@ pub(super) fn apply_guard_narrowing_semantic(
         .collect::<Vec<_>>();
     if_guards.sort_by_key(|(line, _, _)| *line);
     for (_, branch_true, guard) in if_guards {
-        narrowed =
-            apply_guard_condition_semantic(node, nodes, &narrowed, value_name, guard, branch_true);
+        narrowed = apply_guard_condition_semantic_with_context(
+            context,
+            node,
+            nodes,
+            &narrowed,
+            value_name,
+            guard,
+            branch_true,
+        );
     }
 
     let mut post_if_guards = node
@@ -85,8 +94,15 @@ pub(super) fn apply_guard_narrowing_semantic(
         .collect::<Vec<_>>();
     post_if_guards.sort_by_key(|(line, _, _)| *line);
     for (_, branch_true, guard) in post_if_guards {
-        narrowed =
-            apply_guard_condition_semantic(node, nodes, &narrowed, value_name, guard, branch_true);
+        narrowed = apply_guard_condition_semantic_with_context(
+            context,
+            node,
+            nodes,
+            &narrowed,
+            value_name,
+            guard,
+            branch_true,
+        );
     }
 
     let mut asserts = node
@@ -109,7 +125,15 @@ pub(super) fn apply_guard_narrowing_semantic(
         .collect::<Vec<_>>();
     asserts.sort_by_key(|(line, _)| *line);
     for (_, guard) in asserts {
-        narrowed = apply_guard_condition_semantic(node, nodes, &narrowed, value_name, guard, true);
+        narrowed = apply_guard_condition_semantic_with_context(
+            context,
+            node,
+            nodes,
+            &narrowed,
+            value_name,
+            guard,
+            true,
+        );
     }
 
     narrowed
@@ -181,6 +205,27 @@ pub(super) fn apply_guard_condition_semantic(
     guard: &typepython_binding::GuardConditionSite,
     branch_true: bool,
 ) -> SemanticType {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    apply_guard_condition_semantic_with_context(
+        &context,
+        node,
+        nodes,
+        base_type,
+        value_name,
+        guard,
+        branch_true,
+    )
+}
+
+pub(super) fn apply_guard_condition_semantic_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    base_type: &SemanticType,
+    value_name: &str,
+    guard: &typepython_binding::GuardConditionSite,
+    branch_true: bool,
+) -> SemanticType {
     match guard {
         typepython_binding::GuardConditionSite::IsNone { name, negated } if name == value_name => {
             match (branch_true, negated) {
@@ -203,24 +248,42 @@ pub(super) fn apply_guard_condition_semantic(
         typepython_binding::GuardConditionSite::PredicateCall { name, callee }
             if name == value_name =>
         {
-            apply_predicate_guard_semantic(node, nodes, base_type, callee, branch_true)
+            apply_predicate_guard_semantic_with_context(
+                context,
+                node,
+                nodes,
+                base_type,
+                callee,
+                branch_true,
+            )
         }
         typepython_binding::GuardConditionSite::TruthyName { name } if name == value_name => {
             apply_truthy_semantic_narrowing(base_type, branch_true)
         }
         typepython_binding::GuardConditionSite::Not(inner) => {
-            apply_guard_condition_semantic(node, nodes, base_type, value_name, inner, !branch_true)
+            apply_guard_condition_semantic_with_context(
+                context,
+                node,
+                nodes,
+                base_type,
+                value_name,
+                inner,
+                !branch_true,
+            )
         }
         typepython_binding::GuardConditionSite::And(parts) => {
             if branch_true {
                 parts.iter().fold(base_type.clone(), |current, part| {
-                    apply_guard_condition_semantic(node, nodes, &current, value_name, part, true)
+                    apply_guard_condition_semantic_with_context(
+                        context, node, nodes, &current, value_name, part, true,
+                    )
                 })
             } else {
                 let mut joined = Vec::new();
                 let mut current_true = base_type.clone();
                 for part in parts {
-                    joined.push(apply_guard_condition_semantic(
+                    joined.push(apply_guard_condition_semantic_with_context(
+                        context,
                         node,
                         nodes,
                         &current_true,
@@ -228,7 +291,8 @@ pub(super) fn apply_guard_condition_semantic(
                         part,
                         false,
                     ));
-                    current_true = apply_guard_condition_semantic(
+                    current_true = apply_guard_condition_semantic_with_context(
+                        context,
                         node,
                         nodes,
                         &current_true,
@@ -245,7 +309,8 @@ pub(super) fn apply_guard_condition_semantic(
                 let mut joined = Vec::new();
                 let mut current_false = base_type.clone();
                 for part in parts {
-                    joined.push(apply_guard_condition_semantic(
+                    joined.push(apply_guard_condition_semantic_with_context(
+                        context,
                         node,
                         nodes,
                         &current_false,
@@ -253,7 +318,8 @@ pub(super) fn apply_guard_condition_semantic(
                         part,
                         true,
                     ));
-                    current_false = apply_guard_condition_semantic(
+                    current_false = apply_guard_condition_semantic_with_context(
+                        context,
                         node,
                         nodes,
                         &current_false,
@@ -265,7 +331,9 @@ pub(super) fn apply_guard_condition_semantic(
                 join_semantic_type_candidates(joined)
             } else {
                 parts.iter().fold(base_type.clone(), |current, part| {
-                    apply_guard_condition_semantic(node, nodes, &current, value_name, part, false)
+                    apply_guard_condition_semantic_with_context(
+                        context, node, nodes, &current, value_name, part, false,
+                    )
                 })
             }
         }
@@ -280,7 +348,21 @@ pub(super) fn apply_predicate_guard_semantic(
     callee: &str,
     branch_true: bool,
 ) -> SemanticType {
-    let Some((kind, guarded_type, trusted_witness)) = parse_guard_return_kind_semantic(node, nodes, callee) else {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    apply_predicate_guard_semantic_with_context(&context, node, nodes, base_type, callee, branch_true)
+}
+
+pub(super) fn apply_predicate_guard_semantic_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    base_type: &SemanticType,
+    callee: &str,
+    branch_true: bool,
+) -> SemanticType {
+    let Some((kind, guarded_type, trusted_witness)) =
+        parse_guard_return_kind_semantic_with_context(context, node, nodes, callee)
+    else {
         return base_type.clone();
     };
     match (kind.as_str(), branch_true) {
@@ -299,6 +381,7 @@ pub(super) fn apply_predicate_guard_semantic(
 }
 
 pub(super) fn validator_witness_trust_boundary_note(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     current_owner_name: Option<&str>,
@@ -322,7 +405,8 @@ pub(super) fn validator_witness_trust_boundary_note(
             if name != value_name {
                 return None;
             }
-            let (kind, _, trusted_witness) = parse_guard_return_kind_semantic(node, nodes, callee)?;
+            let (kind, _, trusted_witness) =
+                parse_guard_return_kind_semantic_with_context(context, node, nodes, callee)?;
             if kind != "ValidatorWitness" {
                 return None;
             }
@@ -449,14 +533,17 @@ mod tests {
     }
 }
 
-pub(super) fn parse_guard_return_kind_semantic(
+pub(super) fn parse_guard_return_kind_semantic_with_context(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<(String, SemanticType, bool)> {
     let function = resolve_direct_function(node, nodes, callee)?;
     let returns = declaration_signature_return_semantic_type(function)?;
-    if let Some(guarded_type) = generated_validator_witness_type(node, function, &returns) {
+    if let Some(guarded_type) =
+        generated_validator_witness_type(context, node, function, &returns)
+    {
         return Some((String::from("ValidatorWitness"), guarded_type, true));
     }
     if let SemanticType::Generic { head, args } = returns.strip_annotated()
@@ -467,7 +554,7 @@ pub(super) fn parse_guard_return_kind_semantic(
         }
         if head == "ValidatorWitness" && matches!(args.len(), 1 | 2) {
             let trusted = validator_witness_return_is_trusted(args)
-                || validator_witness_trusted_by_boundary_metadata(node, function);
+                || validator_witness_trusted_by_boundary_metadata(context, node, function);
             return Some((head.clone(), args[0].clone(), trusted));
         }
     }
@@ -475,6 +562,7 @@ pub(super) fn parse_guard_return_kind_semantic(
 }
 
 fn generated_validator_witness_type(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     function: &Declaration,
     returns: &SemanticType,
@@ -482,18 +570,19 @@ fn generated_validator_witness_type(
     if !matches!(returns.strip_annotated(), SemanticType::Name(name) if name == "bool") {
         return None;
     }
-    validator_decorators_for_function(node, function).into_iter().find_map(|decorator| {
+    validator_decorators_for_function(context, node, function).into_iter().find_map(|decorator| {
         let metadata = validator_decorator_metadata(&decorator)?;
         validator_trust_marker(metadata.trust).then(|| lower_type_text_or_name(metadata.target))
     })
 }
 
 fn validator_witness_trusted_by_boundary_metadata(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     function: &Declaration,
 ) -> bool {
-    let provider_names = validator_witness_provider_names(node);
-    validator_decorators_for_function(node, function).into_iter().any(|decorator| {
+    let provider_names = validator_witness_provider_names(context, node);
+    validator_decorators_for_function(context, node, function).into_iter().any(|decorator| {
         let name = decorator.split_once(':').map_or(decorator.as_str(), |(name, _)| name);
         provider_names.contains(name)
     })
@@ -505,17 +594,14 @@ struct ValidatorDecoratorMetadata<'a> {
 }
 
 fn validator_decorators_for_function(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     function: &Declaration,
 ) -> Vec<String> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return Vec::new();
-    }
-    let Ok(source) = std::fs::read_to_string(&node.module_path) else {
+    let Some(info) = context.load_decorator_transform_module_info(node) else {
         return Vec::new();
     };
-    typepython_syntax::collect_module_surface_metadata(&source)
-        .decorator_transform
+    info
         .callables
         .into_iter()
         .find(|site| site.owner_type_name.is_none() && site.name == function.name)
@@ -523,15 +609,14 @@ fn validator_decorators_for_function(
         .unwrap_or_default()
 }
 
-fn validator_witness_provider_names(node: &typepython_graph::ModuleNode) -> BTreeSet<String> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return BTreeSet::new();
-    }
-    let Ok(source) = std::fs::read_to_string(&node.module_path) else {
+fn validator_witness_provider_names(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> BTreeSet<String> {
+    let Some(info) = context.load_framework_transform_module_info(node) else {
         return BTreeSet::new();
     };
-    typepython_syntax::collect_module_surface_metadata(&source)
-        .framework_transform
+    info
         .providers
         .into_iter()
         .filter(|provider| {

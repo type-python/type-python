@@ -622,7 +622,8 @@ pub(super) fn resolve_direct_name_reference_semantic_type_with_context(
         current_line,
         value_name,
     )?;
-    let narrowed = apply_guard_narrowing_semantic(
+    let narrowed = apply_guard_narrowing_semantic_with_context(
+        context,
         node,
         nodes,
         current_owner_name,

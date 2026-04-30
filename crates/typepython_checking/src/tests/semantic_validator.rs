@@ -44,6 +44,35 @@ fn check_trust_metadata_decorator_produces_generated_witness() {
 }
 
 #[test]
+fn check_trust_metadata_decorator_uses_source_overrides_without_backing_file() {
+    let result = check_virtual_source_with_overrides(
+        concat!(
+            "from typing import Callable\n\n",
+            "class User:\n",
+            "    name: str\n",
+            "    def greet(self) -> str:\n",
+            "        return self.name\n\n",
+            "def validator[T](target: type[T], trust: str):\n",
+            "    def wrap[**P](fn: Callable[P, bool]) -> Callable[P, bool]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "@validator(User, trust=\"generated\")\n",
+            "def validate_user(value: unknown) -> bool:\n",
+            "    ...\n\n",
+            "def handle(value: unknown) -> str:\n",
+            "    if validate_user(value):\n",
+            "        return value.greet()\n",
+            "    return \"\"\n",
+        ),
+        ParseOptions::default(),
+        false,
+        false,
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_adapter_declared_validator_witness_trusts_one_arg_witness() {
     let result = check_temp_typepython_source(concat!(
         "class User:\n",
@@ -65,6 +94,37 @@ fn check_adapter_declared_validator_witness_trusts_one_arg_witness() {
         "        return value.greet()\n",
         "    return \"\"\n",
     ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_adapter_declared_validator_witness_uses_source_overrides_without_backing_file() {
+    let result = check_virtual_source_with_overrides(
+        concat!(
+            "class User:\n",
+            "    name: str\n",
+            "    def greet(self) -> str:\n",
+            "        return self.name\n\n",
+            "def framework_transform(*args, **kwargs):\n",
+            "    def wrap(obj):\n",
+            "        return obj\n",
+            "    return wrap\n\n",
+            "@framework_transform(kind=\"function_decorator\", capabilities=(\"validator_witness\",))\n",
+            "def trusted_boundary(fn):\n",
+            "    return fn\n\n",
+            "@trusted_boundary\n",
+            "def validate_user(value: unknown) -> ValidatorWitness[User]:\n",
+            "    ...\n\n",
+            "def handle(value: unknown) -> str:\n",
+            "    if validate_user(value):\n",
+            "        return value.greet()\n",
+            "    return \"\"\n",
+        ),
+        ParseOptions::default(),
+        false,
+        false,
+    );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }

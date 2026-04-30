@@ -1051,6 +1051,7 @@ pub(super) fn direct_unknown_operation_diagnostics(
                 ),
             );
             if let Some(note) = validator_witness_trust_boundary_note(
+                context,
                 node,
                 nodes,
                 access.current_owner_name.as_deref(),
@@ -1085,6 +1086,7 @@ pub(super) fn direct_unknown_operation_diagnostics(
                 ),
             );
             if let Some(note) = validator_witness_trust_boundary_note(
+                context,
                 node,
                 nodes,
                 call.current_owner_name.as_deref(),
