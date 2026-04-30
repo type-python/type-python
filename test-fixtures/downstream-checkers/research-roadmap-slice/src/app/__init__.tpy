@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 
 class UserRecord(TypedDict):
@@ -13,3 +13,11 @@ typealias FrozenUser = MapValues[UserRecord, Readonly]
 
 def expose_user(user: UserRecord) -> UserRecord:
     return {"id": user["id"], "name": user["name"], "email": user["email"]}
+
+
+def request_body() -> Tainted[str, "html"]:
+    ...
+
+
+def validate_user_record(value: unknown) -> ValidatorWitness[UserRecord, Literal["trusted"]]:
+    ...

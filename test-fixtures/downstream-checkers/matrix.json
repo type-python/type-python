@@ -117,7 +117,9 @@
           "class UserRecord(TypedDict):",
           "UserKeys: TypeAlias = Literal[\"email\", \"id\", \"name\"]",
           "class FrozenUser(TypedDict):",
-          "id: ReadOnly[int]"
+          "id: ReadOnly[int]",
+          "def request_body() -> str: ...",
+          "def validate_user_record(value: object) -> bool: ..."
         ]
       }
     },
