@@ -268,6 +268,42 @@ fn hover_renders_effect_summary_for_decorated_callable() {
 }
 
 #[test]
+fn hover_renders_effect_summary_for_adapter_declared_callable() {
+    let config = temp_workspace(
+        "hover_renders_effect_summary_for_adapter_declared_callable",
+        &[(
+            "src/app/__init__.tpy",
+            concat!(
+                "from typing import Callable\n\n",
+                "def framework_transform(**kwargs):\n",
+                "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+                "        return fn\n",
+                "    return wrap\n\n",
+                "@framework_transform(kind=\"function_decorator\", capabilities=(\"effect_io_net\", \"effect_time\"))\n",
+                "def remote_call[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+                "    return fn\n\n",
+                "@remote_call\n",
+                "def fetch() -> str:\n",
+                "    return \"ok\"\n",
+            ),
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let hover = server
+        .handle_hover(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 12, "character": 5}
+        }))
+        .expect("hover should succeed");
+    let contents = hover["contents"]["value"].as_str().expect("hover contents should be text");
+
+    assert!(contents.contains("function fetch"), "{contents}");
+    assert!(contents.contains("Effect summary: row [io.net, time]"), "{contents}");
+}
+
+#[test]
 fn hover_renders_restricted_type_level_alias_reduction() {
     let config = temp_workspace(
         "hover_renders_restricted_type_level_alias_reduction",

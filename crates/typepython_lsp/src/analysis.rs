@@ -546,6 +546,8 @@ fn effect_summary_hover_detail(
     }
     let document = workspace.queries.documents_by_module_key.get(&node.module_key)?;
     let decorator_info = typepython_syntax::collect_decorator_transform_module_info(&document.text);
+    let framework_info = typepython_syntax::collect_framework_transform_module_info(&document.text);
+    let adapter_effects = framework_effect_labels_by_provider(&framework_info);
     let site = decorator_info.callables.iter().find(|site| {
         site.name == declaration.name
             && site.owner_type_name.as_deref()
@@ -597,6 +599,11 @@ fn effect_summary_hover_detail(
             }
             _ => {}
         }
+        if let Some(adapter_labels) =
+            adapter_effects.get(short).or_else(|| adapter_effects.get(decorator.as_str()))
+        {
+            effects.extend(adapter_labels.iter().copied());
+        }
     }
     if !pure && effects.is_empty() {
         return None;
@@ -615,6 +622,48 @@ fn effect_summary_hover_detail(
 fn effect_label_from_decorator(decorator: &str) -> Option<&str> {
     let (target, label) = decorator.split_once(':')?;
     (target.rsplit('.').next() == Some("effect") && !label.is_empty()).then_some(label)
+}
+
+fn framework_effect_labels_by_provider(
+    info: &typepython_syntax::FrameworkTransformModuleInfo,
+) -> BTreeMap<String, Vec<&'static str>> {
+    info.providers
+        .iter()
+        .filter(|provider| {
+            provider.provider_kind
+                == Some(typepython_syntax::FrameworkTransformProviderKind::FunctionDecorator)
+        })
+        .filter_map(|provider| {
+            let labels = provider
+                .capabilities
+                .iter()
+                .filter_map(framework_capability_effect_label)
+                .collect::<Vec<_>>();
+            (!labels.is_empty()).then(|| (provider.name.clone(), labels))
+        })
+        .collect()
+}
+
+fn framework_capability_effect_label(
+    capability: &typepython_syntax::FrameworkTransformCapability,
+) -> Option<&'static str> {
+    match capability {
+        typepython_syntax::FrameworkTransformCapability::EffectUnsafe => Some("unsafe"),
+        typepython_syntax::FrameworkTransformCapability::EffectIoFs => Some("io.fs"),
+        typepython_syntax::FrameworkTransformCapability::EffectIoNet => Some("io.net"),
+        typepython_syntax::FrameworkTransformCapability::EffectIoProc => Some("io.proc"),
+        typepython_syntax::FrameworkTransformCapability::EffectTime => Some("time"),
+        typepython_syntax::FrameworkTransformCapability::EffectRandom => Some("random"),
+        typepython_syntax::FrameworkTransformCapability::EffectRuntimeValidation
+        | typepython_syntax::FrameworkTransformCapability::ValidatorWitness => {
+            Some("runtime.validation")
+        }
+        typepython_syntax::FrameworkTransformCapability::EffectTaintSanitize
+        | typepython_syntax::FrameworkTransformCapability::TaintSanitizer => Some("taint.sanitize"),
+        typepython_syntax::FrameworkTransformCapability::TaintSource => Some("taint.source"),
+        typepython_syntax::FrameworkTransformCapability::TaintSink => Some("taint.sink"),
+        _ => None,
+    }
 }
 
 fn resolve_projected_hover_shape(
