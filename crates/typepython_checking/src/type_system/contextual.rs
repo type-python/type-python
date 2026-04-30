@@ -200,7 +200,10 @@ pub(super) fn resolve_known_typed_dict_shape_from_type_with_context(
     type_name: &str,
 ) -> Option<TypedDictShape> {
     let type_name = annotated_inner(type_name).unwrap_or_else(|| normalize_type_text(type_name));
-    resolve_known_typed_dict_shape_with_context(context, node, nodes, &type_name)
+    resolve_known_typed_dict_shape_with_context(context, node, nodes, &type_name).or_else(|| {
+        resolve_known_shape_from_type_alias_with_context(context, node, nodes, &type_name)
+            .map(|shape| TypedDictShape::from_shape(&shape))
+    })
 }
 
 pub(super) fn resolve_known_typed_dict_shape_with_context(
@@ -243,39 +246,175 @@ pub(crate) fn resolve_known_shape_from_type_with_context(
     nodes: &[typepython_graph::ModuleNode],
     type_name: &str,
 ) -> Option<Shape> {
-    if let Some(shape) =
-        resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, type_name)
+    let type_name = annotated_inner(type_name).unwrap_or_else(|| normalize_type_text(type_name));
+    if let Some(shape) = resolve_known_typed_dict_shape_with_context(context, node, nodes, &type_name)
     {
         return Some(Shape::from_typed_dict_shape(&shape));
     }
 
     if let Some(shape) =
-        resolve_known_plain_dataclass_shape_from_type_with_context(context, node, nodes, type_name)
+        resolve_known_plain_dataclass_shape_from_type_with_context(context, node, nodes, &type_name)
     {
         return Some(Shape::from_dataclass_transform_class_shape(
-            type_name,
+            &type_name,
             &shape,
             ShapeSourceKind::Dataclass,
         ));
     }
 
     if let Some(shape) =
-        resolve_known_dataclass_transform_shape_from_type_with_context(context, node, nodes, type_name)
+        resolve_known_dataclass_transform_shape_from_type_with_context(
+            context, node, nodes, &type_name,
+        )
     {
         return Some(Shape::from_dataclass_transform_class_shape(
-            type_name,
+            &type_name,
             &shape,
             ShapeSourceKind::DataclassTransform,
         ));
     }
 
-    resolve_known_framework_transform_shape_from_type_with_context(context, node, nodes, type_name)
+    resolve_known_framework_transform_shape_from_type_with_context(context, node, nodes, &type_name)
         .map(|shape| {
             Shape::from_dataclass_transform_class_shape(
-                type_name,
+                &type_name,
                 &shape,
                 ShapeSourceKind::FrameworkTransform,
             )
+        })
+        .or_else(|| resolve_known_shape_from_type_alias_with_context(context, node, nodes, &type_name))
+}
+
+fn resolve_known_shape_from_type_alias_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    type_name: &str,
+) -> Option<Shape> {
+    let (alias_node, alias_decl) = resolve_direct_type_alias(nodes, node, type_name)?;
+    let alias = declaration_type_alias_semantics(alias_decl)?;
+    let mut shape = resolve_shape_from_semantic_type_with_context(context, alias_node, nodes, &alias.body)?;
+    shape.name = type_name.to_owned();
+    shape.nominal_owner = Some(type_name.to_owned());
+    Some(shape)
+}
+
+fn resolve_shape_from_semantic_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    ty: &SemanticType,
+) -> Option<Shape> {
+    match ty.strip_annotated() {
+        SemanticType::Generic { head, args }
+            if matches!(
+                head.as_str(),
+                "Partial" | "Required_" | "Readonly" | "Mutable" | "Pick" | "Omit" | "MapValues"
+            ) =>
+        {
+            let base = args.first()?;
+            let shape = resolve_shape_from_semantic_type_with_context(context, node, nodes, base)?;
+            match head.as_str() {
+                "Partial" => Some(shape.partial()),
+                "Required_" => Some(shape.required_fields()),
+                "Readonly" => Some(shape.readonly_fields()),
+                "Mutable" => Some(shape.mutable_fields()),
+                "Pick" => {
+                    let keys = semantic_transform_keys(&args[1..])?;
+                    let refs = keys.iter().map(String::as_str).collect::<Vec<_>>();
+                    Some(shape.pick(&refs))
+                }
+                "Omit" => {
+                    let keys = semantic_transform_keys(&args[1..])?;
+                    let refs = keys.iter().map(String::as_str).collect::<Vec<_>>();
+                    Some(shape.omit(&refs))
+                }
+                "MapValues" => {
+                    let wrapper = args.get(1).map(render_semantic_type)?;
+                    shape.map_values(&wrapper)
+                }
+                _ => None,
+            }
+        }
+        other => {
+            let owner = semantic_nominal_owner_name(other)?;
+            resolve_known_typed_dict_shape_with_context(context, node, nodes, &owner)
+                .map(|shape| Shape::from_typed_dict_shape(&shape))
+                .or_else(|| {
+                    resolve_known_plain_dataclass_shape_from_type_with_context(
+                        context, node, nodes, &owner,
+                    )
+                    .map(|shape| {
+                        Shape::from_dataclass_transform_class_shape(
+                            &owner,
+                            &shape,
+                            ShapeSourceKind::Dataclass,
+                        )
+                    })
+                })
+                .or_else(|| {
+                    resolve_known_dataclass_transform_shape_from_type_with_context(
+                        context, node, nodes, &owner,
+                    )
+                    .map(|shape| {
+                        Shape::from_dataclass_transform_class_shape(
+                            &owner,
+                            &shape,
+                            ShapeSourceKind::DataclassTransform,
+                        )
+                    })
+                })
+                .or_else(|| {
+                    resolve_known_framework_transform_shape_from_type_with_context(
+                        context, node, nodes, &owner,
+                    )
+                    .map(|shape| {
+                        Shape::from_dataclass_transform_class_shape(
+                            &owner,
+                            &shape,
+                            ShapeSourceKind::FrameworkTransform,
+                        )
+                    })
+                })
+        }
+    }
+}
+
+fn semantic_transform_keys(args: &[SemanticType]) -> Option<Vec<String>> {
+    if args.len() == 1 {
+        semantic_key_set(&args[0])
+    } else {
+        args.iter().map(semantic_string_literal).collect()
+    }
+}
+
+fn semantic_key_set(ty: &SemanticType) -> Option<Vec<String>> {
+    match ty.strip_annotated() {
+        SemanticType::Generic { head, args } if head == "Literal" => {
+            args.iter().map(semantic_string_literal).collect()
+        }
+        SemanticType::Union(branches) => {
+            let mut keys = Vec::new();
+            for branch in branches {
+                keys.extend(semantic_key_set(branch)?);
+            }
+            Some(keys)
+        }
+        other => semantic_string_literal(other).map(|key| vec![key]),
+    }
+}
+
+fn semantic_string_literal(ty: &SemanticType) -> Option<String> {
+    let rendered = render_semantic_type(ty);
+    rendered
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .map(str::to_owned)
+        .or_else(|| {
+            rendered
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+                .map(str::to_owned)
         })
 }
 

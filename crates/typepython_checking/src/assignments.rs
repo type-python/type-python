@@ -531,6 +531,43 @@ impl TypedDictExtraItemsShape {
     }
 }
 
+impl TypedDictShape {
+    pub(crate) fn from_shape(shape: &Shape) -> Self {
+        Self {
+            name: shape.name.clone(),
+            fields: shape
+                .fields
+                .iter()
+                .map(|field| {
+                    (
+                        field.public_alias.clone(),
+                        TypedDictFieldShape {
+                            value_type: field
+                                .semantic_type
+                                .as_ref()
+                                .map(render_semantic_type)
+                                .unwrap_or_else(|| String::from("object")),
+                            value_type_expr: None,
+                            required: field.required,
+                            readonly: field.readonly,
+                        },
+                    )
+                })
+                .collect(),
+            closed: shape.closed,
+            extra_items: shape.extra_items.as_ref().map(|extra| TypedDictExtraItemsShape {
+                value_type: extra
+                    .semantic_type
+                    .as_ref()
+                    .map(render_semantic_type)
+                    .unwrap_or_else(|| String::from("object")),
+                value_type_expr: None,
+                readonly: extra.readonly,
+            }),
+        }
+    }
+}
+
 impl DataclassTransformFieldShape {
     #[must_use]
     pub(crate) fn rendered_annotation(&self) -> String {
@@ -701,6 +738,28 @@ impl Shape {
                     field
                 }),
         )
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn map_values(&self, wrapper: &str) -> Option<Self> {
+        match wrapper {
+            "Optional" => {
+                Some(self.with_projected_fields(self.fields.iter().cloned().map(|mut field| {
+                    let inner = field
+                        .semantic_type
+                        .take()
+                        .unwrap_or_else(|| SemanticType::Name(String::from("object")));
+                    field.semantic_type = Some(SemanticType::Generic {
+                        head: String::from("Optional"),
+                        args: vec![inner],
+                    });
+                    field.source_kind = ShapeFieldSourceKind::ProjectionGenerated;
+                    field
+                })))
+            }
+            "Readonly" | "ReadOnly" => Some(self.readonly_fields()),
+            _ => None,
+        }
     }
 
     fn with_projected_fields(&self, fields: impl IntoIterator<Item = ShapeField>) -> Self {
