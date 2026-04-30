@@ -13,7 +13,7 @@ This slice models taint as a real TypePython author-time qualifier without chang
 - `Tainted[T, C]` is assignable to `Tainted[U, C]` only when `T` is assignable to `U` and the context matches.
 - `Tainted[T, C]` is not assignable to plain `T`.
 - Plain `T` is not assignable to `Tainted[T, C]`.
-- `@source`, `@sink`, and `@sanitizer` decorators are recognized as TypePython effect facts for the vertical slice.
+- `@source`, `@sink`, and `@sanitizer` decorators are recognized as TypePython effect facts for the vertical slice, and those facts survive TypePython module imports through the public effect summary channel.
 - Passing a direct `@source` result to a direct `@sink` call is rejected with `TPY4028` even when both signatures use plain runtime types; local assignments carry that taint forward inside the module slice, and assigning through a `@sanitizer` callable clears the source-to-sink diagnostic.
 - Top-like checker escape hatches (`Any`, `unknown`, `dynamic`) keep their existing behavior.
 
@@ -36,4 +36,4 @@ render_html(raw)                # TPY4001 or TPY4028, depending on whether the f
 render_html(escape_html(body())) # accepted
 ```
 
-Framework adapters can use the same `@source`, `@sink`, and `@sanitizer` vocabulary for FastAPI-style request bodies, template/HTML sinks, and escaping helpers without introducing runtime TypePython artifacts.
+Framework adapters can use the same `@source`, `@sink`, and `@sanitizer` vocabulary for FastAPI-style request bodies, template/HTML sinks, and escaping helpers without introducing runtime TypePython artifacts. Source, sink, and sanitizer declarations may live in a framework shim module while application code imports and composes them; the checker consumes the imported taint facts from effect summaries.

@@ -327,6 +327,10 @@ fn taint_source_sink_diagnostics(
             (name, decorators)
         })
         .collect::<BTreeMap<_, _>>();
+    let mut decorated = decorated;
+    for (name, facts) in imported_taint_decorators(context, node) {
+        decorated.entry(name).or_default().extend(facts);
+    }
     let mut diagnostics = Vec::new();
     let mut tainted_locals: BTreeMap<Option<String>, BTreeSet<String>> = BTreeMap::new();
     let owner_ranges = owner_line_ranges(node);
@@ -423,6 +427,54 @@ fn adapter_taint_decorators(
             Some((provider.name, taint_fact.to_owned()))
         })
         .collect()
+}
+
+fn imported_taint_decorators(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<String, BTreeSet<String>> {
+    node.declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_none())
+        .filter(|declaration| declaration.kind == DeclarationKind::Import)
+        .filter_map(|declaration| {
+            let target = resolve_imported_symbol_semantic_target_from_declaration(
+                context.nodes,
+                declaration,
+            )?;
+            let target_declaration = target.declaration_target()?;
+            if target_declaration.owner.is_some()
+                || target_declaration.kind != DeclarationKind::Function
+            {
+                return None;
+            }
+            let fact =
+                collect_effect_summary_facts(context, target.provider_node).into_iter().find(
+                    |fact| fact.owner_type_name.is_none() && fact.name == target_declaration.name,
+                )?;
+            let facts = taint_decorator_facts_from_effect_summary(&fact);
+            (!facts.is_empty()).then(|| (declaration.name.clone(), facts))
+        })
+        .collect()
+}
+
+fn taint_decorator_facts_from_effect_summary(fact: &SummaryEffectFact) -> BTreeSet<String> {
+    let mut facts = BTreeSet::new();
+    for effect in &fact.effects {
+        match effect.as_str() {
+            "taint.source" => {
+                facts.insert(String::from("source"));
+            }
+            "taint.sink" => {
+                facts.insert(String::from("sink"));
+            }
+            "taint.sanitize" => {
+                facts.insert(String::from("sanitizer"));
+            }
+            _ => {}
+        }
+    }
+    facts
 }
 
 fn adapter_effect_rows(
