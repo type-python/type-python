@@ -2636,6 +2636,47 @@ fn lower_reduces_key_set_type_level_aliases() {
 }
 
 #[test]
+fn lower_expands_literal_key_shape_transforms() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("type-level-literal-keys.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "from typing import Literal, TypedDict\n",
+            "class User(TypedDict):\n",
+            "    id: int\n",
+            "    name: str\n",
+            "    email: str\n\n",
+            "typealias PublicUser = Pick[User, Literal[\"id\", \"name\"]]\n",
+            "typealias UserWithoutEmail = Omit[User, Literal[\"email\"]]\n",
+        )),
+    });
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+
+    assert!(!lowered.diagnostics.has_errors(), "{}", lowered.diagnostics.as_text());
+    assert!(lowered.module.python_source.contains("class PublicUser(TypedDict):"));
+    assert!(lowered.module.python_source.contains("    id: int"));
+    assert!(lowered.module.python_source.contains("    name: str"));
+    assert!(lowered.module.python_source.contains("class UserWithoutEmail(TypedDict):"));
+    assert!(lowered.module.python_source.contains("    id: int"));
+    assert!(lowered.module.python_source.contains("    name: str"));
+    let public_start = lowered
+        .module
+        .python_source
+        .find("class PublicUser")
+        .expect("PublicUser should be emitted");
+    let without_email_start = lowered
+        .module
+        .python_source
+        .find("class UserWithoutEmail")
+        .expect("UserWithoutEmail should be emitted");
+    assert!(!lowered.module.python_source[public_start..without_email_start].contains("email"));
+    assert!(!lowered.module.python_source[without_email_start..].contains("email: str"));
+    assert!(!lowered.module.python_source.contains("PublicUser: TypeAlias = Pick"));
+    assert!(!lowered.module.python_source.contains("UserWithoutEmail: TypeAlias = Omit"));
+}
+
+#[test]
 fn lower_fail_closes_unreduced_restricted_type_level_aliases() {
     let tree = parse(SourceFile {
         path: PathBuf::from("type-level-unsupported.tpy"),

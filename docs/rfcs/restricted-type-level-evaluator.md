@@ -16,6 +16,7 @@ TypePython needs a small, terminating type-level evaluator before conditional or
 - `Pick[ShapeLike, Literal[...]]` and `Omit[ShapeLike, Literal[...]]` project a known Shape's key set through the shared shape operations.
 - `RequiredKeys[ShapeLike]` and `OptionalKeys[ShapeLike]` partition a known Shape by requiredness.
 - `MapValues[ShapeLike, F]` accepts the initial built-in wrapper set (`Optional`, `Readonly`) and fails closed for unsupported wrappers.
+- `Pick` / `Omit` accept both legacy quoted-key arguments and `Literal[...]` key sets, so checker examples such as `Pick[User, Literal["id"]]` lower through the same standard TypedDict materialization path.
 
 Unsupported or failed reductions now surface as `TPY4027` instead of being silently ignored. This keeps the evaluator fail-closed: a type-level alias must reduce to standard Python typing, or the checker reports the exact unsupported/ill-formed form.
 

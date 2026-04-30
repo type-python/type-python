@@ -185,12 +185,18 @@ fn apply_transform_to_shape(
         "Readonly" => shape.readonly_fields(),
         "Mutable" => shape.mutable_fields(),
         "Pick" => {
-            let keys = key_args.iter().map(|s| transform_key_name(s)).collect::<Vec<_>>();
+            let keys = key_args
+                .iter()
+                .flat_map(|key_arg| transform_key_names(key_arg))
+                .collect::<Vec<_>>();
             let keys = keys.iter().map(String::as_str).collect::<Vec<_>>();
             shape.pick(&keys)
         }
         "Omit" => {
-            let keys = key_args.iter().map(|s| transform_key_name(s)).collect::<Vec<_>>();
+            let keys = key_args
+                .iter()
+                .flat_map(|key_arg| transform_key_names(key_arg))
+                .collect::<Vec<_>>();
             let keys = keys.iter().map(String::as_str).collect::<Vec<_>>();
             shape.omit(&keys)
         }
@@ -395,8 +401,8 @@ fn collect_typed_dict_transform_diagnostics(
         .collect();
     key_args
         .iter()
-        .filter_map(|key_arg| {
-            let key = transform_key_name(key_arg);
+        .flat_map(|key_arg| transform_key_specs(key_arg))
+        .filter_map(|(key, raw_key_arg)| {
             (!field_names.contains(key.as_str())).then(|| {
                 typed_dict_transform_error(
                     path,
@@ -405,7 +411,7 @@ fn collect_typed_dict_transform_diagnostics(
                         "type transform `{}` references unknown key `{}` on shape source `{}`",
                         transform, key, target_shape.name
                     ),
-                    Some((&key, key_arg, &field_names)),
+                    Some((&key, raw_key_arg, &field_names)),
                 )
             })
         })
@@ -462,6 +468,27 @@ fn transform_key_name(key: &str) -> String {
         .trim_end_matches(')')
         .trim_end_matches('>')
         .to_owned()
+}
+
+fn transform_key_names(key: &str) -> Vec<String> {
+    transform_key_specs(key).into_iter().map(|(name, _)| name).collect()
+}
+
+fn transform_key_specs(key: &str) -> Vec<(String, &str)> {
+    if let Some((head, args)) = parse_transform_expr(key.trim())
+        && is_literal_transform_head(head)
+        && args.len() >= 2
+    {
+        return args[1..]
+            .iter()
+            .map(|literal_arg| (transform_key_name(literal_arg), *literal_arg))
+            .collect();
+    }
+    vec![(transform_key_name(key), key)]
+}
+
+fn is_literal_transform_head(head: &str) -> bool {
+    matches!(head.trim(), "Literal" | "typing.Literal" | "typing_extensions.Literal")
 }
 
 fn typed_dict_transform_error(
