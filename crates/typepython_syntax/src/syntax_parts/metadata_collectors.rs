@@ -150,7 +150,7 @@ pub fn collect_typed_dict_class_metadata(source: &str) -> Vec<TypedDictClassMeta
 
 #[must_use]
 pub fn collect_module_surface_metadata(source: &str) -> ModuleSurfaceMetadata {
-    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let normalized = module_surface_metadata_parse_source(source);
     with_source_line_index(&normalized, || {
         let Ok(parsed) = parse_module(&normalized) else {
             return ModuleSurfaceMetadata::default();
@@ -293,6 +293,21 @@ pub fn collect_module_surface_metadata(source: &str) -> ModuleSurfaceMetadata {
             direct_method_signatures,
         }
     })
+}
+
+fn module_surface_metadata_parse_source(source: &str) -> String {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    if parse_module(&normalized).is_ok() {
+        return normalized;
+    }
+
+    let tree = parse(SourceFile {
+        path: PathBuf::from("<surface-metadata>.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: source.to_owned(),
+    });
+    normalize_annotated_lambda_source_lossy(&normalize_typepython_source(source, &tree.statements))
 }
 
 #[must_use]

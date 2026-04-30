@@ -63,6 +63,39 @@ fn check_warns_for_explicit_effect_decorator_surface() {
 }
 
 #[test]
+fn check_allows_metadata_only_effect_decorators_without_transform_resolution() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "def effect(label: str):\n",
+            "    def wrap(fn):\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "def source(fn):\n",
+            "    return fn\n\n",
+            "typealias UserKeys = Literal[\"id\"]\n\n",
+            "@effect(\"io.net\")\n",
+            "@source\n",
+            "def fetch() -> str:\n",
+            "    return \"payload\"\n\n",
+            "@effect(\"io.net\")\n",
+            "@effect(\"taint.source\")\n",
+            "def handle() -> str:\n",
+            "    return fetch()\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4001"), "{rendered}");
+    assert!(!rendered.contains("TPY4026"), "{rendered}");
+}
+
+#[test]
 fn check_warns_when_caller_effect_row_does_not_cover_callee() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(

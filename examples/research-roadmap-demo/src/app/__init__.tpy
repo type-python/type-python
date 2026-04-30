@@ -66,6 +66,10 @@ def display_name(user: UserRecord) -> str:
     return user["name"]
 
 
+@effect("io.net")
+@effect("taint.source")
+@effect("taint.sanitize")
+@effect("taint.sink")
 def handle(value: unknown) -> str:
     if validate_user(value):
         return display_name(value)

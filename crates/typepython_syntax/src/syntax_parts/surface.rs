@@ -187,6 +187,26 @@ mod tests {
             ],
         );
     }
+
+    #[test]
+    fn decorator_transform_collector_handles_typepython_typealias_lines() {
+        let info = crate::collect_decorator_transform_module_info(concat!(
+            "from typing import Callable\n\n",
+            "def effect(label: str):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "typealias UserKeys = Literal[\"id\"]\n\n",
+            "@effect(\"io.net\")\n",
+            "@source\n",
+            "def load_user() -> str:\n",
+            "    return \"ok\"\n",
+        ));
+
+        assert_eq!(info.callables.len(), 1);
+        assert_eq!(info.callables[0].name, "load_user");
+        assert_eq!(info.callables[0].decorators, vec!["effect:io.net", "source"]);
+    }
 }
 
 /// Parser output for a source file.

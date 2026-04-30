@@ -476,6 +476,13 @@ pub(super) fn undecidable_decorator_diagnostics(
             if decorated.decorators.is_empty() {
                 return None;
             }
+            if decorated
+                .decorators
+                .iter()
+                .all(|decorator| decorator_is_semantic_metadata_only(decorator))
+            {
+                return None;
+            }
             if decorated.decorators.iter().any(|decorator| {
                 decorator.rsplit('.').next().unwrap_or(decorator) == "dual_emit"
             }) {
@@ -516,6 +523,37 @@ pub(super) fn undecidable_decorator_diagnostics(
             }
         })
         .collect()
+}
+
+fn decorator_is_semantic_metadata_only(decorator: &str) -> bool {
+    let target = decorator.split_once(':').map_or(decorator, |(target, _)| target);
+    let short = target.rsplit('.').next().unwrap_or(target);
+    matches!(
+        short,
+        "effect"
+            | "effectful"
+            | "effect_pure"
+            | "pure"
+            | "effect_unsafe"
+            | "effect_io_fs"
+            | "effect_io_net"
+            | "effect_io_proc"
+            | "effect_time"
+            | "effect_random"
+            | "effect_runtime_validation"
+            | "effect_taint_sanitize"
+            | "source"
+            | "sink"
+            | "sanitizer"
+            | "trusted_validator"
+            | "validator"
+            | "must_use"
+            | "must_call"
+            | "must_close"
+            | "must_dispose"
+            | "must_await"
+            | "must_consume"
+    )
 }
 
 fn framework_owned_decorator_diagnostic(

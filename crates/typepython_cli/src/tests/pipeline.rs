@@ -367,6 +367,47 @@ fn run_with_pipeline_check_persists_effect_metadata_sidecar() {
 }
 
 #[test]
+fn run_with_pipeline_check_accepts_research_roadmap_demo() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let example_dir = workspace_root.join("examples/research-roadmap-demo");
+    let project_dir = temp_project_dir("run_with_pipeline_check_accepts_research_roadmap_demo");
+    let result = {
+        fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            fs::read_to_string(example_dir.join("typepython.toml"))
+                .expect("research roadmap demo config should exist"),
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app/__init__.tpy"),
+            fs::read_to_string(example_dir.join("src/app/__init__.tpy"))
+                .expect("research roadmap demo source should exist"),
+        )
+        .expect("test setup should succeed");
+
+        let exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("check should run to completion");
+        let rendered = fs::read_to_string(project_dir.join(".typepython/cache/effects.json"))
+            .expect("effect sidecar should be written");
+
+        (exit_code, rendered)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let (exit_code, rendered) = result;
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(rendered.contains("\"module\": \"app\""), "{rendered}");
+    assert!(rendered.contains("\"name\": \"load_user\""), "{rendered}");
+    assert!(rendered.contains("io.net"), "{rendered}");
+}
+
+#[test]
 fn run_build_like_command_rebuilds_outputs_after_check_updates_semantic_cache() {
     let project_dir = temp_project_dir(
         "run_build_like_command_rebuilds_outputs_after_check_updates_semantic_cache",
