@@ -1287,6 +1287,11 @@ pub(super) fn resolve_decorated_callable_semantic_type_for_declaration_with_cont
     if decorated.decorators.is_empty() {
         return None;
     }
+    let transform_decorators = decorated
+        .decorators
+        .iter()
+        .filter(|decorator| !decorator_is_semantic_metadata_only(decorator))
+        .collect::<Vec<_>>();
 
     let callable = context.load_declaration_semantics(declaration).callable?;
     let base_signature = callable.params;
@@ -1299,7 +1304,7 @@ pub(super) fn resolve_decorated_callable_semantic_type_for_declaration_with_cont
         callable.return_type?
     };
     let mut current = semantic_callable_type_from_signature_sites_in_module(node, &base_signature, &base_return);
-    for decorator in decorated.decorators.iter().rev() {
+    for decorator in transform_decorators.into_iter().rev() {
         let Some(next) = apply_named_callable_decorator_transform_semantic_with_context(
             context,
             node,
