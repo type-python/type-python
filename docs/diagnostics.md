@@ -125,7 +125,7 @@ This is the largest category, covering all type checking rules.
 | `TPY4023` | warning       | Lifecycle-marked resource is not closed or consumed                                                                |
 | `TPY4024` | warning       | Framework-transformed field is missing a type annotation                                                           |
 | `TPY4025` | error         | Unsupported async construct appears inside a `@dual_emit` function                                                |
-| `TPY4026` | warning       | Pure function calls a function with a declared effect row                                                          |
+| `TPY4026` | warning       | Function calls a function with an effect row that the caller does not cover                                        |
 | `TPY4027` | error         | Restricted type-level alias cannot be evaluated to standard Python typing                                          |
 | `TPY4028` | error         | Tainted source result reaches a sink without a sanitizer                                                          |
 | `TPY4101` | warning/error | Use of deprecated declaration                                                                                      |
@@ -284,7 +284,7 @@ c["name"] = "new"          # TPY4016: Cannot assign to read-only TypedDict key '
 
 #### TPY4026 -- Effect capability mismatch
 
-In strict `.tpy` checking, decorator-declared and adapter-declared effect rows are tracked as author-time facts. A function marked `@effect_pure` warns when it directly returns or assigns the result of a callable with an effect decorator such as `@effect_io_net`, `@effect_io_fs`, `@effect_random`, a function-decorator adapter capability such as `effect_io_net`, or a lifecycle obligation.
+In strict `.tpy` checking, decorator-declared and adapter-declared effect rows are tracked as author-time facts. A function warns when it directly calls, returns, or assigns the result of a callable whose effect row is not covered by the caller's own effect declaration. `@effect_pure` callers are the strictest case because they cover no effects, but the same diagnostic also applies to non-pure callers whose declared row is incomplete.
 
 ```python
 @effect_io_net
