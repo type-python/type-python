@@ -303,28 +303,24 @@ fn taint_source_sink_diagnostics(
     let Some(info) = context.load_decorator_transform_module_info(node) else {
         return Vec::new();
     };
+    let adapter_taint_decorators = adapter_taint_decorators(context, node);
     let decorated = info
         .callables
         .into_iter()
         .map(|site| {
-            let decorators = site
-                .decorators
-                .into_iter()
-                .filter_map(|decorator| decorator_short_name(&decorator).map(str::to_owned))
-                .collect::<BTreeSet<_>>();
-            (site.name, decorators)
-        })
-        .collect::<BTreeMap<_, _>>();
-    let adapter_taint_decorators = adapter_taint_decorators(context, node);
-    let decorated = decorated
-        .into_iter()
-        .map(|(name, mut decorators)| {
-            for decorator in decorators.clone() {
-                if let Some(adapter_fact) = adapter_taint_decorators.get(&decorator) {
+            let mut decorators = BTreeSet::new();
+            for decorator in site.decorators {
+                decorators.extend(taint_decorator_facts_from_decorator(&decorator));
+                if let Some(short) = decorator_short_name(&decorator) {
+                    if let Some(adapter_fact) = adapter_taint_decorators.get(short) {
+                        decorators.insert(adapter_fact.clone());
+                    }
+                }
+                if let Some(adapter_fact) = adapter_taint_decorators.get(decorator.as_str()) {
                     decorators.insert(adapter_fact.clone());
                 }
             }
-            (name, decorators)
+            (site.name, decorators)
         })
         .collect::<BTreeMap<_, _>>();
     let mut decorated = decorated;
@@ -461,20 +457,43 @@ fn imported_taint_decorators(
 fn taint_decorator_facts_from_effect_summary(fact: &SummaryEffectFact) -> BTreeSet<String> {
     let mut facts = BTreeSet::new();
     for effect in &fact.effects {
-        match effect.as_str() {
-            "taint.source" => {
-                facts.insert(String::from("source"));
-            }
-            "taint.sink" => {
-                facts.insert(String::from("sink"));
-            }
-            "taint.sanitize" => {
-                facts.insert(String::from("sanitizer"));
-            }
-            _ => {}
+        if let Some(fact) = taint_fact_from_effect_label(effect) {
+            facts.insert(fact.to_owned());
         }
     }
     facts
+}
+
+fn taint_decorator_facts_from_decorator(decorator: &str) -> BTreeSet<String> {
+    let short = decorator_short_name(decorator).unwrap_or(decorator);
+    let mut facts = BTreeSet::new();
+    match short {
+        "source" => {
+            facts.insert(String::from("source"));
+        }
+        "sink" => {
+            facts.insert(String::from("sink"));
+        }
+        "sanitizer" | "effect_taint_sanitize" => {
+            facts.insert(String::from("sanitizer"));
+        }
+        _ => {}
+    }
+    if let Some(label) = effect_label_from_decorator(short)
+        && let Some(fact) = taint_fact_from_effect_label(label)
+    {
+        facts.insert(fact.to_owned());
+    }
+    facts
+}
+
+fn taint_fact_from_effect_label(label: &str) -> Option<&'static str> {
+    match label {
+        "taint.source" => Some("source"),
+        "taint.sink" => Some("sink"),
+        "taint.sanitize" => Some("sanitizer"),
+        _ => None,
+    }
 }
 
 fn adapter_effect_rows(

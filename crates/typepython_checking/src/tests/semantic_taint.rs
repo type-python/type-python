@@ -182,6 +182,43 @@ fn check_uses_framework_adapter_taint_source_and_sink_capabilities() {
 }
 
 #[test]
+fn check_uses_explicit_taint_effect_labels_for_local_source_sink_flow() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "def effect(label: str):\n",
+            "    def wrap(fn):\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "@effect(\"taint.source\")\n",
+            "def request_body() -> str:\n",
+            "    ...\n\n",
+            "@effect(\"taint.sanitize\")\n",
+            "def escape_html(value: str) -> str:\n",
+            "    ...\n\n",
+            "@effect(\"taint.sink\")\n",
+            "def render_html(value: str) -> None:\n",
+            "    ...\n\n",
+            "def unsafe() -> None:\n",
+            "    raw = request_body()\n",
+            "    render_html(raw)\n\n",
+            "def safe() -> None:\n",
+            "    raw = request_body()\n",
+            "    render_html(escape_html(raw))\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("TPY4028").count(), 1, "{rendered}");
+    assert!(rendered.contains("tainted source result flows into sink `render_html`"), "{rendered}");
+}
+
+#[test]
 fn check_uses_imported_taint_source_sink_and_sanitizer_facts() {
     let root = create_temp_typepython_root();
     let lib_path = root.join("lib.tpy");
