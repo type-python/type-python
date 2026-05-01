@@ -112,7 +112,7 @@
       "targets": ["3.12"],
       "expected_stub_fragments": {
         "3.12": [
-          "from typing import Literal",
+          "from typing import Any, Literal",
           "from typing_extensions import ReadOnly",
           "class UserRecord(TypedDict):",
           "UserKeys: TypeAlias = Literal[\"email\", \"id\", \"name\"]",

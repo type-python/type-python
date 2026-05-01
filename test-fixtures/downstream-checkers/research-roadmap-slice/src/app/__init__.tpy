@@ -1,4 +1,4 @@
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict, cast
 
 
 class UserRecord(TypedDict):
@@ -16,8 +16,8 @@ def expose_user(user: UserRecord) -> UserRecord:
 
 
 def request_body() -> Tainted[str, "html"]:
-    ...
+    return cast(Any, "<user-input>")
 
 
 def validate_user_record(value: unknown) -> ValidatorWitness[UserRecord, Literal["trusted"]]:
-    ...
+    return cast(Any, isinstance(value, dict))
