@@ -1,7 +1,7 @@
 # RFC: Must-Use, Must-Await, and Must-Close Diagnostics
 
-**Status:** implemented local checker slice
-**Strategic source:** `docs/strategic-todo.md` P2 Must-Use, Must-Await, and Must-Close Diagnostics  
+**Status:** implemented local checker slice<br>
+**Strategic source:** `docs/strategic-todo.md` P2 Must-Use, Must-Await, and Must-Close Diagnostics<br>
 **Scope:** lightweight intra-procedural lifecycle checks, not full typestate
 
 ## Summary
