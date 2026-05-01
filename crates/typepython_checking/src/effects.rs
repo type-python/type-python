@@ -311,10 +311,10 @@ fn taint_source_sink_diagnostics(
             let mut decorators = BTreeSet::new();
             for decorator in site.decorators {
                 decorators.extend(taint_decorator_facts_from_decorator(&decorator));
-                if let Some(short) = decorator_short_name(&decorator) {
-                    if let Some(adapter_fact) = adapter_taint_decorators.get(short) {
-                        decorators.insert(adapter_fact.clone());
-                    }
+                if let Some(short) = decorator_short_name(&decorator)
+                    && let Some(adapter_fact) = adapter_taint_decorators.get(short)
+                {
+                    decorators.insert(adapter_fact.clone());
                 }
                 if let Some(adapter_fact) = adapter_taint_decorators.get(decorator.as_str()) {
                     decorators.insert(adapter_fact.clone());

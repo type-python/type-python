@@ -6,3 +6,4 @@ include!("expressions.rs");
 include!("flow.rs");
 include!("members.rs");
 include!("imports.rs");
+include!("flow_tests.rs");
