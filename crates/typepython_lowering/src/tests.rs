@@ -2744,6 +2744,46 @@ fn lower_fail_closes_unreduced_restricted_type_level_aliases() {
 }
 
 #[test]
+fn lower_recursively_reduces_typeif_branch_key_sets() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("type-level-typeif-keyof.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "from typing import TypedDict\n",
+            "class User(TypedDict):\n",
+            "    id: int\n\n",
+            "typealias Selected = TypeIf[IsSubtype[int, object], KeyOf[User], bytes]\n",
+        )),
+    });
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+
+    assert!(!lowered.diagnostics.has_errors(), "{}", lowered.diagnostics.as_text());
+    assert!(lowered.module.python_source.contains("from typing import Literal"));
+    assert!(lowered.module.python_source.contains("Selected: TypeAlias = Literal[\"id\"]"));
+    assert!(!lowered.module.python_source.contains("KeyOf[User]"));
+}
+
+#[test]
+fn lower_fail_closes_unsupported_typeif_restricted_branch() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("type-level-typeif-unsupported.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "from typing import Callable, TypedDict\n",
+            "class User(TypedDict):\n",
+            "    id: int\n\n",
+            "typealias Selected = TypeIf[IsSubtype[int, object], MapValues[User, Callable], bytes]\n",
+        )),
+    });
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+
+    assert!(!lowered.module.python_source.contains("MapValues[User, Callable]"));
+    assert!(lowered.module.python_source.contains("Selected: TypeAlias = object"));
+}
+
+#[test]
 fn lower_expands_map_values_shape_transform() {
     let tree = parse(SourceFile {
         path: PathBuf::from("type-level-map-values.tpy"),

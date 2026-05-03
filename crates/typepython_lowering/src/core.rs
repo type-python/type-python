@@ -1,5 +1,7 @@
 use super::*;
 
+const RESTRICTED_TYPE_LEVEL_REDUCTION_BUDGET: usize = 64;
+
 pub(super) fn is_typed_dict_base(base: &str) -> bool {
     matches!(base.trim(), "TypedDict" | "typing.TypedDict" | "typing_extensions.TypedDict")
 }
@@ -424,8 +426,11 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             options.experimental_shape_transforms,
         );
         let needs_literal_import = type_aliases.values().any(|statement| {
-            typepython_syntax::reduce_key_set_alias_text(statement.value.trim(), &type_level_fields)
-                .is_some()
+            reduce_restricted_type_level_alias_text_with_fields(
+                statement.value.trim(),
+                &type_level_fields,
+            )
+            .is_some_and(|reduced| reduced.trim_start().starts_with("Literal["))
         });
         if needs_literal_import && !has_literal_import(&tree.source.text) {
             inserted_lines.emit_required_import(String::from("from typing import Literal"));
@@ -1730,13 +1735,32 @@ fn reduce_restricted_type_level_alias_text(
 ) -> Option<String> {
     let trimmed = value.trim();
     let fields = type_level_shape_fields(typed_dicts, data_classes, experimental_shape_transforms);
-    if let Some(keys) = typepython_syntax::reduce_key_set_alias_text(trimmed, &fields) {
-        return Some(format!(
-            "Literal[{}]",
-            keys.into_iter().map(|key| format!("\"{key}\"")).collect::<Vec<_>>().join(", ")
-        ));
+    reduce_restricted_type_level_alias_text_with_fields(trimmed, &fields)
+}
+
+fn reduce_restricted_type_level_alias_text_with_fields(
+    value: &str,
+    fields: &[typepython_syntax::TypeLevelShapeField],
+) -> Option<String> {
+    let mut current = value.trim().to_owned();
+    for _ in 0..RESTRICTED_TYPE_LEVEL_REDUCTION_BUDGET {
+        if let Some(keys) = typepython_syntax::reduce_key_set_alias_text(&current, fields) {
+            return Some(render_literal_key_set(keys));
+        }
+        let reduced = typepython_syntax::reduce_typeif_is_subtype_text(&current)?;
+        if !typepython_syntax::contains_restricted_type_level_alias_text(&reduced) {
+            return Some(reduced);
+        }
+        current = reduced;
     }
-    typepython_syntax::reduce_typeif_is_subtype_text(trimmed)
+    None
+}
+
+fn render_literal_key_set(keys: Vec<String>) -> String {
+    format!(
+        "Literal[{}]",
+        keys.into_iter().map(|key| format!("\"{key}\"")).collect::<Vec<_>>().join(", ")
+    )
 }
 
 fn type_level_shape_fields(
