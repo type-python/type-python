@@ -119,79 +119,143 @@ pub(super) fn effect_capability_diagnostics(
         return diagnostics;
     }
 
-    let effectful_by_name = effectful_summaries_by_name(&summaries);
-    if effectful_by_name.is_empty() {
+    let effectful_by_name = effectful_function_summaries_by_name(&summaries);
+    let effectful_by_method = effectful_method_summaries_by_name(&summaries);
+    if effectful_by_name.is_empty() && effectful_by_method.is_empty() {
         return diagnostics;
     }
 
-    let summary_by_name = summaries
-        .iter()
-        .map(|summary| (summary.callable.as_str(), summary))
-        .collect::<BTreeMap<_, _>>();
+    let summary_by_name = function_summaries_by_name(&summaries);
+    let summary_by_method = method_summaries_by_name(&summaries);
 
     let mut reported = BTreeSet::new();
     for assignment in &node.assignments {
         let Some(owner) = assignment.owner_name.as_deref() else {
             continue;
         };
-        let Some(callee) = assignment.value_callee.as_deref() else {
-            continue;
-        };
-        if let Some(callee_summary) = effectful_by_name.get(callee)
-            && !caller_effect_row_allows(summary_by_name.get(owner).copied(), &callee_summary.row)
-            && !capability_scopes_allow(&capability_scopes, assignment.line, &callee_summary.row)
-            && reported.insert((owner.to_owned(), assignment.line, callee_summary.display_name()))
+        let caller = caller_effect_summary(
+            &summary_by_name,
+            &summary_by_method,
+            owner,
+            assignment.owner_type_name.as_deref(),
+        );
+        if let Some(callee) = assignment.value_callee.as_deref()
+            && let Some(callee_summary) = effectful_by_name.get(callee).copied()
         {
-            diagnostics.push(effect_call_diagnostic(
+            maybe_push_effect_call_diagnostic(
+                &mut diagnostics,
+                &mut reported,
                 node,
+                &capability_scopes,
                 owner,
-                summary_by_name.get(owner).copied(),
+                caller,
                 callee_summary,
                 assignment.line,
-            ));
+            );
+        }
+        if let Some(callee_summary) = effectful_method_summary(
+            &effectful_by_method,
+            assignment.value_method_owner_name.as_deref(),
+            assignment.value_method_name.as_deref(),
+        ) {
+            maybe_push_effect_call_diagnostic(
+                &mut diagnostics,
+                &mut reported,
+                node,
+                &capability_scopes,
+                owner,
+                caller,
+                callee_summary,
+                assignment.line,
+            );
         }
     }
     for return_site in &node.returns {
-        let Some(callee) = return_site.value_callee.as_deref() else {
-            continue;
-        };
-        if let Some(callee_summary) = effectful_by_name.get(callee)
-            && !caller_effect_row_allows(
-                summary_by_name.get(return_site.owner_name.as_str()).copied(),
-                &callee_summary.row,
-            )
-            && !capability_scopes_allow(&capability_scopes, return_site.line, &callee_summary.row)
-            && reported.insert((
-                return_site.owner_name.clone(),
-                return_site.line,
-                callee_summary.display_name(),
-            ))
+        let caller = caller_effect_summary(
+            &summary_by_name,
+            &summary_by_method,
+            &return_site.owner_name,
+            return_site.owner_type_name.as_deref(),
+        );
+        if let Some(callee) = return_site.value_callee.as_deref()
+            && let Some(callee_summary) = effectful_by_name.get(callee).copied()
         {
-            diagnostics.push(effect_call_diagnostic(
+            maybe_push_effect_call_diagnostic(
+                &mut diagnostics,
+                &mut reported,
                 node,
+                &capability_scopes,
                 &return_site.owner_name,
-                summary_by_name.get(return_site.owner_name.as_str()).copied(),
+                caller,
                 callee_summary,
                 return_site.line,
-            ));
+            );
+        }
+        if let Some(callee_summary) = effectful_method_summary(
+            &effectful_by_method,
+            return_site.value_method_owner_name.as_deref(),
+            return_site.value_method_name.as_deref(),
+        ) {
+            maybe_push_effect_call_diagnostic(
+                &mut diagnostics,
+                &mut reported,
+                node,
+                &capability_scopes,
+                &return_site.owner_name,
+                caller,
+                callee_summary,
+                return_site.line,
+            );
         }
     }
     for call_site in context.load_direct_call_context_sites(node) {
         let Some(owner) = call_site.owner_name.as_deref() else {
             continue;
         };
-        if let Some(callee_summary) = effectful_by_name.get(&call_site.callee)
-            && !caller_effect_row_allows(summary_by_name.get(owner).copied(), &callee_summary.row)
-            && !capability_scopes_allow(&capability_scopes, call_site.line, &callee_summary.row)
-            && reported.insert((owner.to_owned(), call_site.line, callee_summary.display_name()))
-        {
-            diagnostics.push(effect_call_diagnostic(
+        let caller = caller_effect_summary(
+            &summary_by_name,
+            &summary_by_method,
+            owner,
+            call_site.owner_type_name.as_deref(),
+        );
+        if let Some(callee_summary) = effectful_by_name.get(&call_site.callee).copied() {
+            maybe_push_effect_call_diagnostic(
+                &mut diagnostics,
+                &mut reported,
                 node,
+                &capability_scopes,
                 owner,
-                summary_by_name.get(owner).copied(),
+                caller,
                 callee_summary,
                 call_site.line,
-            ));
+            );
+        }
+    }
+    for method_call in &node.method_calls {
+        let Some(owner) = method_call.current_owner_name.as_deref() else {
+            continue;
+        };
+        let caller = caller_effect_summary(
+            &summary_by_name,
+            &summary_by_method,
+            owner,
+            method_call.current_owner_type_name.as_deref(),
+        );
+        if let Some(callee_summary) = effectful_method_summary(
+            &effectful_by_method,
+            Some(method_call.owner_name.as_str()),
+            Some(method_call.method.as_str()),
+        ) {
+            maybe_push_effect_call_diagnostic(
+                &mut diagnostics,
+                &mut reported,
+                node,
+                &capability_scopes,
+                owner,
+                caller,
+                callee_summary,
+                method_call.line,
+            );
         }
     }
     diagnostics
@@ -238,12 +302,90 @@ fn collect_visible_effect_summaries(
     summaries
 }
 
-fn effectful_summaries_by_name(summaries: &[EffectSummary]) -> BTreeMap<String, &EffectSummary> {
+fn function_summaries_by_name(summaries: &[EffectSummary]) -> BTreeMap<String, &EffectSummary> {
     let mut by_name = BTreeMap::new();
-    for summary in summaries.iter().filter(|summary| !summary.row.is_empty()) {
+    for summary in summaries.iter().filter(|summary| summary.owner_type_name.is_none()) {
         by_name.entry(summary.callable.clone()).or_insert(summary);
     }
     by_name
+}
+
+fn method_summaries_by_name(
+    summaries: &[EffectSummary],
+) -> BTreeMap<(String, String), &EffectSummary> {
+    let mut by_name = BTreeMap::new();
+    for summary in summaries.iter().filter_map(|summary| {
+        summary
+            .owner_type_name
+            .as_ref()
+            .map(|owner| ((owner.clone(), summary.callable.clone()), summary))
+    }) {
+        by_name.entry(summary.0).or_insert(summary.1);
+    }
+    by_name
+}
+
+fn effectful_function_summaries_by_name(
+    summaries: &[EffectSummary],
+) -> BTreeMap<String, &EffectSummary> {
+    function_summaries_by_name(summaries)
+        .into_iter()
+        .filter(|(_, summary)| !summary.row.is_empty())
+        .collect()
+}
+
+fn effectful_method_summaries_by_name(
+    summaries: &[EffectSummary],
+) -> BTreeMap<(String, String), &EffectSummary> {
+    method_summaries_by_name(summaries)
+        .into_iter()
+        .filter(|(_, summary)| !summary.row.is_empty())
+        .collect()
+}
+
+fn caller_effect_summary<'a>(
+    by_name: &'a BTreeMap<String, &'a EffectSummary>,
+    by_method: &'a BTreeMap<(String, String), &'a EffectSummary>,
+    owner_name: &str,
+    owner_type_name: Option<&str>,
+) -> Option<&'a EffectSummary> {
+    owner_type_name
+        .and_then(|owner_type_name| {
+            by_method.get(&(owner_type_name.to_owned(), owner_name.to_owned())).copied()
+        })
+        .or_else(|| by_name.get(owner_name).copied())
+}
+
+fn effectful_method_summary<'a>(
+    by_method: &'a BTreeMap<(String, String), &'a EffectSummary>,
+    owner_name: Option<&str>,
+    method_name: Option<&str>,
+) -> Option<&'a EffectSummary> {
+    let owner_name = owner_name?;
+    let method_name = method_name?;
+    by_method.get(&(owner_name.to_owned(), method_name.to_owned())).copied()
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "effect diagnostics share the same caller/callee/capability tuple across call surfaces"
+)]
+fn maybe_push_effect_call_diagnostic(
+    diagnostics: &mut Vec<Diagnostic>,
+    reported: &mut BTreeSet<(String, usize, String)>,
+    node: &typepython_graph::ModuleNode,
+    capability_scopes: &[CapabilityScope],
+    owner: &str,
+    caller: Option<&EffectSummary>,
+    callee: &EffectSummary,
+    line: usize,
+) {
+    if !caller_effect_row_allows(caller, &callee.row)
+        && !capability_scopes_allow(capability_scopes, line, &callee.row)
+        && reported.insert((owner.to_owned(), line, callee.display_name()))
+    {
+        diagnostics.push(effect_call_diagnostic(node, owner, caller, callee, line));
+    }
 }
 
 fn collect_imported_effect_summaries(
@@ -780,10 +922,11 @@ fn effect_call_diagnostic(
     let source_note = effect_source_note(callee);
     let caller_kind = caller
         .map_or("function", |summary| if summary.pure { "pure function" } else { "function" });
+    let callee_kind = if callee.owner_type_name.is_some() { "method" } else { "function" };
     Diagnostic::warning(
         "TPY4026",
         format!(
-            "{caller_kind} `{owner}` calls effectful function `{}` with uncovered effect row `{labels}`",
+            "{caller_kind} `{owner}` calls effectful {callee_kind} `{}` with uncovered effect row `{labels}`",
             callee.display_name(),
         ),
     )
