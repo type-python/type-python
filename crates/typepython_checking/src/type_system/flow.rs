@@ -439,10 +439,10 @@ pub(super) fn parse_guard_return_kind_semantic_with_context(
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<(String, SemanticType, bool)> {
-    let function = resolve_direct_function(node, nodes, callee)?;
+    let (function_node, function) = resolve_direct_function_with_node(node, nodes, callee)?;
     let returns = declaration_signature_return_semantic_type(function)?;
     if let Some(guarded_type) =
-        generated_validator_witness_type(context, node, function, &returns)
+        generated_validator_witness_type(context, function_node, function, &returns)
     {
         return Some((String::from("ValidatorWitness"), guarded_type, true));
     }
@@ -454,7 +454,7 @@ pub(super) fn parse_guard_return_kind_semantic_with_context(
         }
         if head == "ValidatorWitness" && matches!(args.len(), 1 | 2) {
             let trusted = validator_witness_return_is_trusted(args)
-                || validator_witness_trusted_by_boundary_metadata(context, node, function);
+                || validator_witness_trusted_by_boundary_metadata(context, function_node, function);
             return Some((head.clone(), args[0].clone(), trusted));
         }
     }

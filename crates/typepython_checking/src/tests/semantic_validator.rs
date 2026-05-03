@@ -73,6 +73,74 @@ fn check_trust_metadata_decorator_uses_source_overrides_without_backing_file() {
 }
 
 #[test]
+fn check_imported_trust_metadata_validator_produces_witness() {
+    let root = create_temp_typepython_root();
+    let lib_path = root.join("lib.tpy");
+    let app_path = root.join("app.tpy");
+    let lib_source = concat!(
+        "from typing import Callable\n\n",
+        "class User:\n",
+        "    name: str\n",
+        "    def greet(self) -> str:\n",
+        "        return self.name\n\n",
+        "def validator[T](target: type[T], trust: str):\n",
+        "    def wrap[**P](fn: Callable[P, bool]) -> Callable[P, bool]:\n",
+        "        return fn\n",
+        "    return wrap\n\n",
+        "@validator(User, trust=\"generated\")\n",
+        "def validate_user(value: unknown) -> bool:\n",
+        "    ...\n",
+    );
+    let app_source = concat!(
+        "from lib import User, validate_user\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if validate_user(value):\n",
+        "        return value.greet()\n",
+        "    return \"\"\n",
+    );
+    fs::write(&lib_path, lib_source).expect("temp source should be written");
+    fs::write(&app_path, app_source).expect("temp source should be written");
+
+    let trees = [
+        parse_with_options(
+            SourceFile {
+                path: lib_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("lib"),
+                text: lib_source.to_owned(),
+            },
+            ParseOptions::default(),
+        ),
+        parse_with_options(
+            SourceFile {
+                path: app_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app"),
+                text: app_source.to_owned(),
+            },
+            ParseOptions::default(),
+        ),
+    ];
+    let bindings = trees.iter().map(bind).collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let result = check_with_binding_metadata(
+        &graph,
+        &bindings,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+        ImportFallback::Unknown,
+        None,
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn check_adapter_declared_validator_witness_trusts_one_arg_witness() {
     let result = check_temp_typepython_source(concat!(
         "class User:\n",
