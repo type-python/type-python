@@ -505,6 +505,9 @@ fn taint_source_sink_diagnostics(
     for (name, facts) in imported_taint_decorators(context, node) {
         decorated.entry(name).or_default().extend(facts);
     }
+    for (method, facts) in imported_taint_method_decorators(context, node) {
+        decorated_methods.entry(method).or_default().extend(facts);
+    }
     let mut diagnostics = Vec::new();
     let mut tainted_locals: BTreeMap<Option<String>, BTreeSet<String>> = BTreeMap::new();
     let mut source_method_call_lines: BTreeSet<(Option<String>, usize)> = BTreeSet::new();
@@ -700,6 +703,42 @@ fn imported_taint_decorators(
             (!facts.is_empty()).then(|| (declaration.name.clone(), facts))
         })
         .collect()
+}
+
+fn imported_taint_method_decorators(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<(String, String), BTreeSet<String>> {
+    let mut imported = BTreeMap::<(String, String), BTreeSet<String>>::new();
+    for declaration in node
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_none())
+        .filter(|declaration| declaration.kind == DeclarationKind::Import)
+    {
+        let Some(target) =
+            resolve_imported_symbol_semantic_target_from_declaration(context.nodes, declaration)
+        else {
+            continue;
+        };
+        let Some(target_declaration) = target.declaration_target() else {
+            continue;
+        };
+        if target_declaration.owner.is_some() || target_declaration.kind != DeclarationKind::Class {
+            continue;
+        }
+        for fact in
+            collect_effect_summary_facts(context, target.provider_node).into_iter().filter(|fact| {
+                fact.owner_type_name.as_deref() == Some(target_declaration.name.as_str())
+            })
+        {
+            let facts = taint_decorator_facts_from_effect_summary(&fact);
+            if !facts.is_empty() {
+                imported.entry((declaration.name.clone(), fact.name)).or_default().extend(facts);
+            }
+        }
+    }
+    imported
 }
 
 fn taint_decorator_facts_from_effect_summary(fact: &SummaryEffectFact) -> BTreeSet<String> {
