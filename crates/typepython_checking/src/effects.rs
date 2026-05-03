@@ -478,97 +478,171 @@ fn taint_source_sink_diagnostics(
         return Vec::new();
     };
     let adapter_taint_decorators = adapter_taint_decorators(context, node);
-    let decorated = info
-        .callables
-        .into_iter()
-        .map(|site| {
-            let mut decorators = BTreeSet::new();
-            for decorator in site.decorators {
-                decorators.extend(taint_decorator_facts_from_decorator(&decorator));
-                if let Some(short) = decorator_short_name(&decorator)
-                    && let Some(adapter_fact) = adapter_taint_decorators.get(short)
-                {
-                    decorators.insert(adapter_fact.clone());
-                }
-                if let Some(adapter_fact) = adapter_taint_decorators.get(decorator.as_str()) {
-                    decorators.insert(adapter_fact.clone());
-                }
+    let mut decorated = BTreeMap::new();
+    let mut decorated_methods = BTreeMap::new();
+    for site in info.callables {
+        let mut decorators = BTreeSet::new();
+        for decorator in site.decorators {
+            decorators.extend(taint_decorator_facts_from_decorator(&decorator));
+            if let Some(short) = decorator_short_name(&decorator)
+                && let Some(adapter_fact) = adapter_taint_decorators.get(short)
+            {
+                decorators.insert(adapter_fact.clone());
             }
-            (site.name, decorators)
-        })
-        .collect::<BTreeMap<_, _>>();
-    let mut decorated = decorated;
+            if let Some(adapter_fact) = adapter_taint_decorators.get(decorator.as_str()) {
+                decorators.insert(adapter_fact.clone());
+            }
+        }
+        if decorators.is_empty() {
+            continue;
+        }
+        if let Some(owner_type_name) = site.owner_type_name {
+            decorated_methods.insert((owner_type_name, site.name), decorators);
+        } else {
+            decorated.insert(site.name, decorators);
+        }
+    }
     for (name, facts) in imported_taint_decorators(context, node) {
         decorated.entry(name).or_default().extend(facts);
     }
     let mut diagnostics = Vec::new();
     let mut tainted_locals: BTreeMap<Option<String>, BTreeSet<String>> = BTreeMap::new();
+    let mut source_method_call_lines: BTreeSet<(Option<String>, usize)> = BTreeSet::new();
+    let mut sanitizer_method_call_lines: BTreeSet<(Option<String>, usize)> = BTreeSet::new();
     let owner_ranges = owner_line_ranges(node);
     let owner_markers = owner_line_markers(node);
-    let mut assignments = node.assignments.iter().peekable();
-    let mut calls = node.calls.iter().peekable();
 
-    while assignments.peek().is_some() || calls.peek().is_some() {
-        let next_assignment_line = assignments.peek().map(|assignment| assignment.line);
-        let next_call_line = calls.peek().map(|call| call.line);
-        if next_call_line.is_some()
-            && (next_assignment_line.is_none() || next_call_line <= next_assignment_line)
-        {
-            let call = calls.next().expect("peeked call exists");
-            let owner = owner_for_line(&owner_ranges, &owner_markers, call.line);
-            if decorated.get(&call.callee).is_some_and(|decorators| decorators.contains("sink"))
-                && call.arg_values.iter().any(|arg| {
+    let mut events = Vec::new();
+    events.extend(node.assignments.iter().map(TaintEvent::Assignment));
+    events.extend(node.calls.iter().map(TaintEvent::Call));
+    events.extend(node.method_calls.iter().map(TaintEvent::MethodCall));
+    events.sort_by_key(TaintEvent::sort_key);
+
+    for event in events {
+        match event {
+            TaintEvent::Call(call) => {
+                let owner = owner_for_line(&owner_ranges, &owner_markers, call.line);
+                if decorated.get(&call.callee).is_some_and(|decorators| decorators.contains("sink"))
+                    && call.arg_values.iter().any(|arg| {
+                        argument_is_unsanitized_source(
+                            arg,
+                            &decorated,
+                            &decorated_methods,
+                            &tainted_locals,
+                            owner.as_deref(),
+                        )
+                    })
+                {
+                    diagnostics.push(taint_sink_diagnostic(node, &call.callee, call.line));
+                }
+            }
+            TaintEvent::MethodCall(call) => {
+                let owner = call
+                    .current_owner_name
+                    .clone()
+                    .or_else(|| owner_for_line(&owner_ranges, &owner_markers, call.line));
+                let method_facts = taint_method_facts(
+                    &decorated_methods,
+                    Some(call.owner_name.as_str()),
+                    Some(call.method.as_str()),
+                );
+                if method_facts.is_some_and(|decorators| decorators.contains("source")) {
+                    source_method_call_lines.insert((owner.clone(), call.line));
+                }
+                if method_facts.is_some_and(|decorators| decorators.contains("sanitizer")) {
+                    sanitizer_method_call_lines.insert((owner.clone(), call.line));
+                }
+                if method_facts.is_some_and(|decorators| decorators.contains("sink"))
+                    && call.arg_values.iter().any(|arg| {
+                        argument_is_unsanitized_source(
+                            arg,
+                            &decorated,
+                            &decorated_methods,
+                            &tainted_locals,
+                            owner.as_deref(),
+                        )
+                    })
+                {
+                    diagnostics.push(taint_sink_diagnostic(
+                        node,
+                        &format!("{}.{}", call.owner_name, call.method),
+                        call.line,
+                    ));
+                }
+            }
+            TaintEvent::Assignment(assignment) => {
+                let owner = assignment.owner_name.clone();
+                let owner_line = (owner.clone(), assignment.line);
+                let is_tainted = assignment.value.as_ref().is_some_and(|value| {
                     argument_is_unsanitized_source(
-                        arg,
+                        value,
                         &decorated,
+                        &decorated_methods,
                         &tainted_locals,
                         owner.as_deref(),
                     )
-                })
-            {
-                diagnostics.push(
-                    Diagnostic::error(
-                        "TPY4028",
-                        format!(
-                            "tainted source result flows into sink `{}` without a sanitizer",
-                            call.callee
-                        ),
-                    )
-                    .with_span(Span::new(
-                        node.module_path.display().to_string(),
-                        call.line,
-                        1,
-                        call.line,
-                        1,
-                    ))
-                    .with_note(
-                        "wrap the source value in a callable marked `@sanitizer` before passing it to a `@sink`",
-                    ),
-                );
-            }
-        } else {
-            let assignment = assignments.next().expect("peeked assignment exists");
-            let owner = assignment.owner_name.clone();
-            let is_tainted = assignment.value.as_ref().is_some_and(|value| {
-                argument_is_unsanitized_source(value, &decorated, &tainted_locals, owner.as_deref())
-            }) || assignment
-                .value_callee
-                .as_deref()
-                .is_some_and(|callee| decorated.get(callee).is_some_and(|d| d.contains("source")));
-            let is_sanitized = assignment.value_callee.as_deref().is_some_and(|callee| {
-                decorated.get(callee).is_some_and(|d| d.contains("sanitizer"))
-            });
-            let locals = tainted_locals.entry(owner).or_default();
-            if is_sanitized {
-                locals.remove(&assignment.name);
-            } else if is_tainted {
-                locals.insert(assignment.name.clone());
-            } else {
-                locals.remove(&assignment.name);
+                }) || assignment.value_callee.as_deref().is_some_and(|callee| {
+                    decorated.get(callee).is_some_and(|d| d.contains("source"))
+                }) || taint_method_facts(
+                    &decorated_methods,
+                    assignment.value_method_owner_name.as_deref(),
+                    assignment.value_method_name.as_deref(),
+                )
+                .is_some_and(|decorators| decorators.contains("source"));
+                let is_sanitized = assignment.value_callee.as_deref().is_some_and(|callee| {
+                    decorated.get(callee).is_some_and(|d| d.contains("sanitizer"))
+                }) || taint_method_facts(
+                    &decorated_methods,
+                    assignment.value_method_owner_name.as_deref(),
+                    assignment.value_method_name.as_deref(),
+                )
+                .is_some_and(|decorators| decorators.contains("sanitizer"));
+                let is_tainted = is_tainted || source_method_call_lines.contains(&owner_line);
+                let is_sanitized =
+                    is_sanitized || sanitizer_method_call_lines.contains(&owner_line);
+                let locals = tainted_locals.entry(owner).or_default();
+                if is_sanitized {
+                    locals.remove(&assignment.name);
+                } else if is_tainted {
+                    locals.insert(assignment.name.clone());
+                } else {
+                    locals.remove(&assignment.name);
+                }
             }
         }
     }
     diagnostics
+}
+
+enum TaintEvent<'a> {
+    Assignment(&'a typepython_binding::AssignmentSite),
+    Call(&'a typepython_binding::CallSite),
+    MethodCall(&'a typepython_binding::MethodCallSite),
+}
+
+impl TaintEvent<'_> {
+    fn sort_key(&self) -> (usize, u8) {
+        match self {
+            Self::Call(call) => (call.line, 0),
+            Self::MethodCall(call) => (call.line, 0),
+            Self::Assignment(assignment) => (assignment.line, 1),
+        }
+    }
+}
+
+fn taint_sink_diagnostic(
+    node: &typepython_graph::ModuleNode,
+    sink_name: &str,
+    line: usize,
+) -> Diagnostic {
+    Diagnostic::error(
+        "TPY4028",
+        format!("tainted source result flows into sink `{sink_name}` without a sanitizer"),
+    )
+    .with_span(Span::new(node.module_path.display().to_string(), line, 1, line, 1))
+    .with_note(
+        "wrap the source value in a callable marked `@sanitizer` before passing it to a `@sink`",
+    )
 }
 
 fn adapter_taint_decorators(
@@ -737,6 +811,7 @@ fn framework_capability_effect_kind(
 fn argument_is_unsanitized_source(
     arg: &typepython_syntax::DirectExprMetadata,
     decorated: &BTreeMap<String, BTreeSet<String>>,
+    decorated_methods: &BTreeMap<(String, String), BTreeSet<String>>,
     tainted_locals: &BTreeMap<Option<String>, BTreeSet<String>>,
     owner_name: Option<&str>,
 ) -> bool {
@@ -748,6 +823,18 @@ fn argument_is_unsanitized_source(
             return true;
         }
     }
+    if let Some(decorators) = taint_method_facts(
+        decorated_methods,
+        arg.value_method_owner_name.as_deref(),
+        arg.value_method_name.as_deref(),
+    ) {
+        if decorators.contains("sanitizer") {
+            return false;
+        }
+        if decorators.contains("source") {
+            return true;
+        }
+    }
     if let Some(name) = arg.value_name.as_deref()
         && tainted_locals
             .get(&owner_name.map(str::to_owned))
@@ -756,10 +843,32 @@ fn argument_is_unsanitized_source(
         return true;
     }
     arg.value_bool_left.as_deref().is_some_and(|inner| {
-        argument_is_unsanitized_source(inner, decorated, tainted_locals, owner_name)
+        argument_is_unsanitized_source(
+            inner,
+            decorated,
+            decorated_methods,
+            tainted_locals,
+            owner_name,
+        )
     }) || arg.value_bool_right.as_deref().is_some_and(|inner| {
-        argument_is_unsanitized_source(inner, decorated, tainted_locals, owner_name)
+        argument_is_unsanitized_source(
+            inner,
+            decorated,
+            decorated_methods,
+            tainted_locals,
+            owner_name,
+        )
     })
+}
+
+fn taint_method_facts<'a>(
+    decorated_methods: &'a BTreeMap<(String, String), BTreeSet<String>>,
+    owner_name: Option<&str>,
+    method_name: Option<&str>,
+) -> Option<&'a BTreeSet<String>> {
+    let owner_name = owner_name?;
+    let method_name = method_name?;
+    decorated_methods.get(&(owner_name.to_owned(), method_name.to_owned()))
 }
 
 fn owner_line_ranges(

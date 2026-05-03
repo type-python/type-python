@@ -219,6 +219,52 @@ fn check_uses_explicit_taint_effect_labels_for_local_source_sink_flow() {
 }
 
 #[test]
+fn check_uses_method_source_sink_and_sanitizer_for_local_taint_flow() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "def sink[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "def sanitizer[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "class Request:\n",
+            "    @source\n",
+            "    def body(self) -> str:\n",
+            "        ...\n\n",
+            "class Html:\n",
+            "    @sanitizer\n",
+            "    def escape(self, value: str) -> str:\n",
+            "        return value\n\n",
+            "class Response:\n",
+            "    @sink\n",
+            "    def render(self, value: str) -> None:\n",
+            "        ...\n\n",
+            "def unsafe() -> None:\n",
+            "    raw = Request().body()\n",
+            "    Response().render(raw)\n\n",
+            "def safe() -> None:\n",
+            "    raw = Request().body()\n",
+            "    Response().render(Html().escape(raw))\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("TPY4028").count(), 1, "{rendered}");
+    assert!(
+        rendered.contains("tainted source result flows into sink `Response.render`"),
+        "{rendered}"
+    );
+}
+
+#[test]
 fn check_uses_imported_taint_source_sink_and_sanitizer_facts() {
     let root = create_temp_typepython_root();
     let lib_path = root.join("lib.tpy");
