@@ -392,34 +392,66 @@ fn collect_imported_effect_summaries(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
 ) -> Vec<EffectSummary> {
-    node.declarations
+    let mut summaries = Vec::new();
+    for declaration in node
+        .declarations
         .iter()
         .filter(|declaration| declaration.owner.is_none())
         .filter(|declaration| declaration.kind == DeclarationKind::Import)
-        .filter_map(|declaration| {
-            let target = resolve_imported_symbol_semantic_target_from_declaration(
-                context.nodes,
-                declaration,
-            )?;
-            let target_declaration = target.declaration_target()?;
-            if target_declaration.owner.is_some()
-                || target_declaration.kind != DeclarationKind::Function
-            {
-                return None;
+    {
+        let Some(target) =
+            resolve_imported_symbol_semantic_target_from_declaration(context.nodes, declaration)
+        else {
+            continue;
+        };
+        let Some(target_declaration) = target.declaration_target() else {
+            continue;
+        };
+        if target_declaration.owner.is_some() {
+            continue;
+        }
+
+        let facts = collect_effect_summary_facts(context, target.provider_node);
+        match target_declaration.kind {
+            DeclarationKind::Function => {
+                if let Some(fact) = facts.into_iter().find(|fact| {
+                    fact.owner_type_name.is_none() && fact.name == target_declaration.name
+                }) {
+                    summaries
+                        .push(effect_summary_from_function_fact(declaration.name.clone(), fact));
+                }
             }
-            let fact =
-                collect_effect_summary_facts(context, target.provider_node).into_iter().find(
-                    |fact| fact.owner_type_name.is_none() && fact.name == target_declaration.name,
-                )?;
-            Some(effect_summary_from_fact(declaration.name.clone(), fact))
-        })
-        .collect()
+            DeclarationKind::Class => {
+                summaries.extend(facts.into_iter().filter_map(|fact| {
+                    (fact.owner_type_name.as_deref() == Some(target_declaration.name.as_str()))
+                        .then(|| effect_summary_from_method_fact(declaration.name.clone(), fact))
+                }));
+            }
+            _ => {}
+        }
+    }
+    summaries
 }
 
-fn effect_summary_from_fact(local_name: String, fact: SummaryEffectFact) -> EffectSummary {
+fn effect_summary_from_function_fact(local_name: String, fact: SummaryEffectFact) -> EffectSummary {
+    effect_summary_from_fact(local_name, None, fact)
+}
+
+fn effect_summary_from_method_fact(
+    local_owner_type_name: String,
+    fact: SummaryEffectFact,
+) -> EffectSummary {
+    effect_summary_from_fact(fact.name.clone(), Some(local_owner_type_name), fact)
+}
+
+fn effect_summary_from_fact(
+    callable: String,
+    owner_type_name: Option<String>,
+    fact: SummaryEffectFact,
+) -> EffectSummary {
     EffectSummary {
-        callable: local_name,
-        owner_type_name: fact.owner_type_name,
+        callable,
+        owner_type_name,
         pure: fact.pure,
         row: EffectRow::from_labels(fact.effects),
         sources: fact.sources.into_iter().map(EffectSource::Decorator).collect(),
