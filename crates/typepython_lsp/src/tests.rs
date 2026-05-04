@@ -268,6 +268,56 @@ fn hover_renders_effect_summary_for_decorated_callable() {
 }
 
 #[test]
+fn hover_renders_contextual_taint_effect_summary() {
+    let config = temp_workspace(
+        "hover_renders_contextual_taint_effect_summary",
+        &[(
+            "src/app/__init__.tpy",
+            concat!(
+                "from typing import Callable\n\n",
+                "def source(label: str):\n",
+                "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+                "        return fn\n",
+                "    return wrap\n\n",
+                "@source(\"html\")\n",
+                "def request_body() -> str:\n",
+                "    return \"raw\"\n\n",
+                "def load() -> str:\n",
+                "    return request_body()\n",
+            ),
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let source_hover = server
+        .handle_hover(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 8, "character": 5}
+        }))
+        .expect("hover should succeed");
+    let source_contents =
+        source_hover["contents"]["value"].as_str().expect("hover contents should be text");
+    assert!(
+        source_contents.contains("Effect summary: row [taint.source[html]]"),
+        "{source_contents}"
+    );
+
+    let inferred_hover = server
+        .handle_hover(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 11, "character": 5}
+        }))
+        .expect("hover should succeed");
+    let inferred_contents =
+        inferred_hover["contents"]["value"].as_str().expect("hover contents should be text");
+    assert!(
+        inferred_contents.contains("Effect summary: inferred row [taint.source[html]]"),
+        "{inferred_contents}"
+    );
+}
+
+#[test]
 fn hover_renders_effect_summary_for_adapter_declared_callable() {
     let config = temp_workspace(
         "hover_renders_effect_summary_for_adapter_declared_callable",

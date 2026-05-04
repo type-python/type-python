@@ -47,3 +47,5 @@ query_sql(body())                # accepted by decorator-only context matching
 ```
 
 Framework adapters can use the same `@source`, `@sink`, and `@sanitizer` vocabulary for FastAPI-style request bodies, template/HTML sinks, and escaping helpers without introducing runtime TypePython artifacts. Source, sink, and sanitizer declarations may live in a framework shim module while application code imports and composes them; the checker consumes the imported taint facts from effect summaries.
+
+LSP hover renders contextual taint facts in effect summaries, for example `taint.source[html]`, `taint.sink[html]`, and `taint.sanitize[html]`. Inferred hover summaries preserve those context labels when a local function or imported callable forwards a contextual taint source.

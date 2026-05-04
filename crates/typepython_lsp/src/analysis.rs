@@ -632,6 +632,10 @@ fn explicit_hover_effect_summary(
             summary.effects.insert(effect.to_owned());
             continue;
         }
+        if let Some(effect) = taint_effect_label_from_decorator(short) {
+            summary.effects.insert(effect);
+            continue;
+        }
         match short {
             "effect_pure" | "pure" => summary.pure = true,
             "effect_unsafe" => {
@@ -655,18 +659,9 @@ fn explicit_hover_effect_summary(
             "effect_runtime_validation" | "trusted_validator" => {
                 summary.effects.insert(String::from("runtime.validation"));
             }
-            "effect_taint_sanitize" | "sanitizer" => {
-                summary.effects.insert(String::from("taint.sanitize"));
-            }
             "must_use" | "must_call" | "must_close" | "must_dispose" | "must_await"
             | "must_consume" => {
                 summary.effects.insert(String::from("resource.lifecycle"));
-            }
-            "source" => {
-                summary.effects.insert(String::from("taint.source"));
-            }
-            "sink" => {
-                summary.effects.insert(String::from("taint.sink"));
             }
             _ => {}
         }
@@ -677,6 +672,20 @@ fn explicit_hover_effect_summary(
         }
     }
     summary
+}
+
+fn taint_effect_label_from_decorator(decorator: &str) -> Option<String> {
+    let (target, context) =
+        decorator.split_once(':').map_or((decorator, None), |(target, context)| {
+            (target, (!context.is_empty()).then_some(context))
+        });
+    let label = match target.rsplit('.').next().unwrap_or(target) {
+        "source" => "taint.source",
+        "sink" => "taint.sink",
+        "sanitizer" | "effect_taint_sanitize" => "taint.sanitize",
+        _ => return None,
+    };
+    Some(context.map_or_else(|| label.to_owned(), |context| format!("{label}[{context}]")))
 }
 
 fn infer_hover_effect_summaries(
