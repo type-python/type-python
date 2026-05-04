@@ -82,6 +82,7 @@ pub(super) enum EffectSource {
     Decorator(String),
     Lifecycle(String),
     UnsafeBlock,
+    Inferred(String),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -100,6 +101,15 @@ impl EffectSummary {
             .as_ref()
             .map(|owner| format!("{owner}.{}", self.callable))
             .unwrap_or_else(|| self.callable.clone())
+    }
+
+    fn key(&self) -> (Option<String>, String) {
+        (self.owner_type_name.clone(), self.callable.clone())
+    }
+
+    fn has_declared_effect_row(&self) -> bool {
+        !self.row.is_empty()
+            && self.sources.iter().any(|source| !matches!(source, EffectSource::Inferred(_)))
     }
 }
 
@@ -265,7 +275,10 @@ pub(super) fn collect_effect_summary_facts(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
 ) -> Vec<SummaryEffectFact> {
-    let mut facts = collect_effect_summaries(context, node)
+    let local_summaries = collect_local_effect_summaries(context, node);
+    let mut summaries = local_summaries.clone();
+    summaries.extend(collect_inferred_effect_summaries(context, node, &local_summaries));
+    let mut facts = summaries
         .into_iter()
         .map(|summary| SummaryEffectFact {
             name: summary.callable,
@@ -279,6 +292,7 @@ pub(super) fn collect_effect_summary_facts(
                     EffectSource::Decorator(name) => name,
                     EffectSource::Lifecycle(name) => name,
                     EffectSource::UnsafeBlock => String::from("unsafe:"),
+                    EffectSource::Inferred(name) => format!("inferred:{name}"),
                 })
                 .collect(),
             line: summary.line,
@@ -297,9 +311,217 @@ fn collect_visible_effect_summaries(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
 ) -> Vec<EffectSummary> {
-    let mut summaries = collect_effect_summaries(context, node);
+    let mut summaries = collect_local_effect_summaries(context, node);
     summaries.extend(collect_imported_effect_summaries(context, node));
+    summaries.extend(collect_inferred_effect_summaries(context, node, &summaries));
     summaries
+}
+
+fn collect_inferred_effect_summaries(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    seeds: &[EffectSummary],
+) -> Vec<EffectSummary> {
+    let declared_keys = seeds
+        .iter()
+        .filter(|summary| summary.pure || summary.has_declared_effect_row())
+        .map(EffectSummary::key)
+        .collect::<BTreeSet<_>>();
+    let mut summaries = seeds.to_vec();
+    let mut inferred = BTreeMap::<(Option<String>, String), EffectSummary>::new();
+
+    for _ in 0..8 {
+        let function_effects = effectful_function_summaries_by_name(&summaries);
+        let method_effects = effectful_method_summaries_by_name(&summaries);
+        let mut changed = false;
+
+        for edge in effect_call_edges(context, node) {
+            if declared_keys.contains(&edge.owner_key()) {
+                continue;
+            }
+            let callee = match &edge.callee {
+                EffectCallCallee::Function(callee) => function_effects.get(callee).copied(),
+                EffectCallCallee::Method { owner_type_name, method_name } => {
+                    method_effects.get(&(owner_type_name.clone(), method_name.clone())).copied()
+                }
+            };
+            let Some(callee) = callee else {
+                continue;
+            };
+            if callee.row.is_empty() {
+                continue;
+            }
+            let key = edge.owner_key();
+            let entry = inferred.entry(key.clone()).or_insert_with(|| EffectSummary {
+                callable: key.1.clone(),
+                owner_type_name: key.0.clone(),
+                pure: false,
+                row: EffectRow::empty(),
+                sources: Vec::new(),
+                line: edge.line,
+            });
+            let before = entry.row.clone();
+            entry.row.extend(&callee.row);
+            let inferred_source = EffectSource::Inferred(callee.display_name());
+            if !entry.sources.contains(&inferred_source) {
+                entry.sources.push(inferred_source);
+            }
+            entry.line = entry.line.min(edge.line);
+            if entry.row != before {
+                changed = true;
+            }
+        }
+
+        summaries = seeds.iter().cloned().chain(inferred.values().cloned()).collect();
+        if !changed {
+            break;
+        }
+    }
+
+    inferred.into_values().collect()
+}
+
+#[derive(Debug, Clone)]
+struct EffectCallEdge {
+    owner_type_name: Option<String>,
+    owner_name: String,
+    callee: EffectCallCallee,
+    line: usize,
+}
+
+impl EffectCallEdge {
+    fn owner_key(&self) -> (Option<String>, String) {
+        (self.owner_type_name.clone(), self.owner_name.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+enum EffectCallCallee {
+    Function(String),
+    Method { owner_type_name: String, method_name: String },
+}
+
+fn effect_call_edges(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> Vec<EffectCallEdge> {
+    let mut edges = Vec::new();
+    for assignment in &node.assignments {
+        let Some(owner_name) = assignment.owner_name.clone() else {
+            continue;
+        };
+        if let Some(callee) = assignment.value_callee.clone() {
+            edges.push(EffectCallEdge {
+                owner_type_name: assignment.owner_type_name.clone(),
+                owner_name: owner_name.clone(),
+                callee: EffectCallCallee::Function(callee),
+                line: assignment.line,
+            });
+        }
+        collect_expr_method_call_edges(
+            assignment.value.as_ref(),
+            assignment.owner_type_name.clone(),
+            owner_name,
+            assignment.line,
+            &mut edges,
+        );
+    }
+    for return_site in &node.returns {
+        if let Some(callee) = return_site.value_callee.clone() {
+            edges.push(EffectCallEdge {
+                owner_type_name: return_site.owner_type_name.clone(),
+                owner_name: return_site.owner_name.clone(),
+                callee: EffectCallCallee::Function(callee),
+                line: return_site.line,
+            });
+        }
+        collect_expr_method_call_edges(
+            return_site.value.as_ref(),
+            return_site.owner_type_name.clone(),
+            return_site.owner_name.clone(),
+            return_site.line,
+            &mut edges,
+        );
+    }
+    for call_site in context.load_direct_call_context_sites(node) {
+        let Some(owner_name) = call_site.owner_name.clone() else {
+            continue;
+        };
+        edges.push(EffectCallEdge {
+            owner_type_name: call_site.owner_type_name,
+            owner_name,
+            callee: EffectCallCallee::Function(call_site.callee),
+            line: call_site.line,
+        });
+    }
+    for method_call in &node.method_calls {
+        let Some(owner_name) = method_call.current_owner_name.clone() else {
+            continue;
+        };
+        edges.push(EffectCallEdge {
+            owner_type_name: method_call.current_owner_type_name.clone(),
+            owner_name,
+            callee: EffectCallCallee::Method {
+                owner_type_name: method_call.owner_name.clone(),
+                method_name: method_call.method.clone(),
+            },
+            line: method_call.line,
+        });
+    }
+    edges
+}
+
+fn collect_expr_method_call_edges(
+    value: Option<&typepython_syntax::DirectExprMetadata>,
+    owner_type_name: Option<String>,
+    owner_name: String,
+    line: usize,
+    edges: &mut Vec<EffectCallEdge>,
+) {
+    let Some(value) = value else {
+        return;
+    };
+    if let (Some(callee_owner), Some(method_name)) =
+        (&value.value_method_owner_name, &value.value_method_name)
+    {
+        edges.push(EffectCallEdge {
+            owner_type_name: owner_type_name.clone(),
+            owner_name: owner_name.clone(),
+            callee: EffectCallCallee::Method {
+                owner_type_name: callee_owner.clone(),
+                method_name: method_name.clone(),
+            },
+            line,
+        });
+    }
+    collect_expr_method_call_edges(
+        value.value_bool_left.as_deref(),
+        owner_type_name.clone(),
+        owner_name.clone(),
+        line,
+        edges,
+    );
+    collect_expr_method_call_edges(
+        value.value_bool_right.as_deref(),
+        owner_type_name.clone(),
+        owner_name.clone(),
+        line,
+        edges,
+    );
+    collect_expr_method_call_edges(
+        value.value_if_true.as_deref(),
+        owner_type_name.clone(),
+        owner_name.clone(),
+        line,
+        edges,
+    );
+    collect_expr_method_call_edges(
+        value.value_if_false.as_deref(),
+        owner_type_name,
+        owner_name,
+        line,
+        edges,
+    );
 }
 
 fn function_summaries_by_name(summaries: &[EffectSummary]) -> BTreeMap<String, &EffectSummary> {
@@ -454,13 +676,22 @@ fn effect_summary_from_fact(
         owner_type_name,
         pure: fact.pure,
         row: EffectRow::from_labels(fact.effects),
-        sources: fact.sources.into_iter().map(EffectSource::Decorator).collect(),
+        sources: fact.sources.into_iter().map(effect_source_from_fact_source).collect(),
         line: fact.line,
     }
 }
 
+fn effect_source_from_fact_source(source: String) -> EffectSource {
+    source
+        .strip_prefix("inferred:")
+        .map(|name| EffectSource::Inferred(name.to_owned()))
+        .unwrap_or(EffectSource::Decorator(source))
+}
+
 fn caller_effect_row_allows(caller: Option<&EffectSummary>, required: &EffectRow) -> bool {
-    caller.is_some_and(|summary| !summary.pure && summary.row.covers(required))
+    caller.is_some_and(|summary| {
+        !summary.pure && summary.has_declared_effect_row() && summary.row.covers(required)
+    })
 }
 
 fn capability_scopes_allow(scopes: &[CapabilityScope], line: usize, row: &EffectRow) -> bool {
@@ -994,7 +1225,7 @@ fn collect_capability_scopes(
         .collect()
 }
 
-fn collect_effect_summaries(
+fn collect_local_effect_summaries(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
 ) -> Vec<EffectSummary> {
@@ -1125,6 +1356,7 @@ fn effect_source_note(summary: &EffectSummary) -> String {
             EffectSource::Decorator(name) => format!("effect declared by `{name}`"),
             EffectSource::Lifecycle(name) => format!("resource effect inferred from `{name}`"),
             EffectSource::UnsafeBlock => String::from("capability granted by `unsafe:` scope"),
+            EffectSource::Inferred(name) => format!("effect inferred from `{name}`"),
         })
         .unwrap_or_else(|| String::from("effect source is unknown"));
     format!("{source} on line {}", summary.line)
