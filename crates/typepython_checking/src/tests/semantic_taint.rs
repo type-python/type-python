@@ -182,6 +182,53 @@ fn check_uses_framework_adapter_taint_source_and_sink_capabilities() {
 }
 
 #[test]
+fn check_uses_framework_adapter_taint_sanitizer_capability() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def framework_transform(**kwargs):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "@framework_transform(kind=\"function_decorator\", capabilities=(\"taint_source\",))\n",
+            "def request_body_marker[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@framework_transform(kind=\"function_decorator\", capabilities=(\"taint_sanitizer\",))\n",
+            "def html_escape_marker[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@framework_transform(kind=\"function_decorator\", capabilities=(\"taint_sink\",))\n",
+            "def html_response_marker[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@request_body_marker\n",
+            "def request_body() -> str:\n",
+            "    ...\n\n",
+            "@html_escape_marker\n",
+            "def escape_html(value: str) -> str:\n",
+            "    return value\n\n",
+            "@html_response_marker\n",
+            "def render_html(value: str) -> None:\n",
+            "    ...\n\n",
+            "def unsafe() -> None:\n",
+            "    raw = request_body()\n",
+            "    render_html(raw)\n\n",
+            "def safe() -> None:\n",
+            "    raw = request_body()\n",
+            "    render_html(escape_html(raw))\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("TPY4028").count(), 1, "{rendered}");
+    assert!(rendered.contains("tainted source result flows into sink `render_html`"), "{rendered}");
+}
+
+#[test]
 fn check_uses_explicit_taint_effect_labels_for_local_source_sink_flow() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(
