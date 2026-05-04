@@ -552,83 +552,364 @@ fn effect_summary_hover_detail(
     ) {
         return None;
     }
+    let summary_key = hover_effect_summary_key(declaration);
+    let summaries = hover_effect_summaries(workspace, node)?;
+    let summary = summaries.get(&summary_key)?;
+    if !summary.pure && summary.effects.is_empty() {
+        return None;
+    }
+    let row = if summary.effects.is_empty() {
+        String::from("pure")
+    } else {
+        summary.effects.iter().cloned().collect::<Vec<_>>().join(", ")
+    };
+    let label = if summary.inferred && !summary.effects.is_empty() {
+        format!("inferred row [{row}]")
+    } else if summary.pure {
+        format!("pure; row [{row}]")
+    } else {
+        format!("row [{row}]")
+    };
+    Some(format!("Effect summary: {label}"))
+}
+
+#[derive(Debug, Clone, Default)]
+struct HoverEffectSummary {
+    pure: bool,
+    effects: BTreeSet<String>,
+    inferred: bool,
+}
+
+fn hover_effect_summary_key(
+    declaration: &typepython_binding::Declaration,
+) -> (Option<String>, String) {
+    (declaration.owner.as_ref().map(|owner| owner.name.clone()), declaration.name.clone())
+}
+
+fn hover_effect_summaries(
+    workspace: &WorkspaceState,
+    node: &ModuleNode,
+) -> Option<BTreeMap<(Option<String>, String), HoverEffectSummary>> {
     let document = workspace.queries.documents_by_module_key.get(&node.module_key)?;
     let decorator_info = typepython_syntax::collect_decorator_transform_module_info(&document.text);
     let framework_info = typepython_syntax::collect_framework_transform_module_info(&document.text);
     let adapter_effects = framework_effect_labels_by_provider(&framework_info);
-    let site = decorator_info.callables.iter().find(|site| {
-        site.name == declaration.name
-            && site.owner_type_name.as_deref()
-                == declaration.owner.as_ref().map(|owner| owner.name.as_str())
-    })?;
-    let mut pure = false;
-    let mut effects = BTreeSet::new();
-    for decorator in &site.decorators {
+    let mut summaries = BTreeMap::new();
+    for site in decorator_info.callables {
+        let summary = explicit_hover_effect_summary(&site.decorators, &adapter_effects);
+        if summary.pure || !summary.effects.is_empty() {
+            summaries.insert((site.owner_type_name, site.name), summary);
+        }
+    }
+    add_stdlib_hover_effect_summaries(node, &mut summaries);
+    infer_hover_effect_summaries(&document.text, node, &mut summaries);
+    Some(summaries)
+}
+
+fn explicit_hover_effect_summary(
+    decorators: &[String],
+    adapter_effects: &BTreeMap<String, Vec<&'static str>>,
+) -> HoverEffectSummary {
+    let mut summary = HoverEffectSummary::default();
+    for decorator in decorators {
         let short = if decorator.contains("effect:") {
             decorator.as_str()
         } else {
             decorator.rsplit('.').next().unwrap_or(decorator.as_str())
         };
         if let Some(effect) = effect_label_from_decorator(short) {
-            effects.insert(effect);
+            summary.effects.insert(effect.to_owned());
             continue;
         }
         match short {
-            "effect_pure" | "pure" => pure = true,
+            "effect_pure" | "pure" => summary.pure = true,
             "effect_unsafe" => {
-                effects.insert("unsafe");
+                summary.effects.insert(String::from("unsafe"));
             }
             "effect_io_fs" => {
-                effects.insert("io.fs");
+                summary.effects.insert(String::from("io.fs"));
             }
             "effect_io_net" => {
-                effects.insert("io.net");
+                summary.effects.insert(String::from("io.net"));
             }
             "effect_io_proc" => {
-                effects.insert("io.proc");
+                summary.effects.insert(String::from("io.proc"));
             }
             "effect_time" => {
-                effects.insert("time");
+                summary.effects.insert(String::from("time"));
             }
             "effect_random" => {
-                effects.insert("random");
+                summary.effects.insert(String::from("random"));
             }
             "effect_runtime_validation" | "trusted_validator" => {
-                effects.insert("runtime.validation");
+                summary.effects.insert(String::from("runtime.validation"));
             }
             "effect_taint_sanitize" | "sanitizer" => {
-                effects.insert("taint.sanitize");
+                summary.effects.insert(String::from("taint.sanitize"));
             }
             "must_use" | "must_call" | "must_close" | "must_dispose" | "must_await"
             | "must_consume" => {
-                effects.insert("resource.lifecycle");
+                summary.effects.insert(String::from("resource.lifecycle"));
             }
             "source" => {
-                effects.insert("taint.source");
+                summary.effects.insert(String::from("taint.source"));
             }
             "sink" => {
-                effects.insert("taint.sink");
+                summary.effects.insert(String::from("taint.sink"));
             }
             _ => {}
         }
         if let Some(adapter_labels) =
             adapter_effects.get(short).or_else(|| adapter_effects.get(decorator.as_str()))
         {
-            effects.extend(adapter_labels.iter().copied());
+            summary.effects.extend(adapter_labels.iter().map(|label| (*label).to_owned()));
         }
     }
-    if !pure && effects.is_empty() {
-        return None;
+    summary
+}
+
+fn infer_hover_effect_summaries(
+    document_text: &str,
+    node: &ModuleNode,
+    summaries: &mut BTreeMap<(Option<String>, String), HoverEffectSummary>,
+) {
+    let explicit_keys = summaries
+        .iter()
+        .filter_map(|(key, summary)| (!summary.inferred).then_some(key.clone()))
+        .collect::<BTreeSet<_>>();
+    for _ in 0..8 {
+        let mut changed = false;
+        let function_effects = hover_function_effects_by_name(summaries);
+        let method_effects = hover_method_effects_by_name(summaries);
+        for assignment in &node.assignments {
+            let Some(owner) = assignment.owner_name.as_ref() else {
+                continue;
+            };
+            let owner_key = (assignment.owner_type_name.clone(), owner.clone());
+            if explicit_keys.contains(&owner_key) {
+                continue;
+            }
+            if let Some(callee) = assignment.value_callee.as_deref()
+                && let Some(effects) = function_effects.get(callee)
+            {
+                changed |=
+                    extend_inferred_hover_effect_summary(summaries, owner_key.clone(), effects);
+            }
+            if let Some(effects) = hover_method_effects(
+                &method_effects,
+                assignment.value_method_owner_name.as_deref(),
+                assignment.value_method_name.as_deref(),
+            ) {
+                changed |= extend_inferred_hover_effect_summary(summaries, owner_key, effects);
+            }
+        }
+        for return_site in &node.returns {
+            let owner_key = (return_site.owner_type_name.clone(), return_site.owner_name.clone());
+            if explicit_keys.contains(&owner_key) {
+                continue;
+            }
+            if let Some(callee) = return_site.value_callee.as_deref()
+                && let Some(effects) = function_effects.get(callee)
+            {
+                changed |=
+                    extend_inferred_hover_effect_summary(summaries, owner_key.clone(), effects);
+            }
+            if let Some(effects) = hover_method_effects(
+                &method_effects,
+                return_site.value_method_owner_name.as_deref(),
+                return_site.value_method_name.as_deref(),
+            ) {
+                changed |= extend_inferred_hover_effect_summary(summaries, owner_key, effects);
+            }
+        }
+        for call_site in typepython_syntax::collect_direct_call_context_sites(document_text) {
+            let Some(owner) = call_site.owner_name.as_ref() else {
+                continue;
+            };
+            let owner_key = (call_site.owner_type_name.clone(), owner.clone());
+            if explicit_keys.contains(&owner_key) {
+                continue;
+            }
+            if let Some(effects) = function_effects.get(&call_site.callee) {
+                changed |= extend_inferred_hover_effect_summary(summaries, owner_key, effects);
+            }
+        }
+        for method_call in &node.method_calls {
+            let Some(owner) = method_call.current_owner_name.as_ref() else {
+                continue;
+            };
+            let owner_key = (method_call.current_owner_type_name.clone(), owner.clone());
+            if explicit_keys.contains(&owner_key) {
+                continue;
+            }
+            if let Some(effects) = hover_method_effects(
+                &method_effects,
+                Some(method_call.owner_name.as_str()),
+                Some(method_call.method.as_str()),
+            ) {
+                changed |= extend_inferred_hover_effect_summary(summaries, owner_key, effects);
+            }
+        }
+        if !changed {
+            break;
+        }
     }
-    let row = if effects.is_empty() {
-        String::from("pure")
-    } else {
-        effects.into_iter().collect::<Vec<_>>().join(", ")
-    };
-    Some(format!(
-        "Effect summary: {}",
-        if pure { format!("pure; row [{row}]") } else { format!("row [{row}]") }
-    ))
+}
+
+fn hover_function_effects_by_name(
+    summaries: &BTreeMap<(Option<String>, String), HoverEffectSummary>,
+) -> BTreeMap<String, BTreeSet<String>> {
+    summaries
+        .iter()
+        .filter(|((owner, _), summary)| owner.is_none() && !summary.effects.is_empty())
+        .map(|((_, name), summary)| (name.clone(), summary.effects.clone()))
+        .collect()
+}
+
+fn hover_method_effects_by_name(
+    summaries: &BTreeMap<(Option<String>, String), HoverEffectSummary>,
+) -> BTreeMap<(String, String), BTreeSet<String>> {
+    summaries
+        .iter()
+        .filter_map(|((owner, name), summary)| {
+            owner.as_ref().and_then(|owner| {
+                (!summary.effects.is_empty())
+                    .then(|| ((owner.clone(), name.clone()), summary.effects.clone()))
+            })
+        })
+        .collect()
+}
+
+fn hover_method_effects<'a>(
+    method_effects: &'a BTreeMap<(String, String), BTreeSet<String>>,
+    owner_name: Option<&str>,
+    method_name: Option<&str>,
+) -> Option<&'a BTreeSet<String>> {
+    method_effects.get(&(owner_name?.to_owned(), method_name?.to_owned()))
+}
+
+fn extend_inferred_hover_effect_summary(
+    summaries: &mut BTreeMap<(Option<String>, String), HoverEffectSummary>,
+    key: (Option<String>, String),
+    effects: &BTreeSet<String>,
+) -> bool {
+    if effects.is_empty() {
+        return false;
+    }
+    let entry = summaries.entry(key).or_insert_with(|| HoverEffectSummary {
+        pure: false,
+        effects: BTreeSet::new(),
+        inferred: true,
+    });
+    let before = entry.effects.len();
+    entry.effects.extend(effects.iter().cloned());
+    entry.inferred = true;
+    entry.effects.len() != before
+}
+
+fn add_stdlib_hover_effect_summaries(
+    node: &ModuleNode,
+    summaries: &mut BTreeMap<(Option<String>, String), HoverEffectSummary>,
+) {
+    for declaration in node
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_none())
+        .filter(|declaration| declaration.kind == typepython_binding::DeclarationKind::Import)
+    {
+        let Some(target) = declaration.import_target() else {
+            continue;
+        };
+        if let Some(symbol_target) = &target.symbol_target
+            && let Some(effect) =
+                stdlib_hover_effect_label(&symbol_target.module_key, &symbol_target.symbol_name)
+        {
+            summaries.insert(
+                (None, declaration.name.clone()),
+                HoverEffectSummary {
+                    pure: false,
+                    effects: BTreeSet::from([effect.to_owned()]),
+                    inferred: true,
+                },
+            );
+            continue;
+        }
+        for (method, effect) in stdlib_hover_effect_methods(&target.raw_target) {
+            summaries.insert(
+                (Some(declaration.name.clone()), method.to_owned()),
+                HoverEffectSummary {
+                    pure: false,
+                    effects: BTreeSet::from([effect.to_owned()]),
+                    inferred: true,
+                },
+            );
+        }
+    }
+}
+
+fn stdlib_hover_effect_methods(module: &str) -> Vec<(&'static str, &'static str)> {
+    stdlib_hover_effect_symbols_for_module(module)
+        .into_iter()
+        .filter_map(|symbol| {
+            stdlib_hover_effect_label(module, symbol).map(|effect| (symbol, effect))
+        })
+        .collect()
+}
+
+fn stdlib_hover_effect_symbols_for_module(module: &str) -> Vec<&'static str> {
+    match module {
+        "time" => vec!["monotonic", "perf_counter", "process_time", "sleep", "time"],
+        "random" => vec!["choice", "choices", "randint", "random", "randrange", "seed", "shuffle"],
+        "secrets" => vec!["choice", "randbelow", "token_bytes", "token_hex", "token_urlsafe"],
+        "subprocess" => vec!["Popen", "call", "check_call", "check_output", "run"],
+        "os" => vec![
+            "chdir",
+            "getcwd",
+            "listdir",
+            "makedirs",
+            "mkdir",
+            "popen",
+            "remove",
+            "removedirs",
+            "rename",
+            "replace",
+            "rmdir",
+            "scandir",
+            "stat",
+            "system",
+            "unlink",
+        ],
+        "urllib.request" => vec!["urlopen", "urlretrieve"],
+        _ => Vec::new(),
+    }
+}
+
+fn stdlib_hover_effect_label(module: &str, symbol: &str) -> Option<&'static str> {
+    match module {
+        "time" => {
+            matches!(symbol, "monotonic" | "perf_counter" | "process_time" | "sleep" | "time")
+                .then_some("time")
+        }
+        "random" => matches!(
+            symbol,
+            "choice" | "choices" | "randint" | "random" | "randrange" | "seed" | "shuffle"
+        )
+        .then_some("random"),
+        "secrets" => {
+            matches!(symbol, "choice" | "randbelow" | "token_bytes" | "token_hex" | "token_urlsafe")
+                .then_some("random")
+        }
+        "subprocess" => matches!(symbol, "Popen" | "call" | "check_call" | "check_output" | "run")
+            .then_some("io.proc"),
+        "os" => match symbol {
+            "popen" | "system" => Some("io.proc"),
+            "chdir" | "getcwd" | "listdir" | "makedirs" | "mkdir" | "remove" | "removedirs"
+            | "rename" | "replace" | "rmdir" | "scandir" | "stat" | "unlink" => Some("io.fs"),
+            _ => None,
+        },
+        "urllib.request" => matches!(symbol, "urlopen" | "urlretrieve").then_some("io.net"),
+        _ => None,
+    }
 }
 
 fn effect_label_from_decorator(decorator: &str) -> Option<&str> {
