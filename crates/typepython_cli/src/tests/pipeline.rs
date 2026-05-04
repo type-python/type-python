@@ -220,6 +220,44 @@ fn run_pipeline_blocks_emit_when_lowering_fails_even_if_emit_is_allowed() {
 }
 
 #[test]
+fn run_pipeline_honors_experimental_shape_transform_gate() {
+    let project_dir = temp_project_dir("run_pipeline_honors_experimental_shape_transform_gate");
+    let runtime_source = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[experimental]\nshape_transforms = true\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.tpy"),
+            concat!(
+                "data class User:\n",
+                "    id: int\n",
+                "    name: str\n\n",
+                "typealias UserPatch = Partial[User]\n",
+            ),
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let snapshot = run_pipeline(&config).expect("pipeline should run");
+        assert!(!snapshot.diagnostics.has_errors(), "{}", snapshot.diagnostics.as_text());
+        let runtime_source = snapshot
+            .lowered_modules
+            .iter()
+            .find(|module| module.source_path.ends_with("src/app.tpy"))
+            .map(|module| module.python_source.clone())
+            .expect("expected lowered runtime source");
+        remove_temp_project_dir(&project_dir);
+        runtime_source
+    };
+
+    assert!(runtime_source.contains("class UserPatch(TypedDict):"), "{runtime_source}");
+    assert!(runtime_source.contains("id: NotRequired[int]"), "{runtime_source}");
+    assert!(runtime_source.contains("name: NotRequired[str]"), "{runtime_source}");
+}
+
+#[test]
 fn run_build_like_command_emits_outputs_when_checker_fails_and_emit_is_allowed() {
     let project_dir = temp_project_dir(
         "run_build_like_command_emits_outputs_when_checker_fails_and_emit_is_allowed",

@@ -104,6 +104,8 @@ pub struct Config {
     pub typing: TypingConfig,
     /// Watch settings.
     pub watch: WatchConfig,
+    /// Explicitly gated experimental features.
+    pub experimental: ExperimentalConfig,
     /// Explicit runtime-validation boundary declarations.
     pub boundaries: Vec<BoundaryConfig>,
 }
@@ -264,6 +266,13 @@ impl Default for EmitConfig {
     }
 }
 
+/// Explicit opt-ins for experimental language slices.
+#[derive(Debug, Clone, Default)]
+pub struct ExperimentalConfig {
+    /// Enable shape projection over non-`TypedDict` field-bearing sources.
+    pub shape_transforms: bool,
+}
+
 /// Import typing fallback.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -367,6 +376,7 @@ struct RawConfig {
     emit: Option<RawEmitConfig>,
     typing: Option<RawTypingConfig>,
     watch: Option<RawWatchConfig>,
+    experimental: Option<RawExperimentalConfig>,
     boundaries: Option<Vec<RawBoundaryConfig>>,
 }
 
@@ -414,6 +424,12 @@ struct RawEmitConfig {
     no_emit_on_error: Option<bool>,
     runtime_validators: Option<bool>,
     emit_style: Option<EmitStyle>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawExperimentalConfig {
+    shape_transforms: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -591,6 +607,12 @@ impl Config {
             && let Some(debounce_ms) = watch.debounce_ms
         {
             config.watch.debounce_ms = debounce_ms;
+        }
+
+        if let Some(experimental) = raw.experimental
+            && let Some(shape_transforms) = experimental.shape_transforms
+        {
+            config.experimental.shape_transforms = shape_transforms;
         }
 
         if let Some(boundaries) = raw.boundaries {
@@ -1681,6 +1703,8 @@ mod tests {
                     "require_known_public_types = true\n",
                     "infer_passthrough = true\n",
                     "conditional_returns = true\n\n",
+                    "[experimental]\n",
+                    "shape_transforms = true\n\n",
                     "[watch]\n",
                     "debounce_ms = 125\n\n",
                     "[[boundaries]]\n",
@@ -1752,6 +1776,7 @@ mod tests {
         assert!(handle.config.typing.require_known_public_types);
         assert!(handle.config.typing.infer_passthrough);
         assert!(handle.config.typing.conditional_returns);
+        assert!(handle.config.experimental.shape_transforms);
         assert_eq!(handle.config.watch.debounce_ms, 125);
         assert_eq!(handle.config.boundaries.len(), 2);
         assert_eq!(handle.config.boundaries[0].name, "create_user_request");
@@ -1807,6 +1832,8 @@ mod tests {
                     "require_known_public_types = false\n",
                     "infer_passthrough = false\n",
                     "conditional_returns = false\n\n",
+                    "[tool.typepython.experimental]\n",
+                    "shape_transforms = false\n\n",
                     "[tool.typepython.watch]\n",
                     "debounce_ms = 40\n"
                 ),
@@ -1857,6 +1884,7 @@ mod tests {
         assert!(!handle.config.typing.require_known_public_types);
         assert!(!handle.config.typing.infer_passthrough);
         assert!(!handle.config.typing.conditional_returns);
+        assert!(!handle.config.experimental.shape_transforms);
         assert_eq!(handle.config.watch.debounce_ms, 40);
     }
 

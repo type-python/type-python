@@ -1711,6 +1711,40 @@ fn execute_command_previews_current_file_emit_outputs() {
 }
 
 #[test]
+fn execute_command_preview_honors_experimental_shape_transform_gate() {
+    let config = temp_workspace_with_config(
+        "execute_command_preview_honors_experimental_shape_transform_gate",
+        "[project]\nsrc = [\"src\"]\n\n[experimental]\nshape_transforms = true\n",
+        &[(
+            "src/app/__init__.tpy",
+            "data class User:\n    id: int\n    name: str\n\n\
+             typealias UserPatch = Partial[User]\n",
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let responses = server
+        .handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "workspace/executeCommand",
+            "params": {
+                "command": "typepython.previewEmit",
+                "arguments": [uri]
+            }
+        }))
+        .expect("preview command should succeed");
+
+    assert_eq!(responses.len(), 1);
+    let result = &responses[0]["result"];
+    let python = result["python"].as_str().unwrap_or_default();
+    assert!(python.contains("class UserPatch(TypedDict):"));
+    assert!(python.contains("id: NotRequired[int]"));
+    assert!(python.contains("name: NotRequired[str]"));
+}
+
+#[test]
 fn workflow_command_args_map_to_cli_invocations() {
     let project_dir = Path::new("/tmp/typepython-project");
 

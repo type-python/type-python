@@ -140,6 +140,8 @@ Checker-side semantic `Shape` remains the richer internal model for assignabilit
 
 Incremental public summaries now carry stable `shapeFingerprints` in solver facts. The fingerprint is derived from a field-bearing declaration's exported field/member surface, so shape-affecting changes invalidate downstream summaries without relying on raw source noise.
 
+Project builds and LSP preview emit gate non-`TypedDict` projection materialization behind `[experimental].shape_transforms = true`. With the gate disabled, `TypedDict` projections remain available while class-backed projection aliases fail closed instead of silently changing the public surface.
+
 ## Acceptance criteria
 
 - Existing `TypedDict` transform tests continue to pass unchanged.

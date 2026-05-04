@@ -331,7 +331,7 @@ impl AnalysisHost {
             &LoweringOptions {
                 target_python: config.config.project.target_python,
                 emit_style: config.config.emit.emit_style,
-                experimental_shape_transforms: false,
+                experimental_shape_transforms: config.config.experimental.shape_transforms,
             },
         );
         if lowering.diagnostics.has_errors() {

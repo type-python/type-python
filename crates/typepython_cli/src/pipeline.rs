@@ -96,6 +96,8 @@ struct MaterializedBuildManifest {
     incremental: IncrementalState,
     emit_plan: Vec<CachedEmitArtifact>,
     runtime_validators: bool,
+    #[serde(default)]
+    experimental_shape_transforms: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -757,6 +759,7 @@ fn can_reuse_cached_pipeline_outputs(
         manifest.incremental == analyzed.incremental
             && manifest.emit_plan == cached_emit_artifacts(&analyzed.pre_lowering_emit_plan)
             && manifest.runtime_validators == config.config.emit.runtime_validators
+            && manifest.experimental_shape_transforms == config.config.experimental.shape_transforms
             && !verify_build_artifacts(config, &analyzed.pre_lowering_emit_plan).has_errors()
     })
 }
@@ -897,6 +900,8 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         Some(manifest)
             if manifest.incremental == analyzed.incremental
                 && manifest.runtime_validators == config.config.emit.runtime_validators
+                && manifest.experimental_shape_transforms
+                    == config.config.experimental.shape_transforms
                 && verify_build_artifacts(config, &analyzed.pre_lowering_emit_plan)
                     .has_errors() =>
         {
@@ -904,13 +909,17 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         }
         Some(manifest)
             if manifest.incremental == analyzed.incremental
-                && manifest.runtime_validators == config.config.emit.runtime_validators =>
+                && manifest.runtime_validators == config.config.emit.runtime_validators
+                && manifest.experimental_shape_transforms
+                    == config.config.experimental.shape_transforms =>
         {
             BTreeSet::new()
         }
         Some(manifest)
             if manifest.incremental.metadata != analyzed.incremental.metadata
-                || manifest.runtime_validators != config.config.emit.runtime_validators =>
+                || manifest.runtime_validators != config.config.emit.runtime_validators
+                || manifest.experimental_shape_transforms
+                    != config.config.experimental.shape_transforms =>
         {
             project_module_keys.clone()
         }
@@ -934,7 +943,7 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let lowering_options = LoweringOptions {
         target_python: config.config.project.target_python,
         emit_style: config.config.emit.emit_style,
-        experimental_shape_transforms: false,
+        experimental_shape_transforms: config.config.experimental.shape_transforms,
     };
     let lowering_results: Vec<_> = prepared
         .syntax_trees
@@ -1110,6 +1119,7 @@ fn write_materialized_build_manifest(
         incremental: snapshot.incremental.clone(),
         emit_plan: cached_emit_artifacts(&snapshot.emit_plan),
         runtime_validators: config.config.emit.runtime_validators,
+        experimental_shape_transforms: config.config.experimental.shape_transforms,
     })
     .context("unable to serialize materialized build manifest")?;
     fs::write(&manifest_path, payload)

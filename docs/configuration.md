@@ -224,6 +224,18 @@ conditional_returns = false
 
 
 # ============================================================================
+# [experimental] -- Explicit opt-ins for unstable language slices
+# ============================================================================
+[experimental]
+
+# Enable shape projection over non-TypedDict field-bearing sources such as
+# TypePython data classes. The emitted surface remains checker-neutral, but the
+# feature is not part of the Core v1 compatibility promise.
+# Default: false
+shape_transforms = false
+
+
+# ============================================================================
 # [watch] -- File watching behavior
 # ============================================================================
 [watch]
@@ -278,6 +290,12 @@ For gradual adoption in existing Python projects. It relaxes strictness, but it 
 | `require_known_public_types`   | `false`     |
 | `infer_passthrough`            | `false`     |
 | `conditional_returns`          | `false`     |
+
+Experimental defaults:
+
+| Setting            | Value   |
+| ------------------ | ------- |
+| `shape_transforms` | `false` |
 
 ## pyproject.toml Embedding
 
