@@ -300,6 +300,32 @@ pub(super) fn effect_capability_diagnostics(
             );
         }
     }
+    for edge in effect_call_edges(context, node) {
+        let caller = caller_effect_summary(
+            &summary_by_name,
+            &summary_by_method,
+            &edge.owner_name,
+            edge.owner_type_name.as_deref(),
+        );
+        let callee_summary = match &edge.callee {
+            EffectCallCallee::Function(callee) => effectful_by_name.get(callee).copied(),
+            EffectCallCallee::Method { owner_type_name, method_name } => {
+                effectful_by_method.get(&(owner_type_name.clone(), method_name.clone())).copied()
+            }
+        };
+        if let Some(callee_summary) = callee_summary {
+            maybe_push_effect_call_diagnostic(
+                &mut diagnostics,
+                &mut reported,
+                node,
+                &capability_scopes,
+                &edge.owner_name,
+                caller,
+                callee_summary,
+                edge.line,
+            );
+        }
+    }
     diagnostics
 }
 
@@ -442,19 +468,12 @@ fn effect_call_edges(
     node: &typepython_graph::ModuleNode,
 ) -> Vec<EffectCallEdge> {
     let mut edges = Vec::new();
+    let owner_lookup = effect_owner_lookup(context, node);
     for assignment in &node.assignments {
         let Some(owner_name) = assignment.owner_name.clone() else {
             continue;
         };
-        if let Some(callee) = assignment.value_callee.clone() {
-            edges.push(EffectCallEdge {
-                owner_type_name: assignment.owner_type_name.clone(),
-                owner_name: owner_name.clone(),
-                callee: EffectCallCallee::Function(callee),
-                line: assignment.line,
-            });
-        }
-        collect_expr_method_call_edges(
+        collect_expr_call_edges(
             assignment.value.as_ref(),
             assignment.owner_type_name.clone(),
             owner_name,
@@ -463,15 +482,7 @@ fn effect_call_edges(
         );
     }
     for return_site in &node.returns {
-        if let Some(callee) = return_site.value_callee.clone() {
-            edges.push(EffectCallEdge {
-                owner_type_name: return_site.owner_type_name.clone(),
-                owner_name: return_site.owner_name.clone(),
-                callee: EffectCallCallee::Function(callee),
-                line: return_site.line,
-            });
-        }
-        collect_expr_method_call_edges(
+        collect_expr_call_edges(
             return_site.value.as_ref(),
             return_site.owner_type_name.clone(),
             return_site.owner_name.clone(),
@@ -490,24 +501,110 @@ fn effect_call_edges(
             line: call_site.line,
         });
     }
+    if let Some(source) = context.load_source_text(node) {
+        for call_site in typepython_syntax::collect_nested_direct_call_context_sites(&source) {
+            let Some(owner_name) = call_site.owner_name else {
+                continue;
+            };
+            edges.push(EffectCallEdge {
+                owner_type_name: call_site.owner_type_name,
+                owner_name,
+                callee: EffectCallCallee::Function(call_site.callee),
+                line: call_site.line,
+            });
+        }
+    }
+    for call in &node.calls {
+        let Some((owner_type_name, owner_name)) = owner_lookup.get(&call.line) else {
+            continue;
+        };
+        edges.push(EffectCallEdge {
+            owner_type_name: owner_type_name.clone(),
+            owner_name: owner_name.clone(),
+            callee: EffectCallCallee::Function(call.callee.clone()),
+            line: call.line,
+        });
+        for value in call
+            .arg_values
+            .iter()
+            .chain(&call.starred_arg_values)
+            .chain(&call.keyword_arg_values)
+            .chain(&call.keyword_expansion_values)
+        {
+            collect_expr_call_edges(
+                Some(value),
+                owner_type_name.clone(),
+                owner_name.clone(),
+                call.line,
+                &mut edges,
+            );
+        }
+    }
     for method_call in &node.method_calls {
         let Some(owner_name) = method_call.current_owner_name.clone() else {
             continue;
         };
         edges.push(EffectCallEdge {
             owner_type_name: method_call.current_owner_type_name.clone(),
-            owner_name,
+            owner_name: owner_name.clone(),
             callee: EffectCallCallee::Method {
                 owner_type_name: method_call.owner_name.clone(),
                 method_name: method_call.method.clone(),
             },
             line: method_call.line,
         });
+        for value in method_call
+            .arg_values
+            .iter()
+            .chain(&method_call.starred_arg_values)
+            .chain(&method_call.keyword_arg_values)
+            .chain(&method_call.keyword_expansion_values)
+        {
+            collect_expr_call_edges(
+                Some(value),
+                method_call.current_owner_type_name.clone(),
+                owner_name.clone(),
+                method_call.line,
+                &mut edges,
+            );
+        }
     }
     edges
 }
 
-fn collect_expr_method_call_edges(
+fn effect_owner_lookup(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<usize, (Option<String>, String)> {
+    let mut owners = BTreeMap::new();
+    for assignment in &node.assignments {
+        if let Some(owner) = assignment.owner_name.as_ref() {
+            owners.insert(assignment.line, (assignment.owner_type_name.clone(), owner.clone()));
+        }
+    }
+    for return_site in &node.returns {
+        owners.insert(
+            return_site.line,
+            (return_site.owner_type_name.clone(), return_site.owner_name.clone()),
+        );
+    }
+    for call_site in context.load_direct_call_context_sites(node) {
+        if let Some(owner) = call_site.owner_name {
+            owners.insert(call_site.line, (call_site.owner_type_name, owner));
+        }
+    }
+    for method_call in &node.method_calls {
+        if let Some(owner) = method_call.current_owner_name.as_ref() {
+            owners.insert(
+                method_call.line,
+                (method_call.current_owner_type_name.clone(), owner.clone()),
+            );
+        }
+    }
+    owners
+}
+
+fn collect_expr_call_edges(
     value: Option<&typepython_syntax::DirectExprMetadata>,
     owner_type_name: Option<String>,
     owner_name: String,
@@ -517,6 +614,14 @@ fn collect_expr_method_call_edges(
     let Some(value) = value else {
         return;
     };
+    if let Some(callee) = &value.value_callee {
+        edges.push(EffectCallEdge {
+            owner_type_name: owner_type_name.clone(),
+            owner_name: owner_name.clone(),
+            callee: EffectCallCallee::Function(callee.clone()),
+            line,
+        });
+    }
     if let (Some(callee_owner), Some(method_name)) =
         (&value.value_method_owner_name, &value.value_method_name)
     {
@@ -530,34 +635,84 @@ fn collect_expr_method_call_edges(
             line,
         });
     }
-    collect_expr_method_call_edges(
+    for inner in [
+        value.value_subscript_target.as_deref(),
         value.value_bool_left.as_deref(),
-        owner_type_name.clone(),
-        owner_name.clone(),
-        line,
-        edges,
-    );
-    collect_expr_method_call_edges(
         value.value_bool_right.as_deref(),
-        owner_type_name.clone(),
-        owner_name.clone(),
-        line,
-        edges,
-    );
-    collect_expr_method_call_edges(
         value.value_if_true.as_deref(),
-        owner_type_name.clone(),
-        owner_name.clone(),
-        line,
-        edges,
-    );
-    collect_expr_method_call_edges(
         value.value_if_false.as_deref(),
-        owner_type_name,
-        owner_name,
-        line,
-        edges,
-    );
+        value.value_binop_left.as_deref(),
+        value.value_binop_right.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        collect_expr_call_edges(
+            Some(inner),
+            owner_type_name.clone(),
+            owner_name.clone(),
+            line,
+            edges,
+        );
+    }
+    for value in
+        value.value_list_elements.iter().flatten().chain(value.value_set_elements.iter().flatten())
+    {
+        collect_expr_call_edges(
+            Some(value),
+            owner_type_name.clone(),
+            owner_name.clone(),
+            line,
+            edges,
+        );
+    }
+    if let Some(entries) = &value.value_dict_entries {
+        for entry in entries {
+            collect_expr_call_edges(
+                entry.key_value.as_deref(),
+                owner_type_name.clone(),
+                owner_name.clone(),
+                line,
+                edges,
+            );
+            collect_expr_call_edges(
+                Some(&entry.value),
+                owner_type_name.clone(),
+                owner_name.clone(),
+                line,
+                edges,
+            );
+        }
+    }
+    for comprehension in
+        [value.value_list_comprehension.as_deref(), value.value_generator_comprehension.as_deref()]
+            .into_iter()
+            .flatten()
+    {
+        collect_expr_call_edges(
+            comprehension.key.as_deref(),
+            owner_type_name.clone(),
+            owner_name.clone(),
+            line,
+            edges,
+        );
+        collect_expr_call_edges(
+            Some(&comprehension.element),
+            owner_type_name.clone(),
+            owner_name.clone(),
+            line,
+            edges,
+        );
+        for clause in &comprehension.clauses {
+            collect_expr_call_edges(
+                Some(&clause.iter),
+                owner_type_name.clone(),
+                owner_name.clone(),
+                line,
+                edges,
+            );
+        }
+    }
 }
 
 fn function_summaries_by_name(summaries: &[EffectSummary]) -> BTreeMap<String, &EffectSummary> {

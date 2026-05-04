@@ -701,6 +701,7 @@ fn infer_hover_effect_summaries(
         let mut changed = false;
         let function_effects = hover_function_effects_by_name(summaries);
         let method_effects = hover_method_effects_by_name(summaries);
+        let owner_lookup = hover_effect_owner_lookup(document_text, node);
         for assignment in &node.assignments {
             let Some(owner) = assignment.owner_name.as_ref() else {
                 continue;
@@ -754,6 +755,48 @@ fn infer_hover_effect_summaries(
                 changed |= extend_inferred_hover_effect_summary(summaries, owner_key, effects);
             }
         }
+        for call_site in typepython_syntax::collect_nested_direct_call_context_sites(document_text)
+        {
+            let Some(owner) = call_site.owner_name.as_ref() else {
+                continue;
+            };
+            let owner_key = (call_site.owner_type_name.clone(), owner.clone());
+            if explicit_keys.contains(&owner_key) {
+                continue;
+            }
+            if let Some(effects) = function_effects.get(&call_site.callee) {
+                changed |= extend_inferred_hover_effect_summary(summaries, owner_key, effects);
+            }
+        }
+        for call in &node.calls {
+            let Some((owner_type_name, owner_name)) = owner_lookup.get(&call.line) else {
+                continue;
+            };
+            let owner_key = (owner_type_name.clone(), owner_name.clone());
+            if explicit_keys.contains(&owner_key) {
+                continue;
+            }
+            if let Some(effects) = function_effects.get(&call.callee) {
+                changed |=
+                    extend_inferred_hover_effect_summary(summaries, owner_key.clone(), effects);
+            }
+            let mut nested_effects = BTreeSet::new();
+            for value in call
+                .arg_values
+                .iter()
+                .chain(&call.starred_arg_values)
+                .chain(&call.keyword_arg_values)
+                .chain(&call.keyword_expansion_values)
+            {
+                collect_hover_expr_effects(
+                    value,
+                    &function_effects,
+                    &method_effects,
+                    &mut nested_effects,
+                );
+            }
+            changed |= extend_inferred_hover_effect_summary(summaries, owner_key, &nested_effects);
+        }
         for method_call in &node.method_calls {
             let Some(owner) = method_call.current_owner_name.as_ref() else {
                 continue;
@@ -767,11 +810,125 @@ fn infer_hover_effect_summaries(
                 Some(method_call.owner_name.as_str()),
                 Some(method_call.method.as_str()),
             ) {
-                changed |= extend_inferred_hover_effect_summary(summaries, owner_key, effects);
+                changed |=
+                    extend_inferred_hover_effect_summary(summaries, owner_key.clone(), effects);
             }
+            let mut nested_effects = BTreeSet::new();
+            for value in method_call
+                .arg_values
+                .iter()
+                .chain(&method_call.starred_arg_values)
+                .chain(&method_call.keyword_arg_values)
+                .chain(&method_call.keyword_expansion_values)
+            {
+                collect_hover_expr_effects(
+                    value,
+                    &function_effects,
+                    &method_effects,
+                    &mut nested_effects,
+                );
+            }
+            changed |= extend_inferred_hover_effect_summary(summaries, owner_key, &nested_effects);
         }
         if !changed {
             break;
+        }
+    }
+}
+
+fn hover_effect_owner_lookup(
+    document_text: &str,
+    node: &ModuleNode,
+) -> BTreeMap<usize, (Option<String>, String)> {
+    let mut owners = BTreeMap::new();
+    for assignment in &node.assignments {
+        if let Some(owner) = assignment.owner_name.as_ref() {
+            owners.insert(assignment.line, (assignment.owner_type_name.clone(), owner.clone()));
+        }
+    }
+    for return_site in &node.returns {
+        owners.insert(
+            return_site.line,
+            (return_site.owner_type_name.clone(), return_site.owner_name.clone()),
+        );
+    }
+    for call_site in typepython_syntax::collect_direct_call_context_sites(document_text) {
+        if let Some(owner) = call_site.owner_name {
+            owners.insert(call_site.line, (call_site.owner_type_name, owner));
+        }
+    }
+    for method_call in &node.method_calls {
+        if let Some(owner) = method_call.current_owner_name.as_ref() {
+            owners.insert(
+                method_call.line,
+                (method_call.current_owner_type_name.clone(), owner.clone()),
+            );
+        }
+    }
+    owners
+}
+
+fn collect_hover_expr_effects(
+    value: &typepython_syntax::DirectExprMetadata,
+    function_effects: &BTreeMap<String, BTreeSet<String>>,
+    method_effects: &BTreeMap<(String, String), BTreeSet<String>>,
+    effects: &mut BTreeSet<String>,
+) {
+    if let Some(callee) = value.value_callee.as_ref()
+        && let Some(callee_effects) = function_effects.get(callee)
+    {
+        effects.extend(callee_effects.iter().cloned());
+    }
+    if let Some(callee_effects) = hover_method_effects(
+        method_effects,
+        value.value_method_owner_name.as_deref(),
+        value.value_method_name.as_deref(),
+    ) {
+        effects.extend(callee_effects.iter().cloned());
+    }
+    for inner in [
+        value.value_subscript_target.as_deref(),
+        value.value_bool_left.as_deref(),
+        value.value_bool_right.as_deref(),
+        value.value_if_true.as_deref(),
+        value.value_if_false.as_deref(),
+        value.value_binop_left.as_deref(),
+        value.value_binop_right.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        collect_hover_expr_effects(inner, function_effects, method_effects, effects);
+    }
+    for value in
+        value.value_list_elements.iter().flatten().chain(value.value_set_elements.iter().flatten())
+    {
+        collect_hover_expr_effects(value, function_effects, method_effects, effects);
+    }
+    if let Some(entries) = &value.value_dict_entries {
+        for entry in entries {
+            if let Some(key) = entry.key_value.as_deref() {
+                collect_hover_expr_effects(key, function_effects, method_effects, effects);
+            }
+            collect_hover_expr_effects(&entry.value, function_effects, method_effects, effects);
+        }
+    }
+    for comprehension in
+        [value.value_list_comprehension.as_deref(), value.value_generator_comprehension.as_deref()]
+            .into_iter()
+            .flatten()
+    {
+        if let Some(key) = comprehension.key.as_deref() {
+            collect_hover_expr_effects(key, function_effects, method_effects, effects);
+        }
+        collect_hover_expr_effects(
+            &comprehension.element,
+            function_effects,
+            method_effects,
+            effects,
+        );
+        for clause in &comprehension.clauses {
+            collect_hover_expr_effects(&clause.iter, function_effects, method_effects, effects);
         }
     }
 }

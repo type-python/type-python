@@ -420,6 +420,43 @@ fn hover_renders_inferred_effect_summary_for_local_callable() {
 }
 
 #[test]
+fn hover_infers_effect_summary_from_nested_call_argument() {
+    let config = temp_workspace(
+        "hover_infers_effect_summary_from_nested_call_argument",
+        &[(
+            "src/app/__init__.tpy",
+            concat!(
+                "from typing import Callable\n\n",
+                "def effect(label: str):\n",
+                "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+                "        return fn\n",
+                "    return wrap\n\n",
+                "@effect(\"io.net\")\n",
+                "def fetch() -> str:\n",
+                "    return \"ok\"\n\n",
+                "def render(value: str) -> str:\n",
+                "    return value\n\n",
+                "def load() -> str:\n",
+                "    return render(fetch())\n",
+            ),
+        )],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let hover = server
+        .handle_hover(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 14, "character": 5}
+        }))
+        .expect("hover should succeed");
+    let contents = hover["contents"]["value"].as_str().expect("hover contents should be text");
+
+    assert!(contents.contains("function load"), "{contents}");
+    assert!(contents.contains("Effect summary: inferred row [io.net]"), "{contents}");
+}
+
+#[test]
 fn hover_renders_inferred_stdlib_effect_summary_for_local_callable() {
     let config = temp_workspace(
         "hover_renders_inferred_stdlib_effect_summary_for_local_callable",

@@ -124,6 +124,25 @@ pub fn collect_direct_call_context_sites(source: &str) -> Vec<DirectCallContextS
 }
 
 #[must_use]
+pub fn collect_nested_direct_call_context_sites(source: &str) -> Vec<DirectCallContextSite> {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return Vec::new();
+        };
+
+        let mut sites = Vec::new();
+        collect_nested_direct_call_context_sites_in_suite(
+            &normalized,
+            parsed.suite(),
+            None,
+            &mut sites,
+        );
+        sites
+    })
+}
+
+#[must_use]
 pub fn collect_typed_dict_mutation_sites(source: &str) -> Vec<TypedDictMutationSite> {
     let normalized = normalize_annotated_lambda_source_lossy(source);
     with_source_line_index(&normalized, || {
@@ -2001,6 +2020,87 @@ pub(super) fn collect_direct_call_context_sites_in_suite(
             }
             _ => {}
         }
+    }
+}
+
+fn collect_nested_direct_call_context_sites_in_suite(
+    source: &str,
+    suite: &[Stmt],
+    owner_type_name: Option<&str>,
+    sites: &mut Vec<DirectCallContextSite>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                let mut collector = NestedDirectCallContextCollector {
+                    source,
+                    owner_name: function.name.as_str().to_owned(),
+                    owner_type_name: owner_type_name.map(str::to_owned),
+                    sites,
+                };
+                for body_stmt in &function.body {
+                    visitor::Visitor::visit_stmt(&mut collector, body_stmt);
+                }
+                collect_nested_direct_call_context_sites_in_suite(
+                    source,
+                    &function.body,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_nested_direct_call_context_sites_in_suite(
+                    source,
+                    &class_def.body,
+                    Some(class_def.name.as_str()),
+                    sites,
+                );
+            }
+            _ => {
+                for_each_nested_suite(stmt, |suite| {
+                    collect_nested_direct_call_context_sites_in_suite(
+                        source,
+                        suite,
+                        owner_type_name,
+                        sites,
+                    );
+                });
+            }
+        }
+    }
+}
+
+struct NestedDirectCallContextCollector<'source, 'sites> {
+    source: &'source str,
+    owner_name: String,
+    owner_type_name: Option<String>,
+    sites: &'sites mut Vec<DirectCallContextSite>,
+}
+
+impl<'source, 'sites, 'ast> visitor::Visitor<'ast>
+    for NestedDirectCallContextCollector<'source, 'sites>
+{
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        if matches!(stmt, Stmt::FunctionDef(_) | Stmt::ClassDef(_)) {
+            return;
+        }
+        visitor::walk_stmt(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &'ast Expr) {
+        if let Some(callee) = extract_direct_call_context_callee(expr) {
+            self.sites.push(DirectCallContextSite {
+                callee,
+                owner_name: Some(self.owner_name.clone()),
+                owner_type_name: self.owner_type_name.clone(),
+                positional_arg_count: extract_direct_call_positional_arg_count(expr).unwrap_or(0),
+                keyword_arg_count: extract_direct_call_keyword_arg_count(expr).unwrap_or(0),
+                has_starred_args: direct_call_has_starred_args(expr).unwrap_or(false),
+                has_unpacked_kwargs: direct_call_has_unpacked_kwargs(expr).unwrap_or(false),
+                line: offset_to_line_column(self.source, expr.range().start().to_usize()).0,
+            });
+        }
+        visitor::walk_expr(self, expr);
     }
 }
 

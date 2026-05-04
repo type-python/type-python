@@ -32,6 +32,37 @@ fn check_warns_when_pure_function_uses_effectful_result() {
 }
 
 #[test]
+fn check_warns_when_pure_function_uses_nested_effectful_argument() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def effect_io_net[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@effect_io_net\n",
+            "def fetch() -> str:\n",
+            "    return \"payload\"\n\n",
+            "def render(value: str) -> str:\n",
+            "    return value\n\n",
+            "@effect_pure\n",
+            "def parse() -> str:\n",
+            "    return render(fetch())\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4026"), "{rendered}");
+    assert!(rendered.contains("effect row `io.net`"), "{rendered}");
+}
+
+#[test]
 fn check_warns_for_explicit_effect_decorator_surface() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(

@@ -240,6 +240,25 @@ mod tests {
         assert_eq!(info.callables[1].decorators, vec!["sink:html"]);
         assert_eq!(info.callables[2].decorators, vec!["sanitizer:html"]);
     }
+
+    #[test]
+    fn nested_direct_call_context_collector_keeps_owner_context() {
+        let sites = crate::collect_nested_direct_call_context_sites(concat!(
+            "def load() -> str:\n",
+            "    return render(fetch())\n",
+        ));
+
+        assert_eq!(
+            sites
+                .into_iter()
+                .map(|site| (site.callee, site.owner_name, site.line))
+                .collect::<Vec<_>>(),
+            vec![
+                (String::from("render"), Some(String::from("load")), 2),
+                (String::from("fetch"), Some(String::from("load")), 2),
+            ],
+        );
+    }
 }
 
 /// Parser output for a source file.
