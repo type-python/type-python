@@ -590,6 +590,14 @@ fn hover_effect_summaries(
     workspace: &WorkspaceState,
     node: &ModuleNode,
 ) -> Option<BTreeMap<(Option<String>, String), HoverEffectSummary>> {
+    hover_effect_summaries_with_import_depth(workspace, node, 1)
+}
+
+fn hover_effect_summaries_with_import_depth(
+    workspace: &WorkspaceState,
+    node: &ModuleNode,
+    import_depth: usize,
+) -> Option<BTreeMap<(Option<String>, String), HoverEffectSummary>> {
     let document = workspace.queries.documents_by_module_key.get(&node.module_key)?;
     let decorator_info = typepython_syntax::collect_decorator_transform_module_info(&document.text);
     let framework_info = typepython_syntax::collect_framework_transform_module_info(&document.text);
@@ -602,6 +610,9 @@ fn hover_effect_summaries(
         }
     }
     add_stdlib_hover_effect_summaries(node, &mut summaries);
+    if import_depth > 0 {
+        add_imported_hover_effect_summaries(workspace, node, import_depth - 1, &mut summaries);
+    }
     infer_hover_effect_summaries(&document.text, node, &mut summaries);
     Some(summaries)
 }
@@ -845,6 +856,64 @@ fn add_stdlib_hover_effect_summaries(
             );
         }
     }
+}
+
+fn add_imported_hover_effect_summaries(
+    workspace: &WorkspaceState,
+    node: &ModuleNode,
+    import_depth: usize,
+    summaries: &mut BTreeMap<(Option<String>, String), HoverEffectSummary>,
+) {
+    for declaration in node
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_none())
+        .filter(|declaration| declaration.kind == typepython_binding::DeclarationKind::Import)
+    {
+        let Some((provider_node, target_declaration)) =
+            resolve_hover_import_target(workspace, declaration)
+        else {
+            continue;
+        };
+        let Some(provider_summaries) =
+            hover_effect_summaries_with_import_depth(workspace, provider_node, import_depth)
+        else {
+            continue;
+        };
+        match target_declaration.kind {
+            typepython_binding::DeclarationKind::Function => {
+                if let Some(summary) =
+                    provider_summaries.get(&(None, target_declaration.name.clone()))
+                {
+                    summaries.insert((None, declaration.name.clone()), summary.clone());
+                }
+            }
+            typepython_binding::DeclarationKind::Class => {
+                for ((owner, method), summary) in &provider_summaries {
+                    if owner.as_deref() == Some(target_declaration.name.as_str()) {
+                        summaries.insert(
+                            (Some(declaration.name.clone()), method.clone()),
+                            summary.clone(),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn resolve_hover_import_target<'a>(
+    workspace: &'a WorkspaceState,
+    declaration: &'a typepython_binding::Declaration,
+) -> Option<(&'a ModuleNode, &'a typepython_binding::Declaration)> {
+    let target = declaration.import_target()?;
+    let symbol_target = target.symbol_target.as_ref()?;
+    let provider_node = workspace.queries.nodes_by_module_key.get(&symbol_target.module_key)?;
+    let target_declaration = provider_node.declarations.iter().find(|candidate| {
+        candidate.owner.is_none() && candidate.name == symbol_target.symbol_name
+    })?;
+    Some((provider_node, target_declaration))
 }
 
 fn stdlib_hover_effect_methods(module: &str) -> Vec<(&'static str, &'static str)> {
