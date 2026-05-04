@@ -264,6 +264,29 @@ fn check_validator_witness_does_not_narrow_after_attribute_mutation() {
 }
 
 #[test]
+fn check_validator_witness_does_not_narrow_after_alias_mutation() {
+    let result = check_temp_typepython_source(concat!(
+        "class User:\n",
+        "    name: str\n",
+        "    def greet(self) -> str:\n",
+        "        return self.name\n\n",
+        "from typing import Literal\n\n",
+        "def validate_user(value: unknown) -> ValidatorWitness[User, Literal[\"trusted\"]]:\n",
+        "    ...\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if validate_user(value):\n",
+        "        alias = value\n",
+        "        alias.name = get_unknown()\n",
+        "        return value.greet()\n",
+        "    return \"\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("invalidated by assignment or mutation"), "{rendered}");
+}
+
+#[test]
 fn check_validator_witness_without_trust_metadata_does_not_narrow() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(

@@ -162,6 +162,42 @@ pub(super) fn name_reassigned_after_line(
     after_line: usize,
     current_line: usize,
 ) -> bool {
+    directly_reassigned_after_line(
+        node,
+        current_owner_name,
+        current_owner_type_name,
+        value_name,
+        after_line,
+        current_line,
+    ) || aliases_after_line(
+        node,
+        current_owner_name,
+        current_owner_type_name,
+        value_name,
+        after_line,
+        current_line,
+    )
+    .into_iter()
+    .any(|(alias, alias_line)| {
+        directly_reassigned_after_line(
+            node,
+            current_owner_name,
+            current_owner_type_name,
+            &alias,
+            alias_line,
+            current_line,
+        )
+    })
+}
+
+fn directly_reassigned_after_line(
+    node: &typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    value_name: &str,
+    after_line: usize,
+    current_line: usize,
+) -> bool {
     node.assignments.iter().any(|assignment| {
         assignment.name == value_name
             && assignment.owner_name.as_deref() == current_owner_name
@@ -175,6 +211,39 @@ pub(super) fn name_reassigned_after_line(
             && after_line < site.line
             && site.line < current_line
     })
+}
+
+fn aliases_after_line(
+    node: &typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    value_name: &str,
+    after_line: usize,
+    current_line: usize,
+) -> BTreeMap<String, usize> {
+    let mut aliases = BTreeMap::new();
+    let mut tracked = BTreeMap::from([(value_name.to_owned(), after_line)]);
+    let mut assignments = node
+        .assignments
+        .iter()
+        .filter(|assignment| {
+            assignment.owner_name.as_deref() == current_owner_name
+                && assignment.owner_type_name.as_deref() == current_owner_type_name
+                && after_line < assignment.line
+                && assignment.line < current_line
+        })
+        .collect::<Vec<_>>();
+    assignments.sort_by_key(|assignment| assignment.line);
+    for assignment in assignments {
+        let Some(source_name) = assignment.value_name.as_deref() else {
+            continue;
+        };
+        if tracked.contains_key(source_name) && assignment.name != value_name {
+            tracked.entry(assignment.name.clone()).or_insert(assignment.line);
+            aliases.entry(assignment.name.clone()).or_insert(assignment.line);
+        }
+    }
+    aliases
 }
 
 pub(super) fn latest_delete_invalidation_line(
