@@ -500,6 +500,62 @@ fn check_warns_when_pure_function_calls_imported_inferred_effectful_function() {
 }
 
 #[test]
+fn check_warns_when_pure_function_calls_stdlib_effect_function_import() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n",
+            "from time import time\n\n",
+            "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@effect_pure\n",
+            "def now() -> float:\n",
+            "    return time()\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4026"), "{rendered}");
+    assert!(rendered.contains("pure function `now`"), "{rendered}");
+    assert!(rendered.contains("effectful function `time`"), "{rendered}");
+    assert!(rendered.contains("effect row `time`"), "{rendered}");
+    assert!(rendered.contains("stdlib `time.time`"), "{rendered}");
+}
+
+#[test]
+fn check_warns_when_pure_function_calls_stdlib_effect_module_method() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n",
+            "import random\n\n",
+            "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@effect_pure\n",
+            "def pick() -> float:\n",
+            "    return random.random()\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4026"), "{rendered}");
+    assert!(rendered.contains("pure function `pick`"), "{rendered}");
+    assert!(rendered.contains("effectful method `random.random`"), "{rendered}");
+    assert!(rendered.contains("effect row `random`"), "{rendered}");
+    assert!(rendered.contains("stdlib `random.random`"), "{rendered}");
+}
+
+#[test]
 fn check_warns_when_pure_function_calls_imported_effectful_function() {
     let root = create_temp_typepython_root();
     let lib_path = root.join("lib.tpy");

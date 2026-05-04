@@ -83,6 +83,7 @@ pub(super) enum EffectSource {
     Lifecycle(String),
     UnsafeBlock,
     Inferred(String),
+    Stdlib(String),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -276,8 +277,10 @@ pub(super) fn collect_effect_summary_facts(
     node: &typepython_graph::ModuleNode,
 ) -> Vec<SummaryEffectFact> {
     let local_summaries = collect_local_effect_summaries(context, node);
-    let mut summaries = local_summaries.clone();
-    summaries.extend(collect_inferred_effect_summaries(context, node, &local_summaries));
+    let mut inference_seeds = local_summaries.clone();
+    inference_seeds.extend(collect_stdlib_effect_summaries(node));
+    let mut summaries = local_summaries;
+    summaries.extend(collect_inferred_effect_summaries(context, node, &inference_seeds));
     let mut facts = summaries
         .into_iter()
         .map(|summary| SummaryEffectFact {
@@ -293,6 +296,7 @@ pub(super) fn collect_effect_summary_facts(
                     EffectSource::Lifecycle(name) => name,
                     EffectSource::UnsafeBlock => String::from("unsafe:"),
                     EffectSource::Inferred(name) => format!("inferred:{name}"),
+                    EffectSource::Stdlib(name) => format!("stdlib:{name}"),
                 })
                 .collect(),
             line: summary.line,
@@ -313,6 +317,7 @@ fn collect_visible_effect_summaries(
 ) -> Vec<EffectSummary> {
     let mut summaries = collect_local_effect_summaries(context, node);
     summaries.extend(collect_imported_effect_summaries(context, node));
+    summaries.extend(collect_stdlib_effect_summaries(node));
     summaries.extend(collect_inferred_effect_summaries(context, node, &summaries));
     summaries
 }
@@ -655,6 +660,120 @@ fn collect_imported_effect_summaries(
     summaries
 }
 
+fn collect_stdlib_effect_summaries(node: &typepython_graph::ModuleNode) -> Vec<EffectSummary> {
+    let mut summaries = Vec::new();
+    for declaration in node
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_none())
+        .filter(|declaration| declaration.kind == DeclarationKind::Import)
+    {
+        let Some(target) = declaration.import_target() else {
+            continue;
+        };
+        if let Some(symbol_target) = &target.symbol_target
+            && let Some(row) =
+                stdlib_symbol_effect_row(&symbol_target.module_key, &symbol_target.symbol_name)
+        {
+            summaries.push(EffectSummary {
+                callable: declaration.name.clone(),
+                owner_type_name: None,
+                pure: false,
+                row,
+                sources: vec![EffectSource::Stdlib(target.raw_target.clone())],
+                line: 1,
+            });
+            continue;
+        }
+        for (method_name, row) in stdlib_module_effect_methods(&target.raw_target) {
+            summaries.push(EffectSummary {
+                callable: method_name.to_owned(),
+                owner_type_name: Some(declaration.name.clone()),
+                pure: false,
+                row,
+                sources: vec![EffectSource::Stdlib(format!("{}.{method_name}", target.raw_target))],
+                line: 1,
+            });
+        }
+    }
+    summaries
+}
+
+fn stdlib_symbol_effect_row(module: &str, symbol: &str) -> Option<EffectRow> {
+    stdlib_effect_kind(module, symbol).map(|effect| {
+        let mut row = EffectRow::empty();
+        row.insert(effect);
+        row
+    })
+}
+
+fn stdlib_module_effect_methods(module: &str) -> Vec<(&'static str, EffectRow)> {
+    stdlib_effect_symbols_for_module(module)
+        .into_iter()
+        .filter_map(|symbol| stdlib_symbol_effect_row(module, symbol).map(|row| (symbol, row)))
+        .collect()
+}
+
+fn stdlib_effect_symbols_for_module(module: &str) -> Vec<&'static str> {
+    match module {
+        "time" => vec!["monotonic", "perf_counter", "process_time", "sleep", "time"],
+        "random" => vec!["choice", "choices", "randint", "random", "randrange", "seed", "shuffle"],
+        "secrets" => vec!["choice", "randbelow", "token_bytes", "token_hex", "token_urlsafe"],
+        "subprocess" => vec!["Popen", "call", "check_call", "check_output", "run"],
+        "os" => vec![
+            "chdir",
+            "getcwd",
+            "listdir",
+            "makedirs",
+            "mkdir",
+            "popen",
+            "remove",
+            "removedirs",
+            "rename",
+            "replace",
+            "rmdir",
+            "scandir",
+            "stat",
+            "system",
+            "unlink",
+        ],
+        "urllib.request" => vec!["urlopen", "urlretrieve"],
+        _ => Vec::new(),
+    }
+}
+
+fn stdlib_effect_kind(module: &str, symbol: &str) -> Option<EffectKind> {
+    match module {
+        "time" => {
+            matches!(symbol, "monotonic" | "perf_counter" | "process_time" | "sleep" | "time")
+                .then_some(EffectKind::Time)
+        }
+        "random" => matches!(
+            symbol,
+            "choice" | "choices" | "randint" | "random" | "randrange" | "seed" | "shuffle"
+        )
+        .then_some(EffectKind::Random),
+        "secrets" => {
+            matches!(symbol, "choice" | "randbelow" | "token_bytes" | "token_hex" | "token_urlsafe")
+                .then_some(EffectKind::Random)
+        }
+        "subprocess" => matches!(symbol, "Popen" | "call" | "check_call" | "check_output" | "run")
+            .then_some(EffectKind::IoProc),
+        "os" => match symbol {
+            "popen" | "system" => Some(EffectKind::IoProc),
+            "chdir" | "getcwd" | "listdir" | "makedirs" | "mkdir" | "remove" | "removedirs"
+            | "rename" | "replace" | "rmdir" | "scandir" | "stat" | "unlink" => {
+                Some(EffectKind::IoFs)
+            }
+            _ => None,
+        },
+        "urllib.request" => {
+            matches!(symbol, "urlopen" | "urlretrieve").then_some(EffectKind::IoNet)
+        }
+        _ => None,
+    }
+}
+
 fn effect_summary_from_function_fact(local_name: String, fact: SummaryEffectFact) -> EffectSummary {
     effect_summary_from_fact(local_name, None, fact)
 }
@@ -682,10 +801,13 @@ fn effect_summary_from_fact(
 }
 
 fn effect_source_from_fact_source(source: String) -> EffectSource {
-    source
-        .strip_prefix("inferred:")
-        .map(|name| EffectSource::Inferred(name.to_owned()))
-        .unwrap_or(EffectSource::Decorator(source))
+    if let Some(name) = source.strip_prefix("inferred:") {
+        return EffectSource::Inferred(name.to_owned());
+    }
+    if let Some(name) = source.strip_prefix("stdlib:") {
+        return EffectSource::Stdlib(name.to_owned());
+    }
+    EffectSource::Decorator(source)
 }
 
 fn caller_effect_row_allows(caller: Option<&EffectSummary>, required: &EffectRow) -> bool {
@@ -1357,6 +1479,7 @@ fn effect_source_note(summary: &EffectSummary) -> String {
             EffectSource::Lifecycle(name) => format!("resource effect inferred from `{name}`"),
             EffectSource::UnsafeBlock => String::from("capability granted by `unsafe:` scope"),
             EffectSource::Inferred(name) => format!("effect inferred from `{name}`"),
+            EffectSource::Stdlib(name) => format!("effect inferred from stdlib `{name}`"),
         })
         .unwrap_or_else(|| String::from("effect source is unknown"));
     format!("{source} on line {}", summary.line)
