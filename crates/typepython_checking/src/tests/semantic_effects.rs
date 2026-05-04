@@ -63,6 +63,48 @@ fn check_warns_when_pure_function_uses_nested_effectful_argument() {
 }
 
 #[test]
+fn check_warns_when_pure_function_uses_effectful_control_flow_expression() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def effect(label: str):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "class Client:\n",
+            "    @effect(\"io.net\")\n",
+            "    def items(self) -> list[str]:\n",
+            "        return []\n\n",
+            "    @effect(\"time\")\n",
+            "    def token(self) -> str:\n",
+            "        return \"token\"\n\n",
+            "@effect_pure\n",
+            "def parse() -> None:\n",
+            "    for item in Client().items():\n",
+            "        pass\n",
+            "    match Client().token():\n",
+            "        case _:\n",
+            "            pass\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4026"), "{rendered}");
+    assert!(rendered.contains("effectful method `Client.items`"), "{rendered}");
+    assert!(rendered.contains("effect row `io.net`"), "{rendered}");
+    assert!(rendered.contains("effectful method `Client.token`"), "{rendered}");
+    assert!(rendered.contains("effect row `time`"), "{rendered}");
+}
+
+#[test]
 fn check_warns_for_explicit_effect_decorator_surface() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(

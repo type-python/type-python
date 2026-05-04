@@ -743,6 +743,102 @@ fn infer_hover_effect_summaries(
                 changed |= extend_inferred_hover_effect_summary(summaries, owner_key, effects);
             }
         }
+        for yield_site in &node.yields {
+            let owner_key = (yield_site.owner_type_name.clone(), yield_site.owner_name.clone());
+            if explicit_keys.contains(&owner_key) {
+                continue;
+            }
+            let mut effects = BTreeSet::new();
+            if let Some(value) = yield_site.value_metadata() {
+                collect_hover_expr_effects(
+                    &value,
+                    &function_effects,
+                    &method_effects,
+                    &mut effects,
+                );
+            }
+            changed |= extend_inferred_hover_effect_summary(summaries, owner_key, &effects);
+        }
+        for if_guard in &node.if_guards {
+            let Some(owner) = if_guard.owner_name.as_ref() else {
+                continue;
+            };
+            let owner_key = (if_guard.owner_type_name.clone(), owner.clone());
+            if explicit_keys.contains(&owner_key) {
+                continue;
+            }
+            let mut effects = BTreeSet::new();
+            collect_hover_guard_effects(if_guard.guard.as_ref(), &function_effects, &mut effects);
+            changed |= extend_inferred_hover_effect_summary(summaries, owner_key, &effects);
+        }
+        for assert_guard in &node.asserts {
+            let Some(owner) = assert_guard.owner_name.as_ref() else {
+                continue;
+            };
+            let owner_key = (assert_guard.owner_type_name.clone(), owner.clone());
+            if explicit_keys.contains(&owner_key) {
+                continue;
+            }
+            let mut effects = BTreeSet::new();
+            collect_hover_guard_effects(
+                assert_guard.guard.as_ref(),
+                &function_effects,
+                &mut effects,
+            );
+            changed |= extend_inferred_hover_effect_summary(summaries, owner_key, &effects);
+        }
+        for match_site in &node.matches {
+            let Some(owner) = match_site.owner_name.as_ref() else {
+                continue;
+            };
+            let owner_key = (match_site.owner_type_name.clone(), owner.clone());
+            if explicit_keys.contains(&owner_key) {
+                continue;
+            }
+            let mut effects = BTreeSet::new();
+            if let Some(subject) = match_site.subject_metadata() {
+                collect_hover_expr_effects(
+                    &subject,
+                    &function_effects,
+                    &method_effects,
+                    &mut effects,
+                );
+            }
+            changed |= extend_inferred_hover_effect_summary(summaries, owner_key, &effects);
+        }
+        for for_loop in &node.for_loops {
+            let Some(owner) = for_loop.owner_name.as_ref() else {
+                continue;
+            };
+            let owner_key = (for_loop.owner_type_name.clone(), owner.clone());
+            if explicit_keys.contains(&owner_key) {
+                continue;
+            }
+            let mut effects = BTreeSet::new();
+            if let Some(iter) = for_loop.iter_metadata() {
+                collect_hover_expr_effects(&iter, &function_effects, &method_effects, &mut effects);
+            }
+            changed |= extend_inferred_hover_effect_summary(summaries, owner_key, &effects);
+        }
+        for with_site in &node.with_statements {
+            let Some(owner) = with_site.owner_name.as_ref() else {
+                continue;
+            };
+            let owner_key = (with_site.owner_type_name.clone(), owner.clone());
+            if explicit_keys.contains(&owner_key) {
+                continue;
+            }
+            let mut effects = BTreeSet::new();
+            if let Some(context) = with_site.context_metadata() {
+                collect_hover_expr_effects(
+                    &context,
+                    &function_effects,
+                    &method_effects,
+                    &mut effects,
+                );
+            }
+            changed |= extend_inferred_hover_effect_summary(summaries, owner_key, &effects);
+        }
         for call_site in typepython_syntax::collect_direct_call_context_sites(document_text) {
             let Some(owner) = call_site.owner_name.as_ref() else {
                 continue;
@@ -930,6 +1026,35 @@ fn collect_hover_expr_effects(
         for clause in &comprehension.clauses {
             collect_hover_expr_effects(&clause.iter, function_effects, method_effects, effects);
         }
+    }
+}
+
+fn collect_hover_guard_effects(
+    guard: Option<&typepython_binding::GuardConditionSite>,
+    function_effects: &BTreeMap<String, BTreeSet<String>>,
+    effects: &mut BTreeSet<String>,
+) {
+    let Some(guard) = guard else {
+        return;
+    };
+    match guard {
+        typepython_binding::GuardConditionSite::PredicateCall { callee, .. } => {
+            if let Some(callee_effects) = function_effects.get(callee) {
+                effects.extend(callee_effects.iter().cloned());
+            }
+        }
+        typepython_binding::GuardConditionSite::Not(inner) => {
+            collect_hover_guard_effects(Some(inner), function_effects, effects);
+        }
+        typepython_binding::GuardConditionSite::And(guards)
+        | typepython_binding::GuardConditionSite::Or(guards) => {
+            for guard in guards {
+                collect_hover_guard_effects(Some(guard), function_effects, effects);
+            }
+        }
+        typepython_binding::GuardConditionSite::IsNone { .. }
+        | typepython_binding::GuardConditionSite::IsInstance { .. }
+        | typepython_binding::GuardConditionSite::TruthyName { .. } => {}
     }
 }
 

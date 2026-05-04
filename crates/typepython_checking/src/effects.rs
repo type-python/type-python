@@ -490,6 +490,79 @@ fn effect_call_edges(
             &mut edges,
         );
     }
+    for yield_site in &node.yields {
+        let value = yield_site.value_metadata();
+        collect_expr_call_edges(
+            value.as_ref(),
+            yield_site.owner_type_name.clone(),
+            yield_site.owner_name.clone(),
+            yield_site.line,
+            &mut edges,
+        );
+    }
+    for if_guard in &node.if_guards {
+        let Some(owner_name) = if_guard.owner_name.clone() else {
+            continue;
+        };
+        collect_guard_call_edges(
+            if_guard.guard.as_ref(),
+            if_guard.owner_type_name.clone(),
+            owner_name,
+            if_guard.line,
+            &mut edges,
+        );
+    }
+    for assert_guard in &node.asserts {
+        let Some(owner_name) = assert_guard.owner_name.clone() else {
+            continue;
+        };
+        collect_guard_call_edges(
+            assert_guard.guard.as_ref(),
+            assert_guard.owner_type_name.clone(),
+            owner_name,
+            assert_guard.line,
+            &mut edges,
+        );
+    }
+    for match_site in &node.matches {
+        let Some(owner_name) = match_site.owner_name.clone() else {
+            continue;
+        };
+        let subject = match_site.subject_metadata();
+        collect_expr_call_edges(
+            subject.as_ref(),
+            match_site.owner_type_name.clone(),
+            owner_name,
+            match_site.line,
+            &mut edges,
+        );
+    }
+    for for_loop in &node.for_loops {
+        let Some(owner_name) = for_loop.owner_name.clone() else {
+            continue;
+        };
+        let iter = for_loop.iter_metadata();
+        collect_expr_call_edges(
+            iter.as_ref(),
+            for_loop.owner_type_name.clone(),
+            owner_name,
+            for_loop.line,
+            &mut edges,
+        );
+    }
+    for with_site in &node.with_statements {
+        let Some(owner_name) = with_site.owner_name.clone() else {
+            continue;
+        };
+        let context = with_site.context_metadata();
+        collect_expr_call_edges(
+            context.as_ref(),
+            with_site.owner_type_name.clone(),
+            owner_name,
+            with_site.line,
+            &mut edges,
+        );
+    }
     for call_site in context.load_direct_call_context_sites(node) {
         let Some(owner_name) = call_site.owner_name.clone() else {
             continue;
@@ -570,6 +643,46 @@ fn effect_call_edges(
         }
     }
     edges
+}
+
+fn collect_guard_call_edges(
+    guard: Option<&typepython_binding::GuardConditionSite>,
+    owner_type_name: Option<String>,
+    owner_name: String,
+    line: usize,
+    edges: &mut Vec<EffectCallEdge>,
+) {
+    let Some(guard) = guard else {
+        return;
+    };
+    match guard {
+        typepython_binding::GuardConditionSite::PredicateCall { callee, .. } => {
+            edges.push(EffectCallEdge {
+                owner_type_name,
+                owner_name,
+                callee: EffectCallCallee::Function(callee.clone()),
+                line,
+            });
+        }
+        typepython_binding::GuardConditionSite::Not(inner) => {
+            collect_guard_call_edges(Some(inner), owner_type_name, owner_name, line, edges);
+        }
+        typepython_binding::GuardConditionSite::And(guards)
+        | typepython_binding::GuardConditionSite::Or(guards) => {
+            for guard in guards {
+                collect_guard_call_edges(
+                    Some(guard),
+                    owner_type_name.clone(),
+                    owner_name.clone(),
+                    line,
+                    edges,
+                );
+            }
+        }
+        typepython_binding::GuardConditionSite::IsNone { .. }
+        | typepython_binding::GuardConditionSite::IsInstance { .. }
+        | typepython_binding::GuardConditionSite::TruthyName { .. } => {}
+    }
 }
 
 fn effect_owner_lookup(
