@@ -311,7 +311,7 @@ typealias Names = MapValues[User, Callable]  # TPY4027: unsupported wrapper in t
 
 #### TPY4028 -- Tainted source reaches sink
 
-Raised when the checker can see a direct source-to-sink taint flow that does not pass through an explicit sanitizer.
+Raised when the checker can see a direct source-to-sink taint flow that does not pass through an explicit sanitizer. Contextual decorators such as `@source("html")`, `@sink("html")`, and `@sanitizer("html")` are checked against matching taint contexts; bare decorators remain wildcard facts.
 
 ```python
 @source
@@ -324,7 +324,7 @@ raw = request_body()
 render_html(raw)  # TPY4028: tainted source result flows into sink
 ```
 
-**Fix:** pass the value through a callable marked `@sanitizer`, or change the source/sink declarations if the flow is intentionally trusted.
+**Fix:** pass the value through a callable marked `@sanitizer` for the same taint context, or change the source/sink declarations if the flow is intentionally trusted.
 
 #### TPY4101 -- Deprecated usage
 

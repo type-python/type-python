@@ -207,6 +207,39 @@ mod tests {
         assert_eq!(info.callables[0].name, "load_user");
         assert_eq!(info.callables[0].decorators, vec!["effect:io.net", "source"]);
     }
+
+    #[test]
+    fn decorator_transform_collector_preserves_taint_contexts() {
+        let info = crate::collect_decorator_transform_module_info(concat!(
+            "from typing import Callable\n\n",
+            "def source(label: str):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "def sink(**kwargs):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "def sanitizer(**kwargs):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "@source(\"html\")\n",
+            "def request_body() -> str:\n",
+            "    return \"raw\"\n\n",
+            "@sink(context=\"html\")\n",
+            "def render_html(value: str) -> None:\n",
+            "    return None\n\n",
+            "@sanitizer(from_taint=\"html\")\n",
+            "def escape_html(value: str) -> str:\n",
+            "    return value\n",
+        ));
+
+        assert_eq!(info.callables.len(), 3);
+        assert_eq!(info.callables[0].decorators, vec!["source:html"]);
+        assert_eq!(info.callables[1].decorators, vec!["sink:html"]);
+        assert_eq!(info.callables[2].decorators, vec!["sanitizer:html"]);
+    }
 }
 
 /// Parser output for a source file.

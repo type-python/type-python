@@ -1344,6 +1344,26 @@ fn decorator_transform_name(
     {
         return Some(format!("{normalized}:{effect}"));
     }
+    if matches!(normalized.rsplit('.').next(), Some("source" | "sink" | "sanitizer"))
+        && let Expr::Call(call) = expr
+        && let Some(context) = call
+            .arguments
+            .args
+            .first()
+            .and_then(|arg| extract_string_literal_value(source, arg))
+            .or_else(|| {
+                call.arguments.keywords.iter().find_map(|keyword| {
+                    matches!(
+                        keyword.arg.as_ref().map(|name| name.as_str()),
+                        Some("context" | "taint" | "label" | "from_taint" | "to_taint")
+                    )
+                    .then(|| extract_string_literal_value(source, &keyword.value))
+                    .flatten()
+                })
+            })
+    {
+        return Some(format!("{normalized}:{context}"));
+    }
     if let Expr::Call(call) = expr
         && let Some(first_arg) = call.arguments.args.first()
         && let Some(target) = decorator_target_name(first_arg)

@@ -219,6 +219,60 @@ fn check_uses_explicit_taint_effect_labels_for_local_source_sink_flow() {
 }
 
 #[test]
+fn check_uses_contextual_taint_decorator_labels() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def source(label: str):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "def sink(label: str):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "def sanitizer(label: str):\n",
+            "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "        return fn\n",
+            "    return wrap\n\n",
+            "@source(\"html\")\n",
+            "def html_body() -> str:\n",
+            "    ...\n\n",
+            "@source(\"sql\")\n",
+            "def sql_body() -> str:\n",
+            "    ...\n\n",
+            "@sanitizer(\"html\")\n",
+            "def escape_html(value: str) -> str:\n",
+            "    return value\n\n",
+            "@sanitizer(\"sql\")\n",
+            "def escape_sql(value: str) -> str:\n",
+            "    return value\n\n",
+            "@sink(\"html\")\n",
+            "def render_html(value: str) -> None:\n",
+            "    ...\n\n",
+            "@sink(\"sql\")\n",
+            "def query_sql(value: str) -> None:\n",
+            "    ...\n\n",
+            "def flows() -> None:\n",
+            "    render_html(html_body())\n",
+            "    render_html(escape_html(html_body()))\n",
+            "    render_html(escape_sql(html_body()))\n",
+            "    query_sql(html_body())\n",
+            "    query_sql(sql_body())\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("TPY4028").count(), 3, "{rendered}");
+}
+
+#[test]
 fn check_uses_method_source_sink_and_sanitizer_for_local_taint_flow() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(
@@ -295,6 +349,81 @@ fn check_uses_imported_taint_source_sink_and_sanitizer_facts() {
         "def safe() -> None:\n",
         "    raw = request_body()\n",
         "    render_html(escape_html(raw))\n",
+    );
+    fs::write(&lib_path, lib_source).expect("temp source should be written");
+    fs::write(&app_path, app_source).expect("temp source should be written");
+
+    let trees = [
+        parse_with_options(
+            SourceFile {
+                path: lib_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("lib"),
+                text: lib_source.to_owned(),
+            },
+            ParseOptions::default(),
+        ),
+        parse_with_options(
+            SourceFile {
+                path: app_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app"),
+                text: app_source.to_owned(),
+            },
+            ParseOptions::default(),
+        ),
+    ];
+    let bindings = trees.iter().map(bind).collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let result = check_with_binding_metadata(
+        &graph,
+        &bindings,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+        ImportFallback::Unknown,
+        None,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("TPY4028").count(), 1, "{rendered}");
+    assert!(rendered.contains("tainted source result flows into sink `render_html`"), "{rendered}");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn check_preserves_imported_contextual_taint_decorator_labels() {
+    let root = create_temp_typepython_root();
+    let lib_path = root.join("lib.tpy");
+    let app_path = root.join("app.tpy");
+    let lib_source = concat!(
+        "from typing import Callable\n\n",
+        "def source(label: str):\n",
+        "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+        "        return fn\n",
+        "    return wrap\n\n",
+        "def sink(label: str):\n",
+        "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+        "        return fn\n",
+        "    return wrap\n\n",
+        "@source(\"html\")\n",
+        "def request_body() -> str:\n",
+        "    ...\n\n",
+        "@sink(\"html\")\n",
+        "def render_html(value: str) -> None:\n",
+        "    ...\n\n",
+        "@sink(\"sql\")\n",
+        "def query_sql(value: str) -> None:\n",
+        "    ...\n",
+    );
+    let app_source = concat!(
+        "from lib import query_sql, render_html, request_body\n\n",
+        "raw = request_body()\n",
+        "render_html(raw)\n",
+        "query_sql(raw)\n",
     );
     fs::write(&lib_path, lib_source).expect("temp source should be written");
     fs::write(&app_path, app_source).expect("temp source should be written");

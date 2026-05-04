@@ -114,6 +114,37 @@ impl EffectSummary {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+enum TaintFactKind {
+    Source,
+    Sink,
+    Sanitizer,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct TaintFact {
+    kind: TaintFactKind,
+    context: Option<String>,
+}
+
+type TaintFacts = BTreeSet<TaintFact>;
+type TaintContexts = BTreeSet<Option<String>>;
+type TaintedLocals = BTreeMap<Option<String>, BTreeMap<String, TaintContexts>>;
+
+impl TaintFact {
+    fn source(context: Option<String>) -> Self {
+        Self { kind: TaintFactKind::Source, context }
+    }
+
+    fn sink(context: Option<String>) -> Self {
+        Self { kind: TaintFactKind::Sink, context }
+    }
+
+    fn sanitizer(context: Option<String>) -> Self {
+        Self { kind: TaintFactKind::Sanitizer, context }
+    }
+}
+
 pub(super) fn effect_capability_diagnostics(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -831,8 +862,8 @@ fn taint_source_sink_diagnostics(
         return Vec::new();
     };
     let adapter_taint_decorators = adapter_taint_decorators(context, node);
-    let mut decorated = BTreeMap::new();
-    let mut decorated_methods = BTreeMap::new();
+    let mut decorated: BTreeMap<String, TaintFacts> = BTreeMap::new();
+    let mut decorated_methods: BTreeMap<(String, String), TaintFacts> = BTreeMap::new();
     for site in info.callables {
         let mut decorators = BTreeSet::new();
         for decorator in site.decorators {
@@ -862,9 +893,11 @@ fn taint_source_sink_diagnostics(
         decorated_methods.entry(method).or_default().extend(facts);
     }
     let mut diagnostics = Vec::new();
-    let mut tainted_locals: BTreeMap<Option<String>, BTreeSet<String>> = BTreeMap::new();
-    let mut source_method_call_lines: BTreeSet<(Option<String>, usize)> = BTreeSet::new();
-    let mut sanitizer_method_call_lines: BTreeSet<(Option<String>, usize)> = BTreeSet::new();
+    let mut tainted_locals: TaintedLocals = BTreeMap::new();
+    let mut source_method_call_lines: BTreeMap<(Option<String>, usize), TaintContexts> =
+        BTreeMap::new();
+    let mut sanitizer_method_call_lines: BTreeMap<(Option<String>, usize), TaintContexts> =
+        BTreeMap::new();
     let owner_ranges = owner_line_ranges(node);
     let owner_markers = owner_line_markers(node);
 
@@ -878,7 +911,8 @@ fn taint_source_sink_diagnostics(
         match event {
             TaintEvent::Call(call) => {
                 let owner = owner_for_line(&owner_ranges, &owner_markers, call.line);
-                if decorated.get(&call.callee).is_some_and(|decorators| decorators.contains("sink"))
+                if let Some(sink_contexts) =
+                    decorated.get(&call.callee).and_then(taint_sink_contexts)
                     && call.arg_values.iter().any(|arg| {
                         argument_is_unsanitized_source(
                             arg,
@@ -886,6 +920,7 @@ fn taint_source_sink_diagnostics(
                             &decorated_methods,
                             &tainted_locals,
                             owner.as_deref(),
+                            &sink_contexts,
                         )
                     })
                 {
@@ -902,13 +937,14 @@ fn taint_source_sink_diagnostics(
                     Some(call.owner_name.as_str()),
                     Some(call.method.as_str()),
                 );
-                if method_facts.is_some_and(|decorators| decorators.contains("source")) {
-                    source_method_call_lines.insert((owner.clone(), call.line));
+                if let Some(source_contexts) = method_facts.and_then(taint_source_contexts) {
+                    source_method_call_lines.insert((owner.clone(), call.line), source_contexts);
                 }
-                if method_facts.is_some_and(|decorators| decorators.contains("sanitizer")) {
-                    sanitizer_method_call_lines.insert((owner.clone(), call.line));
+                if let Some(sanitizer_contexts) = method_facts.and_then(taint_sanitizer_contexts) {
+                    sanitizer_method_call_lines
+                        .insert((owner.clone(), call.line), sanitizer_contexts);
                 }
-                if method_facts.is_some_and(|decorators| decorators.contains("sink"))
+                if let Some(sink_contexts) = method_facts.and_then(taint_sink_contexts)
                     && call.arg_values.iter().any(|arg| {
                         argument_is_unsanitized_source(
                             arg,
@@ -916,6 +952,7 @@ fn taint_source_sink_diagnostics(
                             &decorated_methods,
                             &tainted_locals,
                             owner.as_deref(),
+                            &sink_contexts,
                         )
                     })
                 {
@@ -929,38 +966,66 @@ fn taint_source_sink_diagnostics(
             TaintEvent::Assignment(assignment) => {
                 let owner = assignment.owner_name.clone();
                 let owner_line = (owner.clone(), assignment.line);
-                let is_tainted = assignment.value.as_ref().is_some_and(|value| {
-                    argument_is_unsanitized_source(
+                let mut tainted_contexts = TaintContexts::new();
+                if let Some(value) = assignment.value.as_ref() {
+                    tainted_contexts.extend(argument_taint_contexts(
                         value,
                         &decorated,
                         &decorated_methods,
                         &tainted_locals,
                         owner.as_deref(),
-                    )
-                }) || assignment.value_callee.as_deref().is_some_and(|callee| {
-                    decorated.get(callee).is_some_and(|d| d.contains("source"))
-                }) || taint_method_facts(
+                        None,
+                    ));
+                }
+                if let Some(callee) = assignment.value_callee.as_deref()
+                    && let Some(contexts) = decorated.get(callee).and_then(taint_source_contexts)
+                {
+                    tainted_contexts.extend(contexts);
+                }
+                if let Some(contexts) = taint_method_facts(
                     &decorated_methods,
                     assignment.value_method_owner_name.as_deref(),
                     assignment.value_method_name.as_deref(),
                 )
-                .is_some_and(|decorators| decorators.contains("source"));
-                let is_sanitized = assignment.value_callee.as_deref().is_some_and(|callee| {
-                    decorated.get(callee).is_some_and(|d| d.contains("sanitizer"))
-                }) || taint_method_facts(
+                .and_then(taint_source_contexts)
+                {
+                    tainted_contexts.extend(contexts);
+                }
+                if let Some(contexts) = source_method_call_lines.get(&owner_line) {
+                    tainted_contexts.extend(contexts.iter().cloned());
+                }
+                let mut sanitized_contexts = TaintContexts::new();
+                if let Some(callee) = assignment.value_callee.as_deref()
+                    && let Some(contexts) = decorated.get(callee).and_then(taint_sanitizer_contexts)
+                {
+                    sanitized_contexts.extend(contexts);
+                }
+                if let Some(contexts) = taint_method_facts(
                     &decorated_methods,
                     assignment.value_method_owner_name.as_deref(),
                     assignment.value_method_name.as_deref(),
                 )
-                .is_some_and(|decorators| decorators.contains("sanitizer"));
-                let is_tainted = is_tainted || source_method_call_lines.contains(&owner_line);
-                let is_sanitized =
-                    is_sanitized || sanitizer_method_call_lines.contains(&owner_line);
+                .and_then(taint_sanitizer_contexts)
+                {
+                    sanitized_contexts.extend(contexts);
+                }
+                if let Some(contexts) = sanitizer_method_call_lines.get(&owner_line) {
+                    sanitized_contexts.extend(contexts.iter().cloned());
+                }
                 let locals = tainted_locals.entry(owner).or_default();
-                if is_sanitized {
-                    locals.remove(&assignment.name);
-                } else if is_tainted {
-                    locals.insert(assignment.name.clone());
+                if !sanitized_contexts.is_empty() {
+                    if sanitizer_contexts_cover_all(&sanitized_contexts) {
+                        locals.remove(&assignment.name);
+                    } else if let Some(existing) = locals.get_mut(&assignment.name) {
+                        for context in &sanitized_contexts {
+                            existing.remove(context);
+                        }
+                        if existing.is_empty() {
+                            locals.remove(&assignment.name);
+                        }
+                    }
+                } else if !tainted_contexts.is_empty() {
+                    locals.insert(assignment.name.clone(), tainted_contexts);
                 } else {
                     locals.remove(&assignment.name);
                 }
@@ -1004,7 +1069,7 @@ fn taint_sink_diagnostic(
 fn adapter_taint_decorators(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
-) -> BTreeMap<String, String> {
+) -> BTreeMap<String, TaintFact> {
     let Some(info) = context.load_framework_transform_module_info(node) else {
         return BTreeMap::new();
     };
@@ -1017,14 +1082,18 @@ fn adapter_taint_decorators(
         .filter_map(|provider| {
             let taint_fact =
                 provider.capabilities.iter().find_map(|capability| match capability {
-                    typepython_syntax::FrameworkTransformCapability::TaintSource => Some("source"),
-                    typepython_syntax::FrameworkTransformCapability::TaintSink => Some("sink"),
+                    typepython_syntax::FrameworkTransformCapability::TaintSource => {
+                        Some(TaintFact::source(None))
+                    }
+                    typepython_syntax::FrameworkTransformCapability::TaintSink => {
+                        Some(TaintFact::sink(None))
+                    }
                     typepython_syntax::FrameworkTransformCapability::TaintSanitizer => {
-                        Some("sanitizer")
+                        Some(TaintFact::sanitizer(None))
                     }
                     _ => None,
                 })?;
-            Some((provider.name, taint_fact.to_owned()))
+            Some((provider.name, taint_fact))
         })
         .collect()
 }
@@ -1032,7 +1101,7 @@ fn adapter_taint_decorators(
 fn imported_taint_decorators(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
-) -> BTreeMap<String, BTreeSet<String>> {
+) -> BTreeMap<String, TaintFacts> {
     node.declarations
         .iter()
         .filter(|declaration| declaration.owner.is_none())
@@ -1061,8 +1130,8 @@ fn imported_taint_decorators(
 fn imported_taint_method_decorators(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
-) -> BTreeMap<(String, String), BTreeSet<String>> {
-    let mut imported = BTreeMap::<(String, String), BTreeSet<String>>::new();
+) -> BTreeMap<(String, String), TaintFacts> {
+    let mut imported = BTreeMap::<(String, String), TaintFacts>::new();
     for declaration in node
         .declarations
         .iter()
@@ -1094,44 +1163,53 @@ fn imported_taint_method_decorators(
     imported
 }
 
-fn taint_decorator_facts_from_effect_summary(fact: &SummaryEffectFact) -> BTreeSet<String> {
+fn taint_decorator_facts_from_effect_summary(fact: &SummaryEffectFact) -> TaintFacts {
     let mut facts = BTreeSet::new();
-    for effect in &fact.effects {
-        if let Some(fact) = taint_fact_from_effect_label(effect) {
-            facts.insert(fact.to_owned());
+    for source in &fact.sources {
+        facts.extend(taint_decorator_facts_from_decorator(source));
+    }
+    if facts.is_empty() {
+        for effect in &fact.effects {
+            if let Some(fact) = taint_fact_from_effect_label(effect) {
+                facts.insert(fact);
+            }
         }
     }
     facts
 }
 
-fn taint_decorator_facts_from_decorator(decorator: &str) -> BTreeSet<String> {
+fn taint_decorator_facts_from_decorator(decorator: &str) -> TaintFacts {
     let short = decorator_short_name(decorator).unwrap_or(decorator);
     let mut facts = BTreeSet::new();
-    match short {
-        "source" => {
-            facts.insert(String::from("source"));
-        }
-        "sink" => {
-            facts.insert(String::from("sink"));
-        }
-        "sanitizer" | "effect_taint_sanitize" => {
-            facts.insert(String::from("sanitizer"));
-        }
-        _ => {}
+    if let Some(fact) = taint_fact_from_decorator_name(short) {
+        facts.insert(fact);
     }
     if let Some(label) = effect_label_from_decorator(short)
         && let Some(fact) = taint_fact_from_effect_label(label)
     {
-        facts.insert(fact.to_owned());
+        facts.insert(fact);
     }
     facts
 }
 
-fn taint_fact_from_effect_label(label: &str) -> Option<&'static str> {
+fn taint_fact_from_decorator_name(decorator: &str) -> Option<TaintFact> {
+    let (target, context) =
+        decorator.split_once(':').map_or((decorator, None), |(target, context)| {
+            (target, (!context.is_empty()).then(|| context.to_owned()))
+        });
+    match target.rsplit('.').next().unwrap_or(target) {
+        "source" => Some(TaintFact::source(context)),
+        "sink" => Some(TaintFact::sink(context)),
+        "sanitizer" | "effect_taint_sanitize" => Some(TaintFact::sanitizer(context)),
+        _ => None,
+    }
+}
+
+fn taint_fact_from_effect_label(label: &str) -> Option<TaintFact> {
     match label {
-        "taint.source" => Some("source"),
-        "taint.sink" => Some("sink"),
-        "taint.sanitize" => Some("sanitizer"),
+        "taint.source" => Some(TaintFact::source(None)),
+        "taint.sink" => Some(TaintFact::sink(None)),
+        "taint.sanitize" => Some(TaintFact::sanitizer(None)),
         _ => None,
     }
 }
@@ -1200,19 +1278,61 @@ fn framework_capability_effect_kind(
     }
 }
 
+fn taint_source_contexts(facts: &TaintFacts) -> Option<TaintContexts> {
+    taint_contexts_for_kind(facts, TaintFactKind::Source)
+}
+
+fn taint_sink_contexts(facts: &TaintFacts) -> Option<TaintContexts> {
+    taint_contexts_for_kind(facts, TaintFactKind::Sink)
+}
+
+fn taint_sanitizer_contexts(facts: &TaintFacts) -> Option<TaintContexts> {
+    taint_contexts_for_kind(facts, TaintFactKind::Sanitizer)
+}
+
+fn taint_contexts_for_kind(facts: &TaintFacts, kind: TaintFactKind) -> Option<TaintContexts> {
+    let contexts = facts
+        .iter()
+        .filter(|fact| fact.kind == kind)
+        .map(|fact| fact.context.clone())
+        .collect::<TaintContexts>();
+    (!contexts.is_empty()).then_some(contexts)
+}
+
 fn argument_is_unsanitized_source(
     arg: &typepython_syntax::DirectExprMetadata,
-    decorated: &BTreeMap<String, BTreeSet<String>>,
-    decorated_methods: &BTreeMap<(String, String), BTreeSet<String>>,
-    tainted_locals: &BTreeMap<Option<String>, BTreeSet<String>>,
+    decorated: &BTreeMap<String, TaintFacts>,
+    decorated_methods: &BTreeMap<(String, String), TaintFacts>,
+    tainted_locals: &TaintedLocals,
     owner_name: Option<&str>,
+    required_contexts: &TaintContexts,
 ) -> bool {
+    !argument_taint_contexts(
+        arg,
+        decorated,
+        decorated_methods,
+        tainted_locals,
+        owner_name,
+        Some(required_contexts),
+    )
+    .is_empty()
+}
+
+fn argument_taint_contexts(
+    arg: &typepython_syntax::DirectExprMetadata,
+    decorated: &BTreeMap<String, TaintFacts>,
+    decorated_methods: &BTreeMap<(String, String), TaintFacts>,
+    tainted_locals: &TaintedLocals,
+    owner_name: Option<&str>,
+    required_contexts: Option<&TaintContexts>,
+) -> TaintContexts {
+    let mut contexts = TaintContexts::new();
     if let Some(callee) = arg.value_callee.as_deref() {
-        if decorated.get(callee).is_some_and(|decorators| decorators.contains("sanitizer")) {
-            return false;
+        if let Some(sanitizer_contexts) = decorated.get(callee).and_then(taint_sanitizer_contexts) {
+            return unsanitized_contexts_after_sanitizer(&sanitizer_contexts, required_contexts);
         }
-        if decorated.get(callee).is_some_and(|decorators| decorators.contains("source")) {
-            return true;
+        if let Some(source_contexts) = decorated.get(callee).and_then(taint_source_contexts) {
+            contexts.extend(taint_contexts_matching_required(&source_contexts, required_contexts));
         }
     }
     if let Some(decorators) = taint_method_facts(
@@ -1220,44 +1340,94 @@ fn argument_is_unsanitized_source(
         arg.value_method_owner_name.as_deref(),
         arg.value_method_name.as_deref(),
     ) {
-        if decorators.contains("sanitizer") {
-            return false;
+        if let Some(sanitizer_contexts) = taint_sanitizer_contexts(decorators) {
+            return unsanitized_contexts_after_sanitizer(&sanitizer_contexts, required_contexts);
         }
-        if decorators.contains("source") {
-            return true;
+        if let Some(source_contexts) = taint_source_contexts(decorators) {
+            contexts.extend(taint_contexts_matching_required(&source_contexts, required_contexts));
         }
     }
     if let Some(name) = arg.value_name.as_deref()
-        && tainted_locals
-            .get(&owner_name.map(str::to_owned))
-            .is_some_and(|locals| locals.contains(name))
+        && let Some(local_contexts) =
+            tainted_locals.get(&owner_name.map(str::to_owned)).and_then(|locals| locals.get(name))
     {
-        return true;
+        contexts.extend(taint_contexts_matching_required(local_contexts, required_contexts));
     }
-    arg.value_bool_left.as_deref().is_some_and(|inner| {
-        argument_is_unsanitized_source(
+    for inner in [
+        arg.value_subscript_target.as_deref(),
+        arg.value_if_true.as_deref(),
+        arg.value_if_false.as_deref(),
+        arg.value_bool_left.as_deref(),
+        arg.value_bool_right.as_deref(),
+        arg.value_binop_left.as_deref(),
+        arg.value_binop_right.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        contexts.extend(argument_taint_contexts(
             inner,
             decorated,
             decorated_methods,
             tainted_locals,
             owner_name,
-        )
-    }) || arg.value_bool_right.as_deref().is_some_and(|inner| {
-        argument_is_unsanitized_source(
-            inner,
-            decorated,
-            decorated_methods,
-            tainted_locals,
-            owner_name,
-        )
-    })
+            required_contexts,
+        ));
+    }
+    contexts
+}
+
+fn taint_contexts_matching_required(
+    contexts: &TaintContexts,
+    required_contexts: Option<&TaintContexts>,
+) -> TaintContexts {
+    let Some(required_contexts) = required_contexts else {
+        return contexts.clone();
+    };
+    contexts
+        .iter()
+        .filter(|context| {
+            required_contexts.iter().any(|required| taint_context_matches(context, required))
+        })
+        .cloned()
+        .collect()
+}
+
+fn taint_context_matches(source: &Option<String>, sink: &Option<String>) -> bool {
+    source.is_none() || sink.is_none() || source == sink
+}
+
+fn unsanitized_contexts_after_sanitizer(
+    sanitizer_contexts: &TaintContexts,
+    required_contexts: Option<&TaintContexts>,
+) -> TaintContexts {
+    let Some(required_contexts) = required_contexts else {
+        return TaintContexts::new();
+    };
+    required_contexts
+        .iter()
+        .filter(|required| {
+            !sanitizer_contexts
+                .iter()
+                .any(|sanitizer| sanitizer_context_covers(sanitizer, required))
+        })
+        .cloned()
+        .collect()
+}
+
+fn sanitizer_context_covers(sanitizer: &Option<String>, required: &Option<String>) -> bool {
+    sanitizer.is_none() || (required.is_some() && sanitizer == required)
+}
+
+fn sanitizer_contexts_cover_all(contexts: &TaintContexts) -> bool {
+    contexts.contains(&None)
 }
 
 fn taint_method_facts<'a>(
-    decorated_methods: &'a BTreeMap<(String, String), BTreeSet<String>>,
+    decorated_methods: &'a BTreeMap<(String, String), TaintFacts>,
     owner_name: Option<&str>,
     method_name: Option<&str>,
-) -> Option<&'a BTreeSet<String>> {
+) -> Option<&'a TaintFacts> {
     let owner_name = owner_name?;
     let method_name = method_name?;
     decorated_methods.get(&(owner_name.to_owned(), method_name.to_owned()))
@@ -1407,6 +1577,13 @@ fn effect_kind_from_decorator(short: &str) -> Option<EffectKind> {
     if let Some(effect) = effect_label_from_decorator(short) {
         return Some(effect_kind_from_label(effect));
     }
+    if let Some(fact) = taint_fact_from_decorator_name(short) {
+        return match fact.kind {
+            TaintFactKind::Source => Some(EffectKind::Declared(String::from("taint.source"))),
+            TaintFactKind::Sink => Some(EffectKind::Declared(String::from("taint.sink"))),
+            TaintFactKind::Sanitizer => Some(EffectKind::TaintSanitize),
+        };
+    }
     match short {
         "effect" | "effectful" => Some(EffectKind::Declared(String::from("declared"))),
         "effect_unsafe" => Some(EffectKind::Unsafe),
@@ -1416,10 +1593,6 @@ fn effect_kind_from_decorator(short: &str) -> Option<EffectKind> {
         "effect_time" => Some(EffectKind::Time),
         "effect_random" => Some(EffectKind::Random),
         "effect_runtime_validation" => Some(EffectKind::RuntimeValidation),
-        "effect_taint_sanitize" => Some(EffectKind::TaintSanitize),
-        "source" => Some(EffectKind::Declared(String::from("taint.source"))),
-        "sink" => Some(EffectKind::Declared(String::from("taint.sink"))),
-        "sanitizer" => Some(EffectKind::TaintSanitize),
         "trusted_validator" => Some(EffectKind::RuntimeValidation),
         _ => None,
     }
