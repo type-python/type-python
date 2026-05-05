@@ -80,7 +80,7 @@ package-check:
 	$(PYTHON) -m build --sdist --wheel
 	$(PYTHON) -m twine check dist/*
 
-beta-release-gate: fmt-check lint test test-cli-verification test-downstream-checkers fuzz-smoke package-check stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts
+beta-release-gate: fmt-check lint test test-cli-verification test-downstream-checkers roadmap-demo-smoke fuzz-smoke package-check stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts
 
 bump-version:
 	@test -n "$(VERSION)" || (echo "Usage: make bump-version VERSION=0.0.8" && exit 1)
@@ -98,4 +98,4 @@ snapshot-review:
 docs:
 	RUSTDOCFLAGS="$(RUSTDOCFLAGS)" $(CARGO) doc --workspace --no-deps
 
-ci: fmt-check lint test-fast test-cli-verification test-downstream-checkers stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench-check package-check
+ci: fmt-check lint test-fast test-cli-verification test-downstream-checkers roadmap-demo-smoke stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench-check package-check

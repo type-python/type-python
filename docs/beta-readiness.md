@@ -25,6 +25,8 @@ without a Beta-line compatibility guarantee:
 - LSP UX details, command names, and editor affordances.
 - Framework adapter manifest SDK and prototype adapter metadata.
 - Runtime validators and boundary-validator adapter delegation.
+- Author-time semantic research slices: effect/capability rows, experimental shape projections,
+  restricted type-level evaluator forms, taint facts, and validator witnesses.
 - Migration heuristics, type-budget scoring, and adoption dashboard details.
 - Cache internal schema, support indexes, and incremental snapshot layout.
 - Conditional returns, pass-through inference, sync/async dual emit, and other Experimental v1 work.
@@ -38,6 +40,8 @@ A Beta release candidate must pass the tracked release gate before the classifie
 - `cargo test --workspace`
 - CLI verification suite: `cargo test -p typepython-cli tests::verification::`
 - downstream checker smoke: `python scripts/downstream_checker_smoke.py` with mypy, pyright, and ty
+- roadmap demo smoke: `python scripts/research_roadmap_demo_smoke.py`, which checks and builds the
+  P0-P4 author-time semantics example and asserts portable output
 - fuzz smoke: `parser`, `type_expr`, and `lowering_stub`
 - package build and metadata check: `python -m build --sdist --wheel` and `python -m twine check dist/*`
 - installed wheel quickstart smoke, including `typepython --help`, `init`, `check`, `build`, and `verify`
