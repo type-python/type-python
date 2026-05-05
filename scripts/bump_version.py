@@ -11,6 +11,8 @@ CARGO_TOML = ROOT / "Cargo.toml"
 PYPROJECT_TOML = ROOT / "pyproject.toml"
 PACKAGE_INIT = ROOT / "typepython" / "__init__.py"
 CARGO_LOCK = ROOT / "Cargo.lock"
+README = ROOT / "README.md"
+PYPI_README = ROOT / "README-PyPI.md"
 
 
 def replace_single(pattern: str, replacement: str, text: str, label: str) -> str:
@@ -24,6 +26,15 @@ def replace_literal(old: str, new: str, text: str, label: str) -> str:
     if old not in text:
         raise SystemExit(f"unable to find version {old!r} in {label}")
     return text.replace(old, new)
+
+
+def replace_status_version(text: str, version: str, label: str) -> str:
+    return replace_single(
+        r"\(v\d+\.\d+\.\d+\)",
+        f"(v{version})",
+        text,
+        f"{label} Core v1 Beta status version",
+    )
 
 
 def extract_workspace_members(text: str) -> list[str]:
@@ -97,6 +108,8 @@ def main() -> None:
     cargo_text = CARGO_TOML.read_text()
     init_text = PACKAGE_INIT.read_text()
     lock_text = CARGO_LOCK.read_text()
+    readme_text = README.read_text()
+    pypi_readme_text = PYPI_README.read_text()
 
     cargo_text = replace_single(
         r'^version = "[^"]+"$',
@@ -117,11 +130,17 @@ def main() -> None:
         "typepython/__init__.py __version__",
     )
     lock_text = update_cargo_lock(lock_text, workspace_package_names(), args.version)
+    readme_text = replace_status_version(readme_text, args.version, "README.md")
+    pypi_readme_text = replace_status_version(
+        pypi_readme_text, args.version, "README-PyPI.md"
+    )
 
     CARGO_TOML.write_text(cargo_text)
     PYPROJECT_TOML.write_text(pyproject_text)
     PACKAGE_INIT.write_text(init_text)
     CARGO_LOCK.write_text(lock_text)
+    README.write_text(readme_text)
+    PYPI_README.write_text(pypi_readme_text)
 
     print(f"updated version {old_version} -> {args.version}")
 

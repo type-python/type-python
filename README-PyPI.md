@@ -17,7 +17,7 @@ output runs anywhere CPython runs.
 
 **No custom runtime. No per-checker plugin. No vendor lock-in.**
 
-> Status: **Core v1 Beta** (v0.3.1). Core syntax, config, `init`/`check`/`build`/
+> Status: **Core v1 Beta** (v0.4.0). Core syntax, config, `init`/`check`/`build`/
 > `clean`/`verify`, diagnostic code identity, and emitted `.py`/`.pyi` compatibility
 > are the stable Beta surfaces. LSP UX, adapter manifests, runtime validators, and
 > migration heuristics remain prototype/experimental.

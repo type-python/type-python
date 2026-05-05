@@ -198,7 +198,7 @@ class BaseModel: ...
 
 ## Project status
 
-TypePython is **Core v1 Beta** (v0.3.1). The Beta claim is deliberately scoped: Core syntax,
+TypePython is **Core v1 Beta** (v0.4.0). The Beta claim is deliberately scoped: Core syntax,
 configuration, `init`/`check`/`build`/`clean`/`verify`, diagnostic code identity, and emitted
 `.py`/`.pyi` compatibility are the stable surfaces. DX and Experimental features ship for feedback
 but are not compatibility-stable. See [`docs/beta-readiness.md`](docs/beta-readiness.md).

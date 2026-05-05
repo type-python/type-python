@@ -135,6 +135,7 @@ class RepoContractsTests(unittest.TestCase):
 
     def test_beta_scope_and_release_gate_are_documented(self) -> None:
         pyproject = read_text("pyproject.toml")
+        package_version = string_assignment("pyproject.toml", "version")
         readme = read_text("README.md")
         pypi_readme = read_text("README-PyPI.md")
         faq = read_text("docs/faq.md")
@@ -145,6 +146,8 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("Development Status :: 4 - Beta", pyproject)
         self.assertIn("Core v1 Beta", readme)
         self.assertIn("Core v1 Beta", pypi_readme)
+        self.assertIn(f"Core v1 Beta** (v{package_version})", readme)
+        self.assertIn(f"Core v1 Beta** (v{package_version})", pypi_readme)
         self.assertIn("not a blanket production-ready claim", faq)
         self.assertIn("Stable during Beta", beta)
         self.assertIn("Included but not compatibility-stable", beta)
