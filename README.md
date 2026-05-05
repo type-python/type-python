@@ -289,6 +289,7 @@ Full guide: [`docs/migration-guide.md`](docs/migration-guide.md).
 | You're adopting it in an existing codebase   | [Migration Guide](docs/migration-guide.md)       |
 | You're a framework author                    | [Framework Adapters](docs/framework-adapters.md) |
 | You're evaluating Beta stability             | [Beta Readiness](docs/beta-readiness.md)         |
+| You're checking feature stability            | [Feature Status](docs/feature-status.md)         |
 | You want the crate map / pipeline diagram    | [Architecture](docs/architecture.md)             |
 | You're evaluating the P0-P4 research slices  | [Author-Time Semantics](docs/author-time-semantics.md) |
 | You're sending a PR                          | [Contributing](docs/contributing.md)             |

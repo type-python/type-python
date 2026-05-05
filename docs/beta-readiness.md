@@ -1,14 +1,17 @@
 # Core v1 Beta Readiness
 
-TypePython's Beta claim is intentionally narrow: **Core v1 Beta**. The package may include DX v1 and
-Experimental v1 capabilities, but those surfaces are not part of the Beta compatibility promise until
-they are promoted explicitly.
+TypePython's Beta claim is intentionally narrow: **Core v1 Beta**. The package may include Supported
+DX, Experimental opt-in, and Roadmap / prototype capabilities, but those surfaces are not part of the
+Beta compatibility promise until they are promoted explicitly. The canonical status vocabulary lives
+in [TypePython Feature Status](feature-status.md).
 
-## Stable during Beta
+## Stable Core v1 During Beta
 
 The following surfaces are compatibility-stable for the Core v1 Beta line:
 
 - `.tpy` Core syntax documented in the language spec.
+- Core checker semantics, including same-module `sealed class` closure, sealed-match exhaustiveness,
+  `unknown` narrowing requirements, `unsafe:` fences, and supported `TypedDict` transforms.
 - `typepython.toml` Core configuration fields for project discovery, resolution, typing, and emit
   behavior used by `init`, `check`, `build`, `clean`, and `verify`.
 - CLI commands: `init`, `check`, `build`, `clean`, and `verify`.
@@ -17,19 +20,35 @@ The following surfaces are compatibility-stable for the Core v1 Beta line:
 - Emitted `.py` / `.pyi` compatibility contract: generated artifacts remain standard Python typing
   surfaces with no mandatory TypePython runtime dependency.
 
-## Included but not compatibility-stable
+## Supported DX, Non-Stable
 
 The following features can be useful in Beta builds, but their UX, schemas, or heuristics may change
 without a Beta-line compatibility guarantee:
 
 - LSP UX details, command names, and editor affordances.
-- Framework adapter manifest SDK and prototype adapter metadata.
-- Runtime validators and boundary-validator adapter delegation.
-- Author-time semantic research slices: effect/capability rows, experimental shape projections,
-  restricted type-level evaluator forms, taint facts, and validator witnesses.
 - Migration heuristics, type-budget scoring, and adoption dashboard details.
 - Cache internal schema, support indexes, and incremental snapshot layout.
-- Conditional returns, pass-through inference, sync/async dual emit, and other Experimental v1 work.
+- `watch`, `compat`, `api-diff`, and `type-health` UX and report details.
+
+## Experimental Opt-In
+
+The following features are outside Core v1 conformance and must require explicit opt-in before they
+can affect an ordinary project:
+
+- Runtime validators and boundary-validator adapter delegation.
+- Conditional returns, pass-through `.py` inference, sync/async dual emit, and other Experimental v1
+  work.
+- Shape projections beyond `TypedDict`.
+
+## Roadmap / Prototype
+
+The following surfaces are not compatibility claims and must not appear as completed advantages in
+the main mypy / pyright / PEP 695 comparison table:
+
+- Framework adapter manifest SDK and prototype adapter metadata.
+- Author-time semantic research slices: effect/capability rows beyond the stable `unsafe:` fence,
+  restricted type-level evaluator forms, taint facts, and validator witnesses.
+- Notebook ingestion and other future workflow experiments.
 
 ## Release gate
 

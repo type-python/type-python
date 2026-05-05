@@ -136,6 +136,7 @@ hazards for frameworks that introspect annotations.
 - [Migration Guide](https://github.com/type-python/type-python/blob/main/docs/migration-guide.md)
 - [Framework Adapters](https://github.com/type-python/type-python/blob/main/docs/framework-adapters.md)
 - [Beta Readiness](https://github.com/type-python/type-python/blob/main/docs/beta-readiness.md)
+- [Feature Status](https://github.com/type-python/type-python/blob/main/docs/feature-status.md)
 - [Language Spec v1](https://github.com/type-python/type-python/blob/main/docs/spec/language-spec-v1.md)
 
 ## Links
