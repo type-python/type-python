@@ -371,7 +371,7 @@ During development, option 3 means you can run `python -m typepython check --pro
 ### Release hygiene
 
 - Build release artifacts from a clean checkout. The source distribution uses `MANIFEST.in` with `graft` rules over the Rust workspace and bundled stdlib snapshot, so untracked files under packaged directories can be swept into a locally-built sdist.
-- Use `make bump-version VERSION=X.Y.Z` for version updates. This synchronizes `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, and `typepython/__init__.py` in one step.
+- Use `make bump-version VERSION=X.Y.Z` for version updates. This synchronizes `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, and `typepython/__init__.py` in one step. `./scripts/bootstrap-rust.sh X.Y.Z` is also accepted for release-prep sessions that should confirm the pinned Rust toolchain before applying the same version sync.
 - Validate both artifacts before publishing: `python -m build --sdist --wheel` and `python -m twine check dist/*`.
 - If you intend `pip install type-python` to work without a Rust toolchain, publish platform wheels for each supported target in addition to the sdist. The release workflow uses `cibuildwheel` to publish Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64 wheels.
 

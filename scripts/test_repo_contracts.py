@@ -98,6 +98,8 @@ class RepoContractsTests(unittest.TestCase):
             f"rustup toolchain install {msrv} --profile minimal", rust_workflow
         )
         self.assertIn("make msrv-check", rust_workflow)
+        self.assertIn("REQUESTED_VERSION", bootstrap)
+        self.assertIn("bump_version.py", bootstrap)
 
     def test_bundled_stdlib_baseline_is_pinned_and_current(self) -> None:
         baseline = read_text("stdlib/BASELINE.toml")
