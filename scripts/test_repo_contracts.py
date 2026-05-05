@@ -232,11 +232,55 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("scripts/diagnostic_test_coverage.py --check", makefile)
         self.assertIn("Diagnostic Test Coverage", report)
         self.assertIn("TPY4001", report)
+        self.assertIn("TPY4029", report)
         subprocess.run(
             [sys.executable, "scripts/diagnostic_test_coverage.py", "--check"],
             cwd=REPO_ROOT,
             check=True,
         )
+
+    def test_strict_typing_config_options_are_wired_to_checker(self) -> None:
+        checker = read_text("crates/typepython_checking/src/lib.rs")
+        assignability = read_text(
+            "crates/typepython_checking/src/type_system/assignability.rs"
+        )
+        semantic = read_text("crates/typepython_checking/src/semantic.rs")
+        semantic_tests = read_text("crates/typepython_checking/src/tests/semantic.rs")
+        pipeline = read_text("crates/typepython_cli/src/pipeline.rs")
+        lsp_lifecycle = read_text("crates/typepython_lsp/src/workspace/lifecycle.rs")
+        coverage = read_text("docs/diagnostic-test-coverage.md")
+
+        self.assertIn("pub strict_nulls: bool", checker)
+        self.assertIn("pub no_implicit_dynamic: bool", checker)
+        self.assertIn("strict_nulls: config.strict_nulls", checker)
+        self.assertIn("no_implicit_dynamic: config.no_implicit_dynamic", checker)
+        self.assertIn("fn assignability_options(&self) -> AssignabilityOptions", checker)
+        self.assertIn("implicit_dynamic_diagnostics(context, node)", checker)
+
+        self.assertIn("pub(super) struct AssignabilityOptions", assignability)
+        self.assertIn("pub(super) strict_nulls: bool", assignability)
+        self.assertIn("if !options.strict_nulls", assignability)
+        self.assertIn("semantic_type_is_assignable_with_options", assignability)
+
+        self.assertIn("context.no_implicit_dynamic", semantic)
+        self.assertIn('Diagnostic::error("TPY4029"', semantic)
+        self.assertIn("strict_nulls: false", semantic_tests)
+        self.assertIn("no_implicit_dynamic: true", semantic_tests)
+
+        self.assertIn("strict_nulls: config.config.typing.strict_nulls", pipeline)
+        self.assertIn(
+            "no_implicit_dynamic: config.config.typing.no_implicit_dynamic",
+            pipeline,
+        )
+        self.assertIn(
+            "CheckerOptions::from_typing_config(&config.config.typing)",
+            pipeline,
+        )
+        self.assertIn(
+            "CheckerOptions::from_typing_config(&self.config.config.typing)",
+            lsp_lifecycle,
+        )
+        self.assertIn("TPY4029", coverage)
 
     def test_insta_snapshots_are_limited_to_emission_golden_outputs(self) -> None:
         allowed_prefixes = (
