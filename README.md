@@ -163,8 +163,9 @@ A few stronger guarantees are author-time only — they live in your `.tpy` sour
 | `sealed class` exhaustiveness      | external checkers see a normal class           |
 | `unsafe:` audit fence              | erased; lowered to valid Python                |
 | `TypedDict` transforms             | expanded to standard `TypedDict` shapes        |
+| effect, taint, and witness facts   | checked at author-time; erased or sidecar-only |
 
-This trade is intentional: **you get stronger checks while authoring; consumers get clean, portable Python they can read with mypy, pyright, ty, IDEs, and any PEP 561 tool**. See [`docs/interop.md`](docs/interop.md).
+This trade is intentional: **you get stronger checks while authoring; consumers get clean, portable Python they can read with mypy, pyright, ty, IDEs, and any PEP 561 tool**. See [`docs/interop.md`](docs/interop.md) and [`docs/author-time-semantics.md`](docs/author-time-semantics.md).
 
 ## For library and framework authors
 
@@ -247,6 +248,7 @@ Full reference: [`docs/configuration.md`](docs/configuration.md).
 | [`config-loader/`](examples/config-loader/) | `unknown`, unsafe boundaries, trust-boundary parsing patterns |
 | [`event-system/`](examples/event-system/)   | sealed events, interfaces, data classes, generics             |
 | [`showcase/`](examples/showcase/)           | multi-file feature showcase                                   |
+| [`research-roadmap-demo/`](examples/research-roadmap-demo/) | effect rows, Shape projection, restricted evaluator, taint, validator witnesses |
 
 Framework and downstream-checker fixtures: [`test-fixtures/downstream-checkers/`](test-fixtures/downstream-checkers/).
 
@@ -288,6 +290,7 @@ Full guide: [`docs/migration-guide.md`](docs/migration-guide.md).
 | You're a framework author                    | [Framework Adapters](docs/framework-adapters.md) |
 | You're evaluating Beta stability             | [Beta Readiness](docs/beta-readiness.md)         |
 | You want the crate map / pipeline diagram    | [Architecture](docs/architecture.md)             |
+| You're evaluating the P0-P4 research slices  | [Author-Time Semantics](docs/author-time-semantics.md) |
 | You're sending a PR                          | [Contributing](docs/contributing.md)             |
 | You have a quick question                    | [FAQ](docs/faq.md)                               |
 | You need normative semantics                 | [Language Spec v1](docs/spec/language-spec-v1.md) |
