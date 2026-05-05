@@ -112,6 +112,125 @@ fn check_rejects_none_literal_assignment_when_strict_nulls_is_disabled() {
 }
 
 #[test]
+fn check_accepts_assignment_into_unknown_boundary() {
+    let result = check_temp_typepython_source("value: unknown = 1\n");
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_reports_unknown_assignment_to_concrete_type() {
+    let result = check_temp_typepython_source(
+        "def get_value() -> unknown:\n    ...\n\nvalue: int = get_value()\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("assigns `unknown`"), "{rendered}");
+    assert!(rendered.contains("expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_unknown_assignment_to_allowed_boundary_types() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "as_unknown: unknown = get_value()\n",
+        "as_dynamic: dynamic = get_value()\n",
+        "as_object: object = get_value()\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_accepts_unknown_assignment_to_object_alias_and_union_boundary() {
+    let result = check_temp_typepython_source(concat!(
+        "typealias ObjectSink = object\n\n",
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "as_alias: ObjectSink = get_value()\n",
+        "as_union: object | int = get_value()\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_reports_unknown_assignment_to_any() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Any\n\n",
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "value: Any = get_value()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("assigns `unknown`"), "{rendered}");
+    assert!(rendered.contains("expects `Any`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_assignment_to_any_alias() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Any\n\n",
+        "typealias Loose = Any\n\n",
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "value: Loose = get_value()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("assigns `unknown`"), "{rendered}");
+    assert!(rendered.contains("expects `Loose`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_call_argument_to_concrete_parameter() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "def takes(value: int) -> None:\n",
+        "    pass\n\n",
+        "takes(get_value())\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("passes `unknown`"), "{rendered}");
+    assert!(rendered.contains("expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_return_to_concrete_type() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "def build() -> int:\n",
+        "    return get_value()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("returns `unknown`"), "{rendered}");
+    assert!(rendered.contains("expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_unknown_after_explicit_cast() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import cast\n\n",
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "value: int = cast(int, get_value())\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_empty_tail_paramspec_call() {
     let result = check_temp_typepython_source(
         "from typing import Callable, ParamSpec\n\nP = ParamSpec(\"P\")\n\ndef invoke(cb: Callable[P, int]) -> int:\n    return cb()\n",
@@ -1773,6 +1892,29 @@ fn semantic_callable_assignability_handles_concatenate_structurally() {
 
     assert!(crate::semantic_type_is_assignable(&node, &[], &expected, &assignable));
     assert!(!crate::semantic_type_is_assignable(&node, &[], &expected, &incompatible));
+}
+
+#[test]
+fn semantic_assignability_treats_unknown_as_checked_boundary_not_any() {
+    let node = type_relation_node_with_base_child();
+    let nodes = vec![node.clone()];
+    let named = |name: &str| crate::SemanticType::Name(String::from(name));
+
+    let int = named("int");
+    let unknown = named("unknown");
+    let dynamic = named("dynamic");
+    let any = named("Any");
+    let object = named("object");
+    let object_or_int = crate::SemanticType::parse("object | int").expect("union should parse");
+
+    assert!(crate::semantic_type_is_assignable(&node, &nodes, &unknown, &int));
+    assert!(crate::semantic_type_is_assignable(&node, &nodes, &unknown, &dynamic));
+    assert!(crate::semantic_type_is_assignable(&node, &nodes, &dynamic, &unknown));
+    assert!(crate::semantic_type_is_assignable(&node, &nodes, &object, &unknown));
+    assert!(crate::semantic_type_is_assignable(&node, &nodes, &object_or_int, &unknown));
+
+    assert!(!crate::semantic_type_is_assignable(&node, &nodes, &int, &unknown));
+    assert!(!crate::semantic_type_is_assignable(&node, &nodes, &any, &unknown));
 }
 
 #[test]

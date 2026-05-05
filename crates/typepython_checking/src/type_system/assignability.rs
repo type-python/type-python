@@ -182,10 +182,26 @@ fn direct_semantic_type_is_assignable(
     let expected = expected.strip_annotated().clone();
     let actual = actual.strip_annotated().clone();
 
-    if expected == actual
-        || is_object_semantic_type(&expected)
-        || is_top_assignable_semantic_type(&expected)
-        || is_top_assignable_semantic_type(&actual)
+    if expected == actual {
+        return true;
+    }
+
+    let actual_is_unknown = is_unknown_semantic_type(&actual);
+    if actual_is_unknown
+        && (is_unknown_semantic_type(&expected)
+            || is_dynamic_semantic_type(&expected)
+            || is_object_semantic_type(&expected))
+    {
+        return true;
+    }
+    if actual_is_unknown && is_any_semantic_type(&expected) {
+        return false;
+    }
+
+    if !actual_is_unknown
+        && (is_object_semantic_type(&expected)
+            || is_top_receiving_semantic_type(&expected)
+            || is_top_escaping_semantic_type(&actual))
     {
         return true;
     }
@@ -284,6 +300,8 @@ fn direct_semantic_type_is_assignable(
                 assignable_semantic_generic_bridge(node, nodes, &expected, &actual, options)
             {
                 result
+            } else if actual_is_unknown {
+                false
             } else {
                 direct_semantic_type_matches(node, nodes, &expected, &actual, &mut BTreeSet::new())
             }
@@ -297,8 +315,20 @@ fn is_any_semantic_type(ty: &SemanticType) -> bool {
     matches!(ty, SemanticType::Name(name) if name == "Any")
 }
 
-fn is_top_assignable_semantic_type(ty: &SemanticType) -> bool {
+fn is_top_receiving_semantic_type(ty: &SemanticType) -> bool {
     matches!(ty, SemanticType::Name(name) if matches!(name.as_str(), "Any" | "unknown" | "dynamic"))
+}
+
+fn is_top_escaping_semantic_type(ty: &SemanticType) -> bool {
+    is_any_semantic_type(ty) || is_dynamic_semantic_type(ty)
+}
+
+fn is_dynamic_semantic_type(ty: &SemanticType) -> bool {
+    matches!(ty, SemanticType::Name(name) if name == "dynamic")
+}
+
+fn is_unknown_semantic_type(ty: &SemanticType) -> bool {
+    matches!(ty, SemanticType::Name(name) if name == "unknown")
 }
 
 fn is_object_semantic_type(ty: &SemanticType) -> bool {
@@ -959,6 +989,9 @@ fn expand_semantic_type_alias_once(
         &rewrite_imported_typing_semantic_type(alias_node, &alias.body),
         &substitutions,
     );
+    if expanded == *stripped {
+        return None;
+    }
     let expanded = expand_semantic_type_aliases_in_provider_context(alias_node, nodes, expanded);
     (expanded != *stripped).then_some(expanded)
 }
