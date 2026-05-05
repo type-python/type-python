@@ -108,6 +108,7 @@ TEST_EVIDENCE: dict[str, tuple[str, ...]] = {
     "Public API completeness enforcement when configured": ("cargo test -p typepython-cli public_surface",),
     "Packaging artifact consistency rules for typed publication": ("cargo test -p typepython-cli tests::verification",),
     "`typepython verify` library publishability checks": ("cargo test -p typepython-cli tests::verification",),
+    "Sealed exhaustiveness": ("cargo test -p typepython-checking sealed",),
     "Runtime validator emission for selected data-class trust boundaries": (
         "cargo test -p typepython-emit write_runtime_outputs",
         "cargo test -p typepython-emit write_runtime_outputs_honors_named_validation_boundary_kinds",

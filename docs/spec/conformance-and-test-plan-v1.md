@@ -28,12 +28,13 @@ Features designated **Experimental v1** are outside conformance. Implementations
 2. **Binding and declaration typing** for modules, classes, interfaces, aliases, and imports
 3. **Semantic elaboration** for v1 features that require bound declarations before expansion or checking
 4. **Body type checking** for the supported feature set
-5. **Deterministic emission** of `.py` and `.pyi`
-6. **Source span mapping** from original `.tpy` to emitted `.py`
-7. **Standards-based typing interop** for installed typed packages, stub packages, and the imported typing constructs required by Section 12.6
-8. **Framework transform support** for `dataclass_transform`-driven dataclass-like libraries per Section 10.5
-9. **Public-summary computation and deterministic invalidation**
-10. **`typepython verify`** per Section 18.7
+5. **Sealed hierarchy exhaustiveness** for same-module sealed closures when `enable_sealed_exhaustiveness = true`
+6. **Deterministic emission** of `.py` and `.pyi`
+7. **Source span mapping** from original `.tpy` to emitted `.py`
+8. **Standards-based typing interop** for installed typed packages, stub packages, and the imported typing constructs required by Section 12.6
+9. **Framework transform support** for `dataclass_transform`-driven dataclass-like libraries per Section 10.5
+10. **Public-summary computation and deterministic invalidation**
+11. **`typepython verify`** per Section 18.7
 
 ### 4.2 Core v1 Project and CLI Requirements
 
@@ -192,7 +193,7 @@ The following appendix remains normative for conformance and capability claims.
 | Public API completeness enforcement when configured                                                           | Core v1         | MUST   |
 | Packaging artifact consistency rules for typed publication                                                    | Core v1         | MUST   |
 | `typepython verify` library publishability checks                                                             | Core v1         | MUST   |
-| Sealed exhaustiveness                                                                                         | DX v1           | SHOULD |
+| Sealed exhaustiveness                                                                                         | Core v1         | MUST   |
 | Enum exhaustiveness                                                                                           | DX v1           | SHOULD |
 | Enhanced diagnostics (mismatch path, inference trace, suggested fixes)                                        | DX v1           | SHOULD |
 | Stable JSON diagnostic output                                                                                 | DX v1           | SHOULD |
