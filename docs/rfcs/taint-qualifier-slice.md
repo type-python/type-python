@@ -1,7 +1,6 @@
 # RFC: Taint Qualifier Slice
 
 **Status:** internal P3 vertical slice  
-**Strategic source:** `docs/research-roadmap-assessment.zh.md` P3 Taint as Real Type  
 **Scope:** checker-only `Tainted[T, Context]` assignability semantics plus explicit source/sink/sanitizer facts
 
 ## Summary

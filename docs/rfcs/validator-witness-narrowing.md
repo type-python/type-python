@@ -1,7 +1,6 @@
 # RFC: Validator Witness Narrowing Slice
 
 **Status:** internal P4 vertical slice  
-**Strategic source:** `docs/research-roadmap-assessment.zh.md` P4 Runtime Boundary Witnesses  
 **Scope:** true-branch narrowing for `unknown`; no full runtime soundness claim
 
 ## Summary

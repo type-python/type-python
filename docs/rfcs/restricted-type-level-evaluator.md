@@ -1,7 +1,6 @@
 # RFC: Restricted Type-Level Evaluator
 
 **Status:** internal P2 substrate slice  
-**Strategic source:** `docs/research-roadmap-assessment.zh.md` P2 Restricted Conditional + Mapped Types  
 **Scope:** checker-internal evaluator with guarded lowering and LSP explanation for reduced standard typing
 
 ## Summary

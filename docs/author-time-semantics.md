@@ -2,8 +2,6 @@
 
 TypePython's research slices are implemented as stronger author-time semantics with a portable output boundary. The source language can track effects, shape projections, taint, and validator witnesses, while emitted `.py` and `.pyi` stay standard Python artifacts.
 
-This page is the user-facing map for the implemented P0-P4 slices from `docs/research-roadmap-assessment.zh.md`.
-
 ## The Boundary
 
 TypePython checks richer facts while you author `.tpy`:

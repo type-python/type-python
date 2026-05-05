@@ -1,7 +1,6 @@
 # RFC: Effect and Capability Rows Slice
 
 **Status:** internal P0 vertical slice  
-**Strategic source:** `docs/research-roadmap-assessment.zh.md` P0 Effect / Capability Rows  
 **Scope:** checker and LSP author-time facts; emitted `.py` and `.pyi` remain standard
 
 ## Summary
