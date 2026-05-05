@@ -47,6 +47,14 @@ def load_script_module(relative_path: str, module_name: str):
     return module
 
 
+def markdown_section(text: str, heading: str) -> str:
+    pattern = rf"^##\s+{re.escape(heading)}\s*$\n(?P<body>.*?)(?=^##\s+|\Z)"
+    match = re.search(pattern, text, flags=re.MULTILINE | re.DOTALL)
+    if match is None:
+        raise AssertionError(f"README section {heading!r} was not found")
+    return match.group("body")
+
+
 class RepoContractsTests(unittest.TestCase):
     def test_docs_cover_workspace_crates_without_hard_coded_totals(self) -> None:
         architecture = read_text("docs/architecture.md")
@@ -152,9 +160,45 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("Stable Core v1 During Beta", beta)
         self.assertIn("Supported DX, Non-Stable", beta)
         self.assertIn("Experimental Opt-In", beta)
+        self.assertIn("Roadmap / Prototype", beta)
         self.assertIn("beta-release-gate", workflow)
         self.assertIn("require-beta-release-gate", read_text(".github/workflows/publish.yml"))
         self.assertIn("beta-release-gate:", makefile)
+
+    def test_feature_status_contracts_match_marketing_claims(self) -> None:
+        readme = read_text("README.md")
+        pypi_readme = read_text("README-PyPI.md")
+        beta = read_text("docs/beta-readiness.md")
+        feature_status = read_text("docs/feature-status.md")
+        conformance = read_text("docs/conformance-report.md")
+
+        self.assertIn("[TypePython Feature Status](feature-status.md)", beta)
+        for status in (
+            "Stable Core v1",
+            "Supported DX",
+            "Experimental opt-in",
+            "Roadmap / prototype",
+        ):
+            self.assertIn(status, feature_status)
+
+        self.assertIn(
+            "| Sealed exhaustiveness | Core v1 | MUST | `cargo test -p typepython-checking sealed` |",
+            conformance,
+        )
+        self.assertNotIn(
+            "| Sealed exhaustiveness | DX v1 | SHOULD | missing |",
+            conformance,
+        )
+
+        why_not = markdown_section(readme, "Why not just mypy / pyright / PEP 695?")
+        self.assertIn("`sealed class` + compiler-proved exhaustiveness", why_not)
+        self.assertNotIn("Framework shapes beyond", why_not)
+        self.assertNotIn("Roadmap / prototype", why_not)
+        self.assertNotIn("Experimental opt-in", why_not)
+
+        self.assertIn("Core checker semantics", readme)
+        self.assertIn("Core checker semantics", pypi_readme)
+        self.assertIn("author-time checks", pypi_readme)
 
     def test_conformance_beta_scope_classification_is_precise(self) -> None:
         conformance_report = load_script_module(
