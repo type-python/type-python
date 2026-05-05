@@ -317,4 +317,4 @@ See [`docs/contributing.md`](docs/contributing.md) for the full PR workflow.
 
 ## License
 
-[MIT](LICENSE) © contributors
+[MIT](LICENSE)
