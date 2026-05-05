@@ -29,15 +29,20 @@ pub(super) fn direct_member_access_diagnostics(
 
             let owner_type = resolve_member_access_owner_semantic_type(node, nodes, access)?;
             if let Some(branches) = semantic_union_branches(&owner_type) {
+                let member_required_branches = branches
+                    .iter()
+                    .filter(|branch| context.strict_nulls || !semantic_branch_is_none(branch))
+                    .collect::<Vec<_>>();
                 let available = branches
                     .iter()
+                    .filter(|branch| context.strict_nulls || !semantic_branch_is_none(branch))
                     .filter_map(|branch| {
                         let branch_name = semantic_nominal_owner_name(branch)?;
                         type_has_readable_member(node, nodes, &branch_name, &access.member)
                             .then_some(branch_name)
                     })
                     .collect::<Vec<_>>();
-                if available.len() == branches.len() {
+                if available.len() == member_required_branches.len() {
                     return None;
                 }
                 let mut diagnostic = Diagnostic::error(
@@ -121,6 +126,10 @@ pub(super) fn direct_member_access_diagnostics(
             })
         })
         .collect()
+}
+
+fn semantic_branch_is_none(branch: &SemanticType) -> bool {
+    matches!(branch.strip_annotated(), SemanticType::Name(name) if name == "None")
 }
 
 pub(super) fn type_has_readable_member(

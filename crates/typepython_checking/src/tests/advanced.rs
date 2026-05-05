@@ -11861,6 +11861,107 @@ fn check_reports_union_member_access_with_isinstance_guard_suggestion() {
 }
 
 #[test]
+fn check_accepts_none_union_member_access_when_strict_nulls_is_disabled() {
+    let graph = ModuleGraph {
+        nodes: vec![ModuleNode {
+            module_path: PathBuf::from("src/app/module.py"),
+            module_key: String::from("app.module"),
+            module_kind: SourceKind::TypePython,
+            declarations: vec![
+                declaration! {
+                    name: String::from("A"),
+                    kind: DeclarationKind::Class,
+                    metadata: Default::default(),
+                    value_type_expr: None,
+                    method_kind: None,
+                    class_kind: Some(DeclarationOwnerKind::Class),
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+                declaration! {
+                    name: String::from("name"),
+                    kind: DeclarationKind::Value,
+                    metadata: value_metadata("str"),
+                    value_type_expr: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: Some(DeclarationOwner {
+                        name: String::from("A"),
+                        kind: DeclarationOwnerKind::Class,
+                    }),
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+                declaration! {
+                    name: String::from("value"),
+                    kind: DeclarationKind::Value,
+                    metadata: value_metadata("A | None"),
+                    value_type_expr: None,
+                    method_kind: None,
+                    owner: None,
+                    class_kind: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+            ],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            returns: Vec::new(),
+            member_accesses: vec![typepython_binding::MemberAccessSite {
+                current_owner_name: None,
+                current_owner_type_name: None,
+                owner_name: String::from("value"),
+                member: String::from("name"),
+                through_instance: false,
+                line: 1,
+            }],
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+            summary_fingerprint: 1,
+        }],
+    };
+
+    let result = crate::check_with_checker_options(
+        &normalize_test_graph(&graph),
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_reports_direct_method_call_arity_mismatch() {
     let result = check(&ModuleGraph {
         nodes: vec![ModuleNode {
