@@ -52,7 +52,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
             diagnostics.extend(result.diagnostics);
             let expected_type = lower_type_text_or_name(&expected);
             let actual_type = result.actual_type;
-            if !semantic_type_is_assignable(node, nodes, &expected_type, &actual_type) {
+            if !context.semantic_type_is_assignable(node, &expected_type, &actual_type) {
                 diagnostics.push(assignment_type_mismatch_diagnostic(
                     node,
                     nodes,
@@ -100,7 +100,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
             diagnostics.extend(result.diagnostics);
             let expected_type = lower_type_text_or_name(&expected);
             let actual_type = result.actual_type;
-            if !semantic_type_is_assignable(node, nodes, &expected_type, &actual_type) {
+            if !context.semantic_type_is_assignable(node, &expected_type, &actual_type) {
                 diagnostics.push(assignment_type_mismatch_diagnostic(
                     node,
                     nodes,
@@ -142,7 +142,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
             continue;
         };
         let expected_type = lower_type_text_or_name(&expected);
-        if !semantic_type_is_assignable(node, nodes, &expected_type, &actual) {
+        if !context.semantic_type_is_assignable(node, &expected_type, &actual) {
             diagnostics.push(assignment_type_mismatch_diagnostic(
                 node,
                 nodes,
@@ -951,7 +951,7 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
                 let Some(actual_type) = field.semantic_value_type() else {
                     continue;
                 };
-                if !semantic_type_matches(node, nodes, &expected_type, &actual_type) {
+                if !context.semantic_type_is_assignable(node, &expected_type, &actual_type) {
                     diagnostics.push(typed_dict_literal_diagnostic(
                         node,
                         line,
@@ -979,7 +979,11 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
                     let Some(extra_items_type) = extra_items.semantic_value_type() else {
                         return true;
                     };
-                    !semantic_type_matches(node, nodes, &target_extra_type, &extra_items_type)
+                    !context.semantic_type_is_assignable(
+                        node,
+                        &target_extra_type,
+                        &extra_items_type,
+                    )
                 })
             {
                 diagnostics.push(typed_dict_literal_diagnostic(
@@ -1027,7 +1031,7 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
             &entry.value,
         ) {
             let expected_type = lower_type_text_or_name(target_field.value_type());
-            if !semantic_type_matches(node, nodes, &expected_type, &actual_type) {
+            if !context.semantic_type_is_assignable(node, &expected_type, &actual_type) {
                 diagnostics.push(typed_dict_literal_diagnostic(
                     node,
                     line,
@@ -1338,7 +1342,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                             return Some(diagnostic);
                         }
                         let actual = result.actual_type;
-                        if !semantic_type_matches(node, nodes, &expected, &actual) {
+                        if !context.semantic_type_is_assignable(node, &expected, &actual) {
                             return Some(
                                 Diagnostic::error(
                                     "TPY4001",
@@ -1373,7 +1377,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                         site.line,
                         value,
                     )?;
-                    if !semantic_type_matches(node, nodes, &expected, &actual) {
+                    if !context.semantic_type_is_assignable(node, &expected, &actual) {
                         return Some(
                             Diagnostic::error(
                                 "TPY4001",
@@ -1412,7 +1416,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                         value,
                     )?;
                     let expected = field.semantic_value_type()?;
-                    if !semantic_type_matches(node, nodes, &expected, &actual) {
+                    if !context.semantic_type_is_assignable(node, &expected, &actual) {
                         return Some(
                             Diagnostic::error(
                                 "TPY4001",
@@ -1559,7 +1563,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                         site.line,
                         &site.key_value,
                     )?;
-                    if !semantic_type_is_assignable(node, nodes, &key_type, &actual_key) {
+                    if !context.semantic_type_is_assignable(node, &key_type, &actual_key) {
                         return Some(
                             Diagnostic::error(
                                 "TPY4001",
@@ -1597,9 +1601,8 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                     return Some(diagnostic);
                                 }
                                 let actual_value = result.actual_type;
-                                if !semantic_type_is_assignable(
+                                if !context.semantic_type_is_assignable(
                                     node,
-                                    nodes,
                                     &value_type,
                                     &actual_value,
                                 ) {
@@ -1634,7 +1637,11 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                 site.line,
                                 value,
                             )?;
-                            if !semantic_type_is_assignable(node, nodes, &value_type, &actual_value)
+                            if !context.semantic_type_is_assignable(
+                                node,
+                                &value_type,
+                                &actual_value,
+                            )
                             {
                                 return Some(
                                     Diagnostic::error(
@@ -1694,7 +1701,11 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                 &diagnostic_type_text(&readable_type),
                                 value,
                             )?;
-                            if !semantic_type_is_assignable(node, nodes, &value_type, &actual_value)
+                            if !context.semantic_type_is_assignable(
+                                node,
+                                &value_type,
+                                &actual_value,
+                            )
                             {
                                 return Some(
                                     Diagnostic::error(
@@ -2049,7 +2060,9 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                     return Some(diagnostic);
                                 }
                                 let actual = result.actual_type;
-                                return (!semantic_type_matches(node, nodes, &expected, &actual))
+                                return (!context.semantic_type_is_assignable(
+                                    node, &expected, &actual,
+                                ))
                                     .then(|| {
                                     Diagnostic::error(
                                         "TPY4001",
@@ -2080,7 +2093,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 site.line,
                                 value,
                             )?;
-                            (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {
+                            (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
@@ -2113,7 +2126,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 &diagnostic_type_text(&expected),
                                 value,
                             )?;
-                            (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {
+                            (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
@@ -2156,7 +2169,9 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                     return Some(diagnostic);
                                 }
                                 let actual = result.actual_type;
-                                return (!semantic_type_matches(node, nodes, &expected, &actual))
+                                return (!context.semantic_type_is_assignable(
+                                    node, &expected, &actual,
+                                ))
                                     .then(|| {
                                     Diagnostic::error(
                                         "TPY4001",
@@ -2187,7 +2202,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 site.line,
                                 value,
                             )?;
-                            (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {
+                            (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
@@ -2247,7 +2262,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 &diagnostic_type_text(&readable_type),
                                 value,
                             )?;
-                            (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {
+                            (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(

@@ -213,9 +213,7 @@ struct CheckerContext<'a> {
     nodes: &'a [typepython_graph::ModuleNode],
     import_fallback: ImportFallback,
     strict: bool,
-    #[allow(dead_code)]
     strict_nulls: bool,
-    #[allow(dead_code)]
     no_implicit_dynamic: bool,
     source_facts: CheckerSourceFactsProvider<'a>,
 }
@@ -280,6 +278,25 @@ impl<'a> CheckerContext<'a> {
             ImportFallback::Unknown => "unknown",
             ImportFallback::Dynamic => "dynamic",
         }
+    }
+
+    fn assignability_options(&self) -> AssignabilityOptions {
+        AssignabilityOptions { strict_nulls: self.strict_nulls }
+    }
+
+    fn semantic_type_is_assignable(
+        &self,
+        node: &typepython_graph::ModuleNode,
+        expected: &SemanticType,
+        actual: &SemanticType,
+    ) -> bool {
+        semantic_type_is_assignable_with_options(
+            node,
+            self.nodes,
+            expected,
+            actual,
+            self.assignability_options(),
+        )
     }
 
     fn load_typed_dict_class_metadata(
@@ -1381,7 +1398,7 @@ fn collect_node_semantic_diagnostics(
     push_diagnostics(diagnostics, implicit_dynamic_diagnostics(context, node));
     push_diagnostics(diagnostics, direct_method_call_diagnostics(context, node, context.nodes));
     push_diagnostics(diagnostics, direct_return_type_diagnostics(context, node, context.nodes));
-    push_diagnostics(diagnostics, direct_yield_type_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, direct_yield_type_diagnostics(context, node, context.nodes));
     push_diagnostics(diagnostics, for_loop_target_diagnostics(node, context.nodes));
     push_diagnostics(diagnostics, destructuring_assignment_diagnostics(node, context.nodes));
     push_diagnostics(diagnostics, with_statement_diagnostics(node, context.nodes));

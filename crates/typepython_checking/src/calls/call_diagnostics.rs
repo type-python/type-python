@@ -198,6 +198,7 @@ pub(super) fn direct_call_type_diagnostics(
                 node,
                 nodes,
                 call,
+                context.assignability_options(),
                 arg_types.as_slice(),
                 keyword_arg_types.as_slice(),
                 &param_types,
@@ -700,6 +701,7 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         node,
         nodes,
         call,
+        context.assignability_options(),
         &expanded_arg_types,
         &resolved_keyword_arg_types,
         &param_types,
@@ -946,6 +948,7 @@ pub(super) fn positional_and_keyword_type_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
+    assignability_options: AssignabilityOptions,
     arg_types: &[String],
     keyword_arg_types: &[String],
     param_types: &[String],
@@ -970,6 +973,7 @@ pub(super) fn positional_and_keyword_type_diagnostics(
         node,
         nodes,
         call,
+        assignability_options,
         &arg_types,
         &keyword_arg_types,
         &param_types,
@@ -991,6 +995,7 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
+    assignability_options: AssignabilityOptions,
     arg_types: &[SemanticType],
     keyword_arg_types: &[SemanticType],
     param_types: &[SemanticType],
@@ -1011,7 +1016,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
         .filter(|(arg_ty, param_ty)| {
             !semantic_type_missing(arg_ty)
                 && !semantic_type_missing(param_ty)
-                && !semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
+                && !semantic_type_is_assignable_with_options(
+                    node,
+                    nodes,
+                    param_ty,
+                    arg_ty,
+                    assignability_options,
+                )
         })
         .map(|(arg_ty, param_ty)| {
             let arg_text = diagnostic_type_text(arg_ty);
@@ -1036,7 +1047,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
         };
         if !semantic_type_missing(arg_ty)
             && !semantic_type_missing(param_ty)
-            && !semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
+            && !semantic_type_is_assignable_with_options(
+                node,
+                nodes,
+                param_ty,
+                arg_ty,
+                assignability_options,
+            )
         {
             let arg_text = diagnostic_type_text(arg_ty);
             let param_text = diagnostic_type_text(param_ty);
@@ -1061,7 +1078,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
         };
         if !semantic_type_missing(arg_ty)
             && !semantic_type_missing(param_ty)
-            && !semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
+            && !semantic_type_is_assignable_with_options(
+                node,
+                nodes,
+                param_ty,
+                arg_ty,
+                assignability_options,
+            )
         {
             let arg_text = diagnostic_type_text(arg_ty);
             let param_text = diagnostic_type_text(param_ty);
@@ -1088,11 +1111,12 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                 let field_type = field.semantic_value_type();
                 if !semantic_type_missing(arg_ty)
                     && field_type.is_some()
-                    && !semantic_type_matches(
+                    && !semantic_type_is_assignable_with_options(
                         node,
                         nodes,
                         field_type.as_ref().expect("checked some above"),
                         arg_ty,
+                        assignability_options,
                     )
                 {
                     let arg_text = diagnostic_type_text(arg_ty);
@@ -1122,7 +1146,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
             };
             if !semantic_type_missing(arg_ty)
                 && !semantic_type_missing(param_ty)
-                && !semantic_type_matches(node, nodes, param_ty, arg_ty)
+                && !semantic_type_is_assignable_with_options(
+                    node,
+                    nodes,
+                    param_ty,
+                    arg_ty,
+                    assignability_options,
+                )
             {
                 let arg_text = diagnostic_type_text(arg_ty);
                 let param_text = diagnostic_type_text(param_ty);
@@ -1152,7 +1182,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
         };
         if !semantic_type_missing(arg_ty)
             && !semantic_type_missing(param_ty)
-            && !semantic_type_matches(node, nodes, param_ty, arg_ty)
+            && !semantic_type_is_assignable_with_options(
+                node,
+                nodes,
+                param_ty,
+                arg_ty,
+                assignability_options,
+            )
         {
             let arg_text = diagnostic_type_text(arg_ty);
             let param_text = diagnostic_type_text(param_ty);
@@ -1180,11 +1216,12 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                         let param_ty = &param_types[index];
                         if let Some(field_type) = field.semantic_value_type()
                             && !semantic_type_missing(param_ty)
-                            && !semantic_type_is_assignable(
+                            && !semantic_type_is_assignable_with_options(
                                 node,
                                 nodes,
                                 param_ty,
                                 &field_type,
+                                assignability_options,
                             )
                         {
                             let param_text = diagnostic_type_text(param_ty);
@@ -1205,11 +1242,12 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                         unpack_extra_items_type.as_ref().or(keyword_variadic_type)
                         && let Some(field_type) = field.semantic_value_type()
                             && !semantic_type_missing(param_ty)
-                            && !semantic_type_is_assignable(
+                            && !semantic_type_is_assignable_with_options(
                                 node,
                                 nodes,
                                 param_ty,
                                 &field_type,
+                                assignability_options,
                             )
                         {
                             let param_text = diagnostic_type_text(param_ty);
@@ -1231,11 +1269,12 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                     && let Some(param_ty) = unpack_extra_items_type.as_ref().or(keyword_variadic_type)
                         && let Some(extra_items_type) = extra_items.semantic_value_type()
                             && !semantic_type_missing(param_ty)
-                            && !semantic_type_is_assignable(
+                            && !semantic_type_is_assignable_with_options(
                                 node,
                                 nodes,
                                 param_ty,
                                 &extra_items_type,
+                                assignability_options,
                             )
                         {
                             let param_text = diagnostic_type_text(param_ty);
@@ -1255,7 +1294,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
             KeywordExpansion::Mapping(value_ty) => {
                 if let Some(param_ty) = keyword_variadic_type
                     && !semantic_type_missing(param_ty)
-                    && !semantic_type_is_assignable(node, nodes, param_ty, value_ty)
+                    && !semantic_type_is_assignable_with_options(
+                        node,
+                        nodes,
+                        param_ty,
+                        value_ty,
+                        assignability_options,
+                    )
                 {
                     let param_text = diagnostic_type_text(param_ty);
                     diagnostics.push(Diagnostic::error(

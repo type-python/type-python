@@ -1630,7 +1630,7 @@ pub(super) fn direct_return_type_diagnostics(
         };
         let actual_text = diagnostic_type_text(&actual);
 
-        if !semantic_type_is_assignable(node, nodes, &expected_type, &actual) {
+        if !context.semantic_type_is_assignable(node, &expected_type, &actual) {
             let diagnostic = Diagnostic::error(
                 "TPY4001",
                 match &return_site.owner_type_name {
@@ -1905,6 +1905,7 @@ pub(super) fn resolve_contextual_yield_type(
 }
 
 pub(super) fn direct_yield_type_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -1948,7 +1949,7 @@ pub(super) fn direct_yield_type_diagnostics(
         };
         let actual_text = diagnostic_type_text(&actual);
 
-        if !semantic_type_is_assignable(node, nodes, &expected_type, &actual) {
+        if !context.semantic_type_is_assignable(node, &expected_type, &actual) {
             diagnostics.push(Diagnostic::error(
                     "TPY4001",
                     match &yield_site.owner_type_name {
