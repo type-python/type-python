@@ -219,6 +219,30 @@ pub(super) fn check_temp_typepython_source_with_options(
     )
 }
 
+pub(super) fn check_temp_typepython_source_with_checker_options(
+    source_text: &str,
+    parse_options: ParseOptions,
+    checker_options: crate::CheckerOptions,
+) -> crate::CheckResult {
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+
+    let source = SourceFile {
+        path: path.clone(),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("app"),
+        text: source_text.to_owned(),
+    };
+    let tree = parse_with_options(source, parse_options);
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let result = super::check_with_checker_options(&normalize_test_graph(&graph), checker_options);
+
+    let _ = fs::remove_dir_all(&root);
+    result
+}
+
 pub(super) fn check_temp_typepython_source_with_check_options(
     source_text: &str,
     options: ParseOptions,

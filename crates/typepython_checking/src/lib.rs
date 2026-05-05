@@ -1378,6 +1378,7 @@ fn collect_node_semantic_diagnostics(
         diagnostics,
         deprecated_use_diagnostics(node, context.nodes, options.report_deprecated),
     );
+    push_diagnostics(diagnostics, implicit_dynamic_diagnostics(context, node));
     push_diagnostics(diagnostics, direct_method_call_diagnostics(context, node, context.nodes));
     push_diagnostics(diagnostics, direct_return_type_diagnostics(context, node, context.nodes));
     push_diagnostics(diagnostics, direct_yield_type_diagnostics(node, context.nodes));

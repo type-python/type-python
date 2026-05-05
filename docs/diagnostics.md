@@ -128,6 +128,7 @@ This is the largest category, covering all type checking rules.
 | `TPY4026` | warning       | Function calls a function with an effect row that the caller does not cover                                        |
 | `TPY4027` | error         | Restricted type-level alias cannot be evaluated to standard Python typing                                          |
 | `TPY4028` | error         | Tainted source result reaches a sink without a sanitizer                                                          |
+| `TPY4029` | error         | Implicit fallback to `dynamic` while `typing.no_implicit_dynamic` is enabled                                      |
 | `TPY4101` | warning/error | Use of deprecated declaration                                                                                      |
 | `TPY7003` | error         | Framework adapter manifest is invalid                                                                             |
 
@@ -325,6 +326,19 @@ render_html(raw)  # TPY4028: tainted source result flows into sink
 ```
 
 **Fix:** pass the value through a callable marked `@sanitizer` for the same taint context, or change the source/sink declarations if the flow is intentionally trusted.
+
+#### TPY4029 -- Implicit dynamic fallback
+
+Raised when `typing.no_implicit_dynamic = true` and a TypePython source construct would fall back to `dynamic` without an explicit annotation.
+
+```python
+def parse(value) -> int:  # TPY4029: parameter falls back to dynamic
+    return value
+
+handler = lambda value: value  # TPY4029: lambda parameter falls back to dynamic
+```
+
+**Fix:** add an explicit annotation, provide a concrete contextual type such as `Callable[[int], str]`, or write `dynamic` explicitly where dynamic typing is intentional.
 
 #### TPY4101 -- Deprecated usage
 

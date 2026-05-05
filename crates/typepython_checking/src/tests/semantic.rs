@@ -1,6 +1,63 @@
 use super::*;
 
 #[test]
+fn check_reports_implicit_dynamic_function_and_method_params_when_enabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        concat!(
+            "def parse(value) -> int:\n",
+            "    return value\n\n",
+            "class Box:\n",
+            "    def render(self, item) -> int:\n",
+            "        return item\n",
+        ),
+        ParseOptions::default(),
+        crate::CheckerOptions { no_implicit_dynamic: true, ..crate::CheckerOptions::default() },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4029"), "{rendered}");
+    assert!(rendered.contains("parameter `value` on function `parse`"), "{rendered}");
+    assert!(rendered.contains("parameter `item` on member `Box.render`"), "{rendered}");
+    assert!(!rendered.contains("parameter `self`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_explicit_dynamic_when_no_implicit_dynamic_is_enabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "def parse(value: dynamic) -> dynamic:\n    return value\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { no_implicit_dynamic: true, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_reports_uncontextualized_lambda_param_when_no_implicit_dynamic_is_enabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "handler = lambda value: value\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { no_implicit_dynamic: true, ..crate::CheckerOptions::default() },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4029"), "{rendered}");
+    assert!(rendered.contains("lambda assigned to `handler`"), "{rendered}");
+    assert!(rendered.contains("parameter `value`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_contextual_lambda_param_when_no_implicit_dynamic_is_enabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "from typing import Callable\n\nhandler: Callable[[int], int] = lambda value: value\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { no_implicit_dynamic: true, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_empty_tail_paramspec_call() {
     let result = check_temp_typepython_source(
         "from typing import Callable, ParamSpec\n\nP = ParamSpec(\"P\")\n\ndef invoke(cb: Callable[P, int]) -> int:\n    return cb()\n",

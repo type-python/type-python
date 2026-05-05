@@ -2,6 +2,215 @@ use super::*;
 
 use crate::diagnostic_type_text as render_semantic_type;
 
+pub(super) fn implicit_dynamic_diagnostics(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> Vec<Diagnostic> {
+    if !context.no_implicit_dynamic || node.module_kind != SourceKind::TypePython {
+        return Vec::new();
+    }
+
+    let mut diagnostics = Vec::new();
+    if let Some(source_text) = context.load_source_text(node) {
+        let metadata = typepython_syntax::collect_module_surface_metadata(&source_text);
+        for signature in metadata.direct_function_signatures {
+            diagnostics.extend(
+                signature
+                    .params
+                    .iter()
+                    .filter(|param| param.rendered_annotation().is_none())
+                    .map(|param| {
+                        implicit_dynamic_diagnostic(
+                            node,
+                            signature.line,
+                            format!(
+                                "parameter `{}` on function `{}` falls back to `dynamic`; add an explicit annotation or use `dynamic` explicitly",
+                                param.name, signature.name
+                            ),
+                        )
+                    }),
+            );
+        }
+        for signature in metadata.direct_method_signatures {
+            let skip_receiver = match signature.method_kind {
+                typepython_syntax::MethodKind::Static => false,
+                typepython_syntax::MethodKind::Instance
+                | typepython_syntax::MethodKind::Class
+                | typepython_syntax::MethodKind::Property
+                | typepython_syntax::MethodKind::PropertySetter => true,
+            };
+            diagnostics.extend(
+                signature
+                    .params
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| !skip_receiver || *index > 0)
+                    .map(|(_, param)| param)
+                    .filter(|param| param.rendered_annotation().is_none())
+                    .map(|param| {
+                        implicit_dynamic_diagnostic(
+                            node,
+                            signature.line,
+                            format!(
+                                "parameter `{}` on member `{}.{}` falls back to `dynamic`; add an explicit annotation or use `dynamic` explicitly",
+                                param.name, signature.owner_type_name, signature.name
+                            ),
+                        )
+                    }),
+            );
+        }
+    }
+
+    diagnostics.extend(implicit_dynamic_assignment_lambda_diagnostics(node));
+    diagnostics.extend(implicit_dynamic_return_lambda_diagnostics(node));
+    diagnostics.extend(implicit_dynamic_yield_lambda_diagnostics(node));
+    diagnostics
+}
+
+fn implicit_dynamic_assignment_lambda_diagnostics(
+    node: &typepython_graph::ModuleNode,
+) -> Vec<Diagnostic> {
+    node.assignments
+        .iter()
+        .filter_map(|assignment| {
+            let lambda = assignment.value_lambda.as_deref()?;
+            let expected = assignment.annotation_text();
+            Some(implicit_dynamic_lambda_param_diagnostics(
+                node,
+                assignment.line,
+                lambda,
+                expected,
+                format!("lambda assigned to `{}`", assignment.name),
+            ))
+        })
+        .flatten()
+        .collect()
+}
+
+fn implicit_dynamic_return_lambda_diagnostics(
+    node: &typepython_graph::ModuleNode,
+) -> Vec<Diagnostic> {
+    node.returns
+        .iter()
+        .filter_map(|return_site| {
+            let lambda = return_site.value_lambda.as_deref()?;
+            let target = node.declarations.iter().find(|declaration| {
+                declaration.name == return_site.owner_name
+                    && declaration.kind == DeclarationKind::Function
+                    && match (&return_site.owner_type_name, &declaration.owner) {
+                        (Some(owner_type), Some(owner)) => owner.name == *owner_type,
+                        (None, None) => true,
+                        _ => false,
+                    }
+            })?;
+            let expected = target
+                .owner
+                .as_ref()
+                .map_or_else(
+                    || declaration_signature_return_semantic_type(target),
+                    |owner| {
+                        declaration_signature_return_semantic_type_with_self(target, &owner.name)
+                    },
+                )
+                .map(|ty| render_semantic_type(&rewrite_imported_typing_semantic_type(node, &ty)));
+            Some(implicit_dynamic_lambda_param_diagnostics(
+                node,
+                return_site.line,
+                lambda,
+                expected.as_deref(),
+                format!("lambda returned from `{}`", return_site.owner_name),
+            ))
+        })
+        .flatten()
+        .collect()
+}
+
+fn implicit_dynamic_yield_lambda_diagnostics(
+    node: &typepython_graph::ModuleNode,
+) -> Vec<Diagnostic> {
+    node.yields
+        .iter()
+        .filter_map(|yield_site| {
+            let lambda = yield_site.value_lambda.as_deref()?;
+            let target = node.declarations.iter().find(|declaration| {
+                declaration.name == yield_site.owner_name
+                    && declaration.kind == DeclarationKind::Function
+                    && match (&yield_site.owner_type_name, &declaration.owner) {
+                        (Some(owner_type_name), Some(owner)) => owner.name == *owner_type_name,
+                        (None, None) => true,
+                        _ => false,
+                    }
+            })?;
+            let expected = target
+                .owner
+                .as_ref()
+                .map_or_else(
+                    || declaration_signature_return_semantic_type(target),
+                    |owner| {
+                        declaration_signature_return_semantic_type_with_self(target, &owner.name)
+                    },
+                )
+                .and_then(|returns| unwrap_generator_yield_semantic_type(&returns))
+                .map(|ty| render_semantic_type(&rewrite_imported_typing_semantic_type(node, &ty)));
+            Some(implicit_dynamic_lambda_param_diagnostics(
+                node,
+                yield_site.line,
+                lambda,
+                expected.as_deref(),
+                format!("lambda yielded from `{}`", yield_site.owner_name),
+            ))
+        })
+        .flatten()
+        .collect()
+}
+
+fn implicit_dynamic_lambda_param_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    line: usize,
+    lambda: &typepython_syntax::LambdaMetadata,
+    expected: Option<&str>,
+    context_label: String,
+) -> Vec<Diagnostic> {
+    let expected_params = expected
+        .and_then(parse_callable_annotation)
+        .and_then(|(params, _)| params)
+        .filter(|params| params.len() == lambda.params.len());
+
+    lambda
+        .params
+        .iter()
+        .enumerate()
+        .filter(|(_, param)| param.rendered_annotation().is_none())
+        .filter(|(index, _)| {
+            expected_params.as_ref().is_none_or(|params| params.get(*index).is_none())
+        })
+        .map(|(_, param)| {
+            implicit_dynamic_diagnostic(
+                node,
+                line,
+                format!(
+                    "parameter `{}` on {} falls back to `dynamic`; add a lambda parameter annotation, provide a concrete `Callable[...]` context, or use `dynamic` explicitly",
+                    param.name, context_label
+                ),
+            )
+        })
+        .collect()
+}
+
+fn implicit_dynamic_diagnostic(
+    node: &typepython_graph::ModuleNode,
+    line: usize,
+    message: String,
+) -> Diagnostic {
+    Diagnostic::error("TPY4029", message).with_span(Span::new(
+        node.module_path.display().to_string(),
+        line,
+        1,
+        line,
+        1,
+    ))
+}
+
 pub(super) fn unsafe_boundary_diagnostics(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
