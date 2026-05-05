@@ -35,8 +35,16 @@ class UserRecord(TypedDict):
     email: str
 
 
+data class UserModel:
+    id: int
+    name: str
+    email: str
+
+
 typealias UserKeys = KeyOf[UserRecord]
 typealias FrozenUser = MapValues[UserRecord, Readonly]
+typealias UserPatch = Partial[UserModel]
+typealias PublicUser = Pick[UserModel, Literal["id", "name"]]
 typealias BoundaryKind = TypeIf[IsSubtype[int, object], Literal["trusted"], Literal["rejected"]]
 
 

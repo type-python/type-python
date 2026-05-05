@@ -14,6 +14,9 @@ strict_nulls = true
 imports = "unknown"
 warn_unsafe = true
 
+[experimental]
+shape_transforms = true
+
 [emit]
 emit_pyi = true
 write_py_typed = true
