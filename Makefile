@@ -7,7 +7,7 @@ FUZZ_SMOKE_SECONDS ?= 30
 FUZZ_LONG_SECONDS ?= 300
 COVERAGE_MIN_LINES ?= 20
 
-.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare package-check beta-release-gate snapshot-review docs ci bump-version
+.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers roadmap-demo-smoke coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare package-check beta-release-gate snapshot-review docs ci bump-version
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -40,6 +40,9 @@ test-cli-verification:
 test-downstream-checkers:
 	$(PYTHON) scripts/downstream_checker_smoke.py
 
+roadmap-demo-smoke:
+	$(PYTHON) scripts/research_roadmap_demo_smoke.py
+
 coverage:
 	mkdir -p coverage
 	$(CARGO) llvm-cov clean --workspace
@@ -64,7 +67,7 @@ diagnostic-coverage-check:
 	$(PYTHON) scripts/diagnostic_test_coverage.py --check
 
 repo-contracts:
-	$(PYTHON) -m unittest scripts/test_repo_contracts.py scripts/test_downstream_checker_matrix.py
+	$(PYTHON) -m unittest scripts/test_repo_contracts.py scripts/test_downstream_checker_matrix.py scripts/test_research_roadmap_demo_smoke.py
 
 bench:
 	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker
