@@ -13,7 +13,8 @@ use serde_json::{Value, json};
 use thiserror::Error;
 use typepython_binding::bind;
 use typepython_checking::{
-    check_modules_with_binding_metadata, semantic_incremental_state_with_binding_metadata,
+    CheckerOptions, check_modules_with_binding_metadata,
+    semantic_incremental_state_with_binding_metadata,
     semantic_incremental_state_with_reused_summaries,
 };
 use typepython_config::ConfigHandle;

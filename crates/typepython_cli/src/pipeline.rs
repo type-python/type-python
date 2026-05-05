@@ -11,7 +11,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use typepython_binding::bind;
 use typepython_checking::{
-    check_modules_with_binding_metadata, collect_effective_callable_stub_overrides,
+    CheckerOptions, check_modules_with_binding_metadata, collect_effective_callable_stub_overrides,
     collect_synthetic_method_stubs, semantic_incremental_state_with_binding_metadata,
     semantic_incremental_state_with_reused_summaries,
 };
@@ -107,6 +107,8 @@ struct AnalysisCacheMetadata {
     enable_sealed_exhaustiveness: bool,
     report_deprecated: String,
     strict: bool,
+    strict_nulls: bool,
+    no_implicit_dynamic: bool,
     warn_unsafe: bool,
     imports: String,
     require_known_public_types: bool,
@@ -635,6 +637,8 @@ fn analysis_cache_metadata(
         enable_sealed_exhaustiveness: config.config.typing.enable_sealed_exhaustiveness,
         report_deprecated: format!("{:?}", config.config.typing.report_deprecated),
         strict: config.config.typing.strict,
+        strict_nulls: config.config.typing.strict_nulls,
+        no_implicit_dynamic: config.config.typing.no_implicit_dynamic,
         warn_unsafe: config.config.typing.warn_unsafe,
         imports: format!("{:?}", config.config.typing.imports),
         require_known_public_types: config.config.typing.require_known_public_types,
@@ -869,12 +873,7 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
             &analyzed.graph,
             &analyzed.bindings,
             &rechecked_modules,
-            config.config.typing.require_explicit_overrides,
-            config.config.typing.enable_sealed_exhaustiveness,
-            config.config.typing.report_deprecated,
-            config.config.typing.strict,
-            config.config.typing.warn_unsafe,
-            config.config.typing.imports,
+            CheckerOptions::from_typing_config(&config.config.typing),
             None,
         );
         for (module_key, diagnostics) in module_result.diagnostics_by_module {

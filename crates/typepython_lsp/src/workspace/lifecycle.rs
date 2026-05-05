@@ -373,12 +373,7 @@ impl IncrementalWorkspace {
                     &graph,
                     &bindings,
                     &current_module_keys,
-                    self.config.config.typing.require_explicit_overrides,
-                    self.config.config.typing.enable_sealed_exhaustiveness,
-                    self.config.config.typing.report_deprecated,
-                    self.config.config.typing.strict,
-                    self.config.config.typing.warn_unsafe,
-                    self.config.config.typing.imports,
+                    CheckerOptions::from_typing_config(&self.config.config.typing),
                     Some(&source_overrides),
                 )
                 .diagnostics_by_module;
@@ -398,12 +393,7 @@ impl IncrementalWorkspace {
                         &graph,
                         &bindings,
                         &rechecked_modules,
-                        self.config.config.typing.require_explicit_overrides,
-                        self.config.config.typing.enable_sealed_exhaustiveness,
-                        self.config.config.typing.report_deprecated,
-                        self.config.config.typing.strict,
-                        self.config.config.typing.warn_unsafe,
-                        self.config.config.typing.imports,
+                        CheckerOptions::from_typing_config(&self.config.config.typing),
                         Some(&source_overrides),
                     );
                     for (module_key, diagnostics) in module_result.diagnostics_by_module {

@@ -21,7 +21,7 @@ use std::{
 };
 
 use typepython_binding::{BindingTable, Declaration, DeclarationKind, DeclarationOwnerKind};
-use typepython_config::{DiagnosticLevel, ImportFallback};
+use typepython_config::{DiagnosticLevel, ImportFallback, TypingConfig};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionApplicability};
 use typepython_graph::ModuleGraph;
 use typepython_incremental::{
@@ -123,6 +123,50 @@ impl ModuleCheckResult {
     }
 }
 
+/// Checker behavior selected by project configuration or tests.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct CheckerOptions {
+    pub require_explicit_overrides: bool,
+    pub enable_sealed_exhaustiveness: bool,
+    pub report_deprecated: DiagnosticLevel,
+    pub strict: bool,
+    pub strict_nulls: bool,
+    pub no_implicit_dynamic: bool,
+    pub warn_unsafe: bool,
+    pub import_fallback: ImportFallback,
+}
+
+impl Default for CheckerOptions {
+    fn default() -> Self {
+        Self {
+            require_explicit_overrides: false,
+            enable_sealed_exhaustiveness: true,
+            report_deprecated: DiagnosticLevel::Warning,
+            strict: false,
+            strict_nulls: true,
+            no_implicit_dynamic: false,
+            warn_unsafe: false,
+            import_fallback: ImportFallback::Unknown,
+        }
+    }
+}
+
+impl CheckerOptions {
+    #[must_use]
+    pub fn from_typing_config(config: &TypingConfig) -> Self {
+        Self {
+            require_explicit_overrides: config.require_explicit_overrides,
+            enable_sealed_exhaustiveness: config.enable_sealed_exhaustiveness,
+            report_deprecated: config.report_deprecated,
+            strict: config.strict,
+            strict_nulls: config.strict_nulls,
+            no_implicit_dynamic: config.no_implicit_dynamic,
+            warn_unsafe: config.warn_unsafe,
+            import_fallback: config.imports,
+        }
+    }
+}
+
 /// Stub override derived from checker-resolved callable information.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EffectiveCallableStubOverride {
@@ -169,6 +213,10 @@ struct CheckerContext<'a> {
     nodes: &'a [typepython_graph::ModuleNode],
     import_fallback: ImportFallback,
     strict: bool,
+    #[allow(dead_code)]
+    strict_nulls: bool,
+    #[allow(dead_code)]
+    no_implicit_dynamic: bool,
     source_facts: CheckerSourceFactsProvider<'a>,
 }
 
@@ -203,10 +251,26 @@ impl<'a> CheckerContext<'a> {
         bound_surface_facts: Option<&'a BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
         strict: bool,
     ) -> Self {
+        Self::new_with_bound_surface_facts_and_options(
+            nodes,
+            source_overrides,
+            bound_surface_facts,
+            CheckerOptions { import_fallback, strict, ..CheckerOptions::default() },
+        )
+    }
+
+    fn new_with_bound_surface_facts_and_options(
+        nodes: &'a [typepython_graph::ModuleNode],
+        source_overrides: Option<&'a BTreeMap<String, String>>,
+        bound_surface_facts: Option<&'a BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
+        options: CheckerOptions,
+    ) -> Self {
         Self {
             nodes,
-            import_fallback,
-            strict,
+            import_fallback: options.import_fallback,
+            strict: options.strict,
+            strict_nulls: options.strict_nulls,
+            no_implicit_dynamic: options.no_implicit_dynamic,
             source_facts: CheckerSourceFactsProvider::new(source_overrides, bound_surface_facts),
         }
     }
@@ -337,15 +401,7 @@ fn binding_surface_facts_by_module(
 /// Runs the checker over the module graph.
 #[must_use]
 pub fn check(graph: &ModuleGraph) -> CheckResult {
-    check_with_options(
-        graph,
-        false,
-        true,
-        DiagnosticLevel::Warning,
-        false,
-        false,
-        ImportFallback::Unknown,
-    )
+    check_with_checker_options(graph, CheckerOptions::default())
 }
 
 /// Runs the checker with the caller-controlled option surface used by the CLI and tests.
@@ -359,16 +415,25 @@ pub fn check_with_options(
     warn_unsafe: bool,
     import_fallback: ImportFallback,
 ) -> CheckResult {
-    check_with_source_overrides(
+    check_with_checker_options_and_source_overrides(
         graph,
-        require_explicit_overrides,
-        enable_sealed_exhaustiveness,
-        report_deprecated,
-        strict,
-        warn_unsafe,
-        import_fallback,
+        CheckerOptions {
+            require_explicit_overrides,
+            enable_sealed_exhaustiveness,
+            report_deprecated,
+            strict,
+            warn_unsafe,
+            import_fallback,
+            ..CheckerOptions::default()
+        },
         None,
     )
+}
+
+/// Runs the checker with a structured option surface.
+#[must_use]
+pub fn check_with_checker_options(graph: &ModuleGraph, options: CheckerOptions) -> CheckResult {
+    check_with_checker_options_and_source_overrides(graph, options, None)
 }
 
 #[must_use]
@@ -388,17 +453,36 @@ pub fn check_with_binding_metadata(
     import_fallback: ImportFallback,
     source_overrides: Option<&BTreeMap<String, String>>,
 ) -> CheckResult {
+    check_with_binding_metadata_and_options(
+        graph,
+        bindings,
+        CheckerOptions {
+            require_explicit_overrides,
+            enable_sealed_exhaustiveness,
+            report_deprecated,
+            strict,
+            warn_unsafe,
+            import_fallback,
+            ..CheckerOptions::default()
+        },
+        source_overrides,
+    )
+}
+
+/// Runs the checker with precomputed binding metadata and structured options.
+#[must_use]
+pub fn check_with_binding_metadata_and_options(
+    graph: &ModuleGraph,
+    bindings: &[BindingTable],
+    options: CheckerOptions,
+    source_overrides: Option<&BTreeMap<String, String>>,
+) -> CheckResult {
     let module_keys = graph.nodes.iter().map(|node| node.module_key.clone()).collect();
     let diagnostics = check_modules_with_binding_metadata(
         graph,
         bindings,
         &module_keys,
-        require_explicit_overrides,
-        enable_sealed_exhaustiveness,
-        report_deprecated,
-        strict,
-        warn_unsafe,
-        import_fallback,
+        options,
         source_overrides,
     )
     .diagnostics();
@@ -486,20 +570,31 @@ pub fn check_with_source_overrides(
     import_fallback: ImportFallback,
     source_overrides: Option<&BTreeMap<String, String>>,
 ) -> CheckResult {
-    let module_keys = graph.nodes.iter().map(|node| node.module_key.clone()).collect();
-    let diagnostics = check_modules_internal(
+    check_with_checker_options_and_source_overrides(
         graph,
-        None,
-        &module_keys,
-        require_explicit_overrides,
-        enable_sealed_exhaustiveness,
-        report_deprecated,
-        strict,
-        warn_unsafe,
-        import_fallback,
+        CheckerOptions {
+            require_explicit_overrides,
+            enable_sealed_exhaustiveness,
+            report_deprecated,
+            strict,
+            warn_unsafe,
+            import_fallback,
+            ..CheckerOptions::default()
+        },
         source_overrides,
     )
-    .diagnostics();
+}
+
+/// Runs the checker with structured options and LSP/editor source overrides.
+#[must_use]
+pub fn check_with_checker_options_and_source_overrides(
+    graph: &ModuleGraph,
+    options: CheckerOptions,
+    source_overrides: Option<&BTreeMap<String, String>>,
+) -> CheckResult {
+    let module_keys = graph.nodes.iter().map(|node| node.module_key.clone()).collect();
+    let diagnostics =
+        check_modules_internal(graph, None, &module_keys, options, source_overrides).diagnostics();
     CheckResult { diagnostics }
 }
 
@@ -519,18 +614,31 @@ pub fn check_modules_with_source_overrides(
     import_fallback: ImportFallback,
     source_overrides: Option<&BTreeMap<String, String>>,
 ) -> ModuleCheckResult {
-    check_modules_internal(
+    check_modules_with_checker_options_and_source_overrides(
         graph,
-        None,
         module_keys,
-        require_explicit_overrides,
-        enable_sealed_exhaustiveness,
-        report_deprecated,
-        strict,
-        warn_unsafe,
-        import_fallback,
+        CheckerOptions {
+            require_explicit_overrides,
+            enable_sealed_exhaustiveness,
+            report_deprecated,
+            strict,
+            warn_unsafe,
+            import_fallback,
+            ..CheckerOptions::default()
+        },
         source_overrides,
     )
+}
+
+/// Runs a subset check with structured options and optional source overrides.
+#[must_use]
+pub fn check_modules_with_checker_options_and_source_overrides(
+    graph: &ModuleGraph,
+    module_keys: &BTreeSet<String>,
+    options: CheckerOptions,
+    source_overrides: Option<&BTreeMap<String, String>>,
+) -> ModuleCheckResult {
+    check_modules_internal(graph, None, module_keys, options, source_overrides)
 }
 
 #[must_use]
@@ -542,12 +650,7 @@ pub fn check_modules_with_binding_metadata(
     graph: &ModuleGraph,
     bindings: &[BindingTable],
     module_keys: &BTreeSet<String>,
-    require_explicit_overrides: bool,
-    enable_sealed_exhaustiveness: bool,
-    report_deprecated: DiagnosticLevel,
-    strict: bool,
-    warn_unsafe: bool,
-    import_fallback: ImportFallback,
+    options: CheckerOptions,
     source_overrides: Option<&BTreeMap<String, String>>,
 ) -> ModuleCheckResult {
     let bound_surface_facts = binding_surface_facts_by_module(bindings);
@@ -555,46 +658,33 @@ pub fn check_modules_with_binding_metadata(
         graph,
         Some(&bound_surface_facts),
         module_keys,
-        require_explicit_overrides,
-        enable_sealed_exhaustiveness,
-        report_deprecated,
-        strict,
-        warn_unsafe,
-        import_fallback,
+        options,
         source_overrides,
     )
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "shared implementation for checker option surfaces with optional bound metadata"
-)]
 fn check_modules_internal(
     graph: &ModuleGraph,
     bound_surface_facts: Option<&BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
     module_keys: &BTreeSet<String>,
-    require_explicit_overrides: bool,
-    enable_sealed_exhaustiveness: bool,
-    report_deprecated: DiagnosticLevel,
-    strict: bool,
-    warn_unsafe: bool,
-    import_fallback: ImportFallback,
+    options: CheckerOptions,
     source_overrides: Option<&BTreeMap<String, String>>,
 ) -> ModuleCheckResult {
-    let context = CheckerContext::new_with_bound_surface_facts_and_strict(
+    let context = CheckerContext::new_with_bound_surface_facts_and_options(
         &graph.nodes,
-        import_fallback,
         source_overrides,
         bound_surface_facts,
-        strict,
+        options,
     );
     let mut diagnostics_by_module = BTreeMap::new();
     let options = CheckerPassOptions {
-        require_explicit_overrides,
-        enable_sealed_exhaustiveness,
-        report_deprecated,
-        strict,
-        warn_unsafe,
+        require_explicit_overrides: options.require_explicit_overrides,
+        enable_sealed_exhaustiveness: options.enable_sealed_exhaustiveness,
+        report_deprecated: options.report_deprecated,
+        strict: options.strict,
+        strict_nulls: options.strict_nulls,
+        no_implicit_dynamic: options.no_implicit_dynamic,
+        warn_unsafe: options.warn_unsafe,
     };
 
     for node in &graph.nodes {
@@ -615,6 +705,10 @@ struct CheckerPassOptions {
     enable_sealed_exhaustiveness: bool,
     report_deprecated: DiagnosticLevel,
     strict: bool,
+    #[allow(dead_code)]
+    strict_nulls: bool,
+    #[allow(dead_code)]
+    no_implicit_dynamic: bool,
     warn_unsafe: bool,
 }
 
