@@ -282,6 +282,51 @@ class RepoContractsTests(unittest.TestCase):
         )
         self.assertIn("TPY4029", coverage)
 
+    def test_unknown_assignability_contract_is_enforced(self) -> None:
+        assignability = read_text(
+            "crates/typepython_checking/src/type_system/assignability.rs"
+        )
+        semantic_tests = read_text("crates/typepython_checking/src/tests/semantic.rs")
+        conformance_plan = read_text("docs/spec/conformance-and-test-plan-v1.md")
+        conformance_report = read_text("docs/conformance-report.md")
+        conformance_script = read_text("scripts/conformance_report.py")
+
+        self.assertIn("let actual_is_unknown = is_unknown_semantic_type(&actual)", assignability)
+        self.assertIn("if actual_is_unknown && is_any_semantic_type(&expected)", assignability)
+        self.assertIn("is_top_receiving_semantic_type(&expected)", assignability)
+        self.assertIn("is_top_escaping_semantic_type(&actual)", assignability)
+        self.assertIn("fn is_dynamic_semantic_type", assignability)
+        self.assertIn("fn is_unknown_semantic_type", assignability)
+        self.assertNotIn("is_top_assignable_semantic_type", assignability)
+        self.assertLess(
+            assignability.index("let actual_is_unknown = is_unknown_semantic_type(&actual)"),
+            assignability.index("if !actual_is_unknown"),
+        )
+        self.assertLess(
+            assignability.index("if expanded == *stripped"),
+            assignability.index("expand_semantic_type_aliases_in_provider_context"),
+        )
+
+        for test_name in (
+            "check_accepts_assignment_into_unknown_boundary",
+            "check_reports_unknown_assignment_to_concrete_type",
+            "check_accepts_unknown_assignment_to_allowed_boundary_types",
+            "check_reports_unknown_assignment_to_any",
+            "check_reports_unknown_assignment_to_any_alias",
+            "check_reports_unknown_call_argument_to_concrete_parameter",
+            "check_reports_unknown_return_to_concrete_type",
+            "semantic_assignability_treats_unknown_as_checked_boundary_not_any",
+        ):
+            self.assertIn(test_name, semantic_tests)
+
+        self.assertIn("Unknown and dynamic boundary assignability", conformance_plan)
+        self.assertIn("Unknown and dynamic boundary assignability", conformance_report)
+        self.assertIn("cargo test -p typepython-checking unknown", conformance_report)
+        self.assertIn(
+            '"Unknown and dynamic boundary assignability": ("cargo test -p typepython-checking unknown",)',
+            conformance_script,
+        )
+
     def test_insta_snapshots_are_limited_to_emission_golden_outputs(self) -> None:
         allowed_prefixes = (
             "crates/typepython_emit/src/snapshots/",

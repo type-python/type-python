@@ -187,6 +187,7 @@ The following appendix remains normative for conformance and capability claims.
 | `typing` / `typing_extensions` semantic equivalence for supported constructs                                  | Core v1         | MUST   |
 | Target-version compatibility matrix for emitted typing constructs                                             | Core v1         | MUST   |
 | Untyped import fallback (`unknown`/`dynamic`)                                                                 | Core v1         | MUST   |
+| Unknown and dynamic boundary assignability                                                                    | Core v1         | MUST   |
 | Deterministic diagnostics                                                                                     | Core v1         | MUST   |
 | Cache invalidation                                                                                            | Core v1         | MUST   |
 | `TypedDict` utility transforms (`Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, `Required_`)                | Core v1         | MUST   |
