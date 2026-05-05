@@ -102,7 +102,6 @@ Python's type story has gotten genuinely good. TypePython exists for the gaps th
 | First-class `interface` / `data class` / `typealias`    |    via      |     via        |    via        |     keyword           |
 | Inline generics `def f[T]` on **any** target ≥ 3.10     |     3.12+   |     3.12+      |     3.12+     |          ✅           |
 | `TypedDict` transforms (`Partial`, `Pick`, `Readonly`…) |      —      |       —        |       —       |          ✅           |
-| Framework shapes beyond `dataclass_transform`           |   plugin    |    plugin      |       —       |    declarative        |
 | Output consumed by mypy / pyright / ty unmodified       |     N/A     |     N/A        |       ✅       |          ✅           |
 
 TypePython doesn't replace those checkers. It sits **one step earlier**: you author in `.tpy`, the compiler emits standard typed Python that those tools then consume normally.
@@ -155,17 +154,18 @@ TypePython makes one strong promise about its output:
 
 > Emitted `.py` and `.pyi` contain **only standard Python typing constructs**. Nothing TypePython-specific leaves the build directory.
 
-A few stronger guarantees are author-time only — they live in your `.tpy` source and don't survive into the consumer-facing artifacts:
+A few stronger guarantees are author-time only — they live in your `.tpy` source and intentionally
+degrade to standard typing surfaces in consumer-facing artifacts:
 
-| TypePython author-time guarantee   | At the boundary                                |
-| ---------------------------------- | ---------------------------------------------- |
-| `unknown` requires narrowing       | lowers to `object` in `.pyi`                   |
-| `sealed class` exhaustiveness      | external checkers see a normal class           |
-| `unsafe:` audit fence              | erased; lowered to valid Python                |
-| `TypedDict` transforms             | expanded to standard `TypedDict` shapes        |
-| effect, taint, and witness facts   | checked at author-time; erased or sidecar-only |
+| TypePython author-time fact         | Stability status                | At the boundary                                |
+| ----------------------------------- | ------------------------------- | ---------------------------------------------- |
+| `unknown` requires narrowing        | Stable Core v1                  | lowers to `object` in `.pyi`                   |
+| `sealed class` exhaustiveness       | Stable Core v1                  | external checkers see a normal class           |
+| `unsafe:` audit fence               | Stable Core v1                  | erased; lowered to valid Python                |
+| `TypedDict` transforms              | Stable Core v1                  | expanded to standard `TypedDict` shapes        |
+| effect, taint, and witness facts    | Roadmap / prototype             | checked at author-time; erased or sidecar-only |
 
-This trade is intentional: **you get stronger checks while authoring; consumers get clean, portable Python they can read with mypy, pyright, ty, IDEs, and any PEP 561 tool**. See [`docs/interop.md`](docs/interop.md) and [`docs/author-time-semantics.md`](docs/author-time-semantics.md).
+This trade is intentional: **you get stronger checks while authoring; consumers get clean, portable Python they can read with mypy, pyright, ty, IDEs, and any PEP 561 tool**. See [`docs/interop.md`](docs/interop.md), [`docs/feature-status.md`](docs/feature-status.md), and [`docs/author-time-semantics.md`](docs/author-time-semantics.md).
 
 ## For library and framework authors
 
@@ -198,18 +198,20 @@ class BaseModel: ...
 
 ## Project status
 
-TypePython is **Core v1 Beta** (v0.4.0). The Beta claim is deliberately scoped: Core syntax,
-configuration, `init`/`check`/`build`/`clean`/`verify`, diagnostic code identity, and emitted
-`.py`/`.pyi` compatibility are the stable surfaces. DX and Experimental features ship for feedback
-but are not compatibility-stable. See [`docs/beta-readiness.md`](docs/beta-readiness.md).
+TypePython is **Core v1 Beta** (v0.4.0). The Beta claim is deliberately scoped: Core syntax and
+checker semantics, configuration, `init`/`check`/`build`/`clean`/`verify`, diagnostic code identity,
+and emitted `.py`/`.pyi` compatibility are the stable surfaces. Supported DX, Experimental opt-in,
+and Roadmap / prototype features ship for feedback but are not compatibility-stable. See
+[`docs/beta-readiness.md`](docs/beta-readiness.md) and [`docs/feature-status.md`](docs/feature-status.md).
 
 The breakdown:
 
-| Tier             | What's there                                                                                                                                                                                                                                                                                                                                                       |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Core v1 Beta** | `.tpy` Core syntax; project discovery and `typepython.toml` Core config; `init`, `check`, `build`, `clean`, `verify`; diagnostic code identity; `.py` lowering and `.pyi` generation with no mandatory TypePython runtime.                                                                           |
-| **DX prototype** | `watch`, LSP UX details, `compat`, `api-diff`, `type-health`, `migrate`, checker portability profiles, type budgets, and migration dashboards.                                                                                                                                                        |
-| **Experimental** | framework adapter manifests, runtime validators, shape projection beyond `TypedDict`, conditional return syntax, sync/async dual emit paths, notebook ingestion, and other deferred research tracks.                                                                                                                                                                  |
+| Tier | What's there |
+| ---- | ------------ |
+| **Stable Core v1** | `.tpy` Core syntax; Core checker semantics such as sealed exhaustiveness, `unknown` narrowing, `unsafe:` fences, and supported `TypedDict` transforms; project discovery and `typepython.toml` Core config; `init`, `check`, `build`, `clean`, `verify`; diagnostic code identity; `.py` lowering and `.pyi` generation with no mandatory TypePython runtime. |
+| **Supported DX, non-stable** | `watch`, LSP UX details, `compat`, `api-diff`, `type-health`, `migrate`, checker portability profiles, type budgets, and migration dashboards. |
+| **Experimental opt-in** | runtime validators, shape projection beyond `TypedDict`, conditional return syntax, pass-through `.py` inference, sync/async dual emit paths, and other opt-in research slices. |
+| **Roadmap / prototype** | framework adapter manifests and SDK details, effect/capability rows beyond `unsafe:`, taint facts, validator witnesses, notebook ingestion, and other deferred research tracks. |
 
 Conformance and diagnostic-coverage reports are checked into the repo: [`docs/conformance-report.md`](docs/conformance-report.md), [`docs/diagnostic-test-coverage.md`](docs/diagnostic-test-coverage.md).
 

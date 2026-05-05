@@ -18,9 +18,10 @@ output runs anywhere CPython runs.
 **No custom runtime. No per-checker plugin. No vendor lock-in.**
 
 > Status: **Core v1 Beta** (v0.4.0). Core syntax, config, `init`/`check`/`build`/
-> `clean`/`verify`, diagnostic code identity, and emitted `.py`/`.pyi` compatibility
-> are the stable Beta surfaces. LSP UX, adapter manifests, runtime validators, and
-> migration heuristics remain prototype/experimental.
+> `clean`/`verify`, Core checker semantics, diagnostic code identity, and emitted
+> `.py`/`.pyi` compatibility are the stable Beta surfaces. Supported DX,
+> Experimental opt-in, and Roadmap / prototype features remain outside the Beta
+> compatibility promise.
 > Bug reports and contributions are very welcome.
 
 ## Install
@@ -92,6 +93,11 @@ that any modern type checker can consume — no TypePython runtime required.
 TypePython doesn't replace those checkers. It sits **one step earlier**: you
 author in `.tpy`, the compiler emits standard typed Python that those tools
 then consume normally.
+
+The strongest TypePython guarantees are author-time checks. Emitted artifacts
+remain standard Python: sealed exhaustiveness, `unknown` strictness, and
+`unsafe:` fences are enforced by TypePython during authoring, but external
+checkers see the portable `.py` / `.pyi` boundary.
 
 ## What you also get
 
