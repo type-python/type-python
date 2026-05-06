@@ -588,39 +588,67 @@ pub fn support_source_snapshot_identity(
         .unwrap_or_default();
     files.sort_by(|left, right| left.0.cmp(&right.0));
 
-    let mut hash = Wrapping(0xcbf29ce484222325_u64);
-    let prime = Wrapping(0x100000001b3_u64);
-    for byte in target_python.as_bytes().iter().chain([0_u8].iter()) {
-        hash ^= Wrapping(u64::from(*byte));
-        hash *= prime;
-    }
+    let mut hash = fnv1a64_start();
+    fnv1a64_mix_str(&mut hash, target_python);
     for (relative, bytes) in files {
-        for byte in relative.as_bytes().iter().chain([0_u8].iter()).chain(bytes.iter()) {
-            hash ^= Wrapping(u64::from(*byte));
-            hash *= prime;
-        }
+        fnv1a64_mix_str(&mut hash, &relative);
+        fnv1a64_mix_bytes(&mut hash, &bytes);
+        fnv1a64_mix_byte(&mut hash, 0);
     }
     let mut roots = support_root_signatures(&stdlib_root, &external_roots)?;
     roots.sort();
     for root in roots {
-        for byte in root.kind.as_bytes().iter().chain([0_u8].iter()) {
-            hash ^= Wrapping(u64::from(*byte));
-            hash *= prime;
-        }
-        for byte in root.path.as_bytes().iter().chain([0_u8].iter()) {
-            hash ^= Wrapping(u64::from(*byte));
-            hash *= prime;
-        }
-        let byte = u8::from(root.allow_untyped_runtime);
-        hash ^= Wrapping(u64::from(byte));
-        hash *= prime;
-        for byte in root.modified_unix_ms.unwrap_or_default().to_le_bytes() {
-            hash ^= Wrapping(u64::from(byte));
-            hash *= prime;
+        fnv1a64_mix_str(&mut hash, &root.kind);
+        fnv1a64_mix_str(&mut hash, &root.path);
+        fnv1a64_mix_u64(&mut hash, u64::from(root.allow_untyped_runtime));
+        fnv1a64_mix_str(&mut hash, &root.fingerprint);
+        for file in root.files {
+            fnv1a64_mix_str(&mut hash, &file.path);
+            fnv1a64_mix_str(&mut hash, &file.kind);
+            fnv1a64_mix_u64(&mut hash, file.len);
+            fnv1a64_mix_u64(&mut hash, file.modified_unix_ms.unwrap_or_default());
+            fnv1a64_mix_str(&mut hash, &file.content_hash);
         }
     }
 
-    Ok(format!("fnv1a64:{:016x}", hash.0))
+    Ok(fnv1a64_digest(hash))
+}
+
+const FNV1A64_OFFSET: u64 = 0xcbf29ce484222325_u64;
+const FNV1A64_PRIME: u64 = 0x100000001b3_u64;
+
+fn fnv1a64_start() -> Wrapping<u64> {
+    Wrapping(FNV1A64_OFFSET)
+}
+
+fn fnv1a64_mix_byte(hash: &mut Wrapping<u64>, byte: u8) {
+    *hash ^= Wrapping(u64::from(byte));
+    *hash *= Wrapping(FNV1A64_PRIME);
+}
+
+fn fnv1a64_mix_bytes(hash: &mut Wrapping<u64>, bytes: &[u8]) {
+    for byte in bytes {
+        fnv1a64_mix_byte(hash, *byte);
+    }
+}
+
+fn fnv1a64_mix_str(hash: &mut Wrapping<u64>, value: &str) {
+    fnv1a64_mix_bytes(hash, value.as_bytes());
+    fnv1a64_mix_byte(hash, 0);
+}
+
+fn fnv1a64_mix_u64(hash: &mut Wrapping<u64>, value: u64) {
+    fnv1a64_mix_bytes(hash, &value.to_le_bytes());
+}
+
+fn fnv1a64_hash_bytes(bytes: &[u8]) -> String {
+    let mut hash = fnv1a64_start();
+    fnv1a64_mix_bytes(&mut hash, bytes);
+    fnv1a64_digest(hash)
+}
+
+fn fnv1a64_digest(hash: Wrapping<u64>) -> String {
+    format!("fnv1a64:{:016x}", hash.0)
 }
 
 pub fn external_resolution_sources(config: &ConfigHandle) -> Result<Vec<DiscoveredSource>> {
@@ -823,7 +851,7 @@ pub fn partial_stub_package_marker(stub_root: &Path) -> bool {
         .is_some_and(|contents| contents.lines().any(|line| line.trim() == "partial"))
 }
 
-const SUPPORT_SOURCE_INDEX_VERSION: u32 = 1;
+const SUPPORT_SOURCE_INDEX_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 struct CachedSupportSourceIndex {
@@ -838,7 +866,17 @@ struct CachedSupportRoot {
     kind: String,
     path: String,
     allow_untyped_runtime: bool,
+    files: Vec<CachedSupportFile>,
+    fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+struct CachedSupportFile {
+    path: String,
+    kind: String,
+    len: u64,
     modified_unix_ms: Option<u64>,
+    content_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -951,18 +989,120 @@ fn cached_support_root(
     path: &Path,
     allow_untyped_runtime: bool,
 ) -> Result<CachedSupportRoot> {
-    let modified_unix_ms = path
-        .metadata()
-        .ok()
-        .and_then(|metadata| metadata.modified().ok())
-        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-        .and_then(|duration| u64::try_from(duration.as_millis()).ok());
+    let mut files = Vec::new();
+    let external_root = if kind == "external" {
+        Some(ExternalSupportRoot { path: path.to_path_buf(), allow_untyped_runtime })
+    } else {
+        None
+    };
+    collect_support_signature_files(path, path, external_root.as_ref(), &mut files)?;
+    files.sort();
+    let fingerprint = support_signature_fingerprint(kind, path, allow_untyped_runtime, &files);
     Ok(CachedSupportRoot {
         kind: kind.to_owned(),
         path: path.display().to_string(),
         allow_untyped_runtime,
-        modified_unix_ms,
+        files,
+        fingerprint,
     })
+}
+
+fn collect_support_signature_files(
+    root: &Path,
+    directory: &Path,
+    external_root: Option<&ExternalSupportRoot>,
+    files: &mut Vec<CachedSupportFile>,
+) -> Result<()> {
+    if !directory.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(directory).with_context(|| {
+        format!("unable to read support signature directory {}", directory.display())
+    })? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_support_signature_files(root, &path, external_root, files)?;
+            continue;
+        }
+
+        let Some(kind) = support_signature_file_kind(&path, external_root) else {
+            continue;
+        };
+        let relative_path = path
+            .strip_prefix(root)
+            .with_context(|| {
+                format!(
+                    "support signature path {} is outside root {}",
+                    path.display(),
+                    root.display()
+                )
+            })
+            .map(normalize_glob_path)?;
+        let metadata = fs::metadata(&path)
+            .with_context(|| format!("unable to stat support signature file {}", path.display()))?;
+        let contents = fs::read(&path)
+            .with_context(|| format!("unable to read support signature file {}", path.display()))?;
+        files.push(CachedSupportFile {
+            path: relative_path,
+            kind: kind.to_owned(),
+            len: metadata.len(),
+            modified_unix_ms: metadata_modified_unix_ms(&metadata),
+            content_hash: fnv1a64_hash_bytes(&contents),
+        });
+    }
+
+    Ok(())
+}
+
+fn support_signature_file_kind(
+    path: &Path,
+    external_root: Option<&ExternalSupportRoot>,
+) -> Option<&'static str> {
+    if path.file_name().and_then(|name| name.to_str()) == Some("py.typed") {
+        return Some("py.typed");
+    }
+
+    match SourceKind::from_path(path)? {
+        SourceKind::Stub => Some("stub"),
+        SourceKind::Python => {
+            if external_root.is_some_and(|root| external_runtime_allowed(root, path)) {
+                Some("python")
+            } else {
+                None
+            }
+        }
+        SourceKind::TypePython => None,
+    }
+}
+
+fn metadata_modified_unix_ms(metadata: &fs::Metadata) -> Option<u64> {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+}
+
+fn support_signature_fingerprint(
+    kind: &str,
+    path: &Path,
+    allow_untyped_runtime: bool,
+    files: &[CachedSupportFile],
+) -> String {
+    let mut hash = fnv1a64_start();
+    fnv1a64_mix_str(&mut hash, kind);
+    fnv1a64_mix_str(&mut hash, &path.display().to_string());
+    fnv1a64_mix_u64(&mut hash, u64::from(allow_untyped_runtime));
+    for file in files {
+        fnv1a64_mix_str(&mut hash, &file.path);
+        fnv1a64_mix_str(&mut hash, &file.kind);
+        fnv1a64_mix_u64(&mut hash, file.len);
+        fnv1a64_mix_u64(&mut hash, file.modified_unix_ms.unwrap_or_default());
+        fnv1a64_mix_str(&mut hash, &file.content_hash);
+    }
+    fnv1a64_digest(hash)
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1163,6 +1303,134 @@ mod tests {
 
         assert_eq!(result.0, Some(1));
         assert_eq!(result.0, result.1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cached_support_source_index_invalidates_when_external_stub_contents_change() {
+        let project_dir = temp_project_dir(
+            "cached_support_source_index_invalidates_when_external_stub_contents_change",
+        );
+        let result = {
+            let probe = project_dir.join("python-probe");
+            write_executable_script(
+                &probe,
+                "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+            );
+            let stub_path = project_dir.join("site-packages/demo/__init__.pyi");
+            fs::create_dir_all(stub_path.parent().expect("stub parent should exist"))
+                .expect("support package directory should be created");
+            fs::write(&stub_path, "value: int\n").expect("support package stub should be written");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\npython_executable = \"{}\"\n",
+                    project_dir.join("site-packages").display(),
+                    probe.display()
+                ),
+            )
+            .expect("typepython.toml should be written");
+            let config = typepython_config::load(&project_dir).expect("config should load");
+            let target_python = config.config.project.target_python.to_string();
+            let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
+            let external_roots =
+                configured_external_type_roots(&config).expect("external roots should resolve");
+            let cache_path = support_source_index_cache_path(&config, &target_python);
+            support_source_index(&config, &target_python).expect("index should build");
+
+            let valid_before = load_cached_support_source_index(
+                &cache_path,
+                &target_python,
+                &stdlib_root,
+                &external_roots,
+            )
+            .expect("cache load should succeed")
+            .is_some();
+
+            fs::write(&stub_path, "value: str\n").expect("support package stub should be updated");
+
+            let valid_after = load_cached_support_source_index(
+                &cache_path,
+                &target_python,
+                &stdlib_root,
+                &external_roots,
+            )
+            .expect("cache load should succeed")
+            .is_some();
+            (valid_before, valid_after)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(result.0);
+        assert!(!result.1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn support_source_snapshot_identity_changes_when_external_stub_contents_change() {
+        let project_dir =
+            temp_project_dir("support_source_snapshot_identity_changes_external_stub");
+        let result = {
+            let probe = project_dir.join("python-probe");
+            write_executable_script(
+                &probe,
+                "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+            );
+            let stub_path = project_dir.join("site-packages/demo/__init__.pyi");
+            fs::create_dir_all(stub_path.parent().expect("stub parent should exist"))
+                .expect("support package directory should be created");
+            fs::write(&stub_path, "value: int\n").expect("support package stub should be written");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\npython_executable = \"{}\"\n",
+                    project_dir.join("site-packages").display(),
+                    probe.display()
+                ),
+            )
+            .expect("typepython.toml should be written");
+            let config = typepython_config::load(&project_dir).expect("config should load");
+            let target_python = config.config.project.target_python.to_string();
+
+            let before = support_source_snapshot_identity(&config, &target_python)
+                .expect("support snapshot identity should be computed");
+            fs::write(&stub_path, "value: str\n").expect("support package stub should be updated");
+            let after = support_source_snapshot_identity(&config, &target_python)
+                .expect("support snapshot identity should be recomputed");
+            (before, after)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert_ne!(result.0, result.1);
+    }
+
+    #[test]
+    fn support_root_signatures_include_py_typed_marker_contents() {
+        let root = temp_project_dir("support_root_signatures_include_py_typed_marker_contents");
+        let result = {
+            fs::create_dir_all(root.join("demo")).expect("test package directory should exist");
+            fs::write(root.join("demo/runtime.py"), "pass\n")
+                .expect("runtime source should be written");
+            let marker = root.join("demo/py.typed");
+            fs::write(&marker, "").expect("typed marker should be written");
+
+            let before =
+                cached_support_root("external", &root, false).expect("root should be signed");
+            fs::write(&marker, "partial\n").expect("typed marker should be updated");
+            let after =
+                cached_support_root("external", &root, false).expect("root should be re-signed");
+            (before, after)
+        };
+        remove_temp_project_dir(&root);
+
+        assert_ne!(result.0.fingerprint, result.1.fingerprint);
+        assert!(
+            result
+                .0
+                .files
+                .iter()
+                .any(|file| file.path == normalize_glob_path(Path::new("demo/py.typed")))
+        );
     }
 
     #[test]
