@@ -4,7 +4,7 @@ use std::{
     num::Wrapping,
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
-    time::{SystemTime, UNIX_EPOCH},
+    time::UNIX_EPOCH,
 };
 
 use anyhow::{Context, Result};
@@ -1098,34 +1098,19 @@ fn cached_support_root_matches_current(
         if current.path != cached_file.path || current.kind != cached_file.kind {
             return Ok(false);
         }
-        let metadata_identical = current.len == cached_file.len
-            && current.modified_unix_ms == cached_file.modified_unix_ms;
-        if metadata_identical && support_signature_mtime_is_stable(current.modified_unix_ms) {
-            continue;
+        if current.len != cached_file.len {
+            return Ok(false);
         }
 
         let content_hash = support_signature_file_content_hash(path, &current.path)?;
         if content_hash != cached_file.content_hash {
             return Ok(false);
         }
+        let metadata_identical = current.modified_unix_ms == cached_file.modified_unix_ms;
         metadata_changed |= !metadata_identical;
     }
 
     Ok(!metadata_changed)
-}
-
-fn support_signature_mtime_is_stable(modified_unix_ms: Option<u64>) -> bool {
-    let Some(modified_unix_ms) = modified_unix_ms else {
-        return false;
-    };
-    let Some(now_unix_ms) = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
-    else {
-        return false;
-    };
-    now_unix_ms.saturating_sub(modified_unix_ms) > 2_000
 }
 
 fn cached_support_root(
@@ -1392,6 +1377,16 @@ mod tests {
         fs::set_permissions(path, permissions).expect("script permissions should be updated");
     }
 
+    #[cfg(unix)]
+    fn set_stable_file_mtime(path: &Path) {
+        let status = std::process::Command::new("touch")
+            .args(["-t", "202001010000"])
+            .arg(path)
+            .status()
+            .expect("touch should run");
+        assert!(status.success(), "touch should update test file mtime");
+    }
+
     fn temp_project_dir(test_name: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1545,6 +1540,68 @@ mod tests {
             .is_some();
 
             fs::write(&stub_path, "value: str\n").expect("support package stub should be updated");
+
+            let valid_after = load_cached_support_source_index(
+                &cache_path,
+                &target_python,
+                &stdlib_root,
+                &external_roots,
+            )
+            .expect("cache load should succeed")
+            .is_some();
+            (valid_before, valid_after)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(result.0);
+        assert!(!result.1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cached_support_source_index_invalidates_same_len_same_mtime_content_change() {
+        let project_dir = temp_project_dir(
+            "cached_support_source_index_invalidates_same_len_same_mtime_content_change",
+        );
+        let result = {
+            let probe = project_dir.join("python-probe");
+            write_executable_script(
+                &probe,
+                "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+            );
+            let stub_path = project_dir.join("site-packages/demo/__init__.pyi");
+            fs::create_dir_all(stub_path.parent().expect("stub parent should exist"))
+                .expect("support package directory should be created");
+            fs::write(&stub_path, "value: int\n").expect("support package stub should be written");
+            set_stable_file_mtime(&stub_path);
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\npython_executable = \"{}\"\n",
+                    project_dir.join("site-packages").display(),
+                    probe.display()
+                ),
+            )
+            .expect("typepython.toml should be written");
+            let config = typepython_config::load(&project_dir).expect("config should load");
+            let target_python = config.config.project.target_python.to_string();
+            let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
+            let external_roots =
+                configured_external_type_roots(&config).expect("external roots should resolve");
+            let cache_path = support_source_index_cache_path(&config, &target_python);
+            support_source_index(&config, &target_python).expect("index should build");
+
+            let valid_before = load_cached_support_source_index(
+                &cache_path,
+                &target_python,
+                &stdlib_root,
+                &external_roots,
+            )
+            .expect("cache load should succeed")
+            .is_some();
+
+            fs::write(&stub_path, "value: str\n").expect("support package stub should be updated");
+            set_stable_file_mtime(&stub_path);
 
             let valid_after = load_cached_support_source_index(
                 &cache_path,
