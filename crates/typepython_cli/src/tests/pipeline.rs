@@ -362,6 +362,99 @@ fn run_with_pipeline_check_persists_analysis_cache_without_materializing_outputs
 }
 
 #[test]
+fn run_with_pipeline_check_treats_old_analysis_cache_as_miss() {
+    let project_dir = temp_project_dir("run_with_pipeline_check_treats_old_analysis_cache_as_miss");
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+
+        let first_exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("first check should run to completion");
+
+        let cache_path = project_dir.join(".typepython/cache/analysis-cache.json");
+        let mut cache: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&cache_path).expect("cache should exist"))
+                .expect("cache should be valid JSON");
+        let metadata = cache
+            .get_mut("metadata")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("cache metadata should be an object");
+        metadata.remove("strict_nulls");
+        metadata.remove("no_implicit_dynamic");
+        fs::write(&cache_path, serde_json::to_string_pretty(&cache).expect("cache renders"))
+            .expect("test setup should succeed");
+
+        let second_exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("second check should rebuild stale analysis cache");
+
+        (first_exit_code, second_exit_code)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(result, (ExitCode::SUCCESS, ExitCode::SUCCESS));
+}
+
+#[test]
+fn run_with_pipeline_check_treats_incompatible_incremental_snapshot_as_miss() {
+    let project_dir = temp_project_dir(
+        "run_with_pipeline_check_treats_incompatible_incremental_snapshot_as_miss",
+    );
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+
+        let first_exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("first check should run to completion");
+
+        let snapshot_path = project_dir.join(".typepython/cache/snapshot.json");
+        let mut snapshot: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&snapshot_path).expect("snapshot should exist"),
+        )
+        .expect("snapshot should be valid JSON");
+        snapshot["schema_version"] = serde_json::json!(0);
+        fs::write(
+            &snapshot_path,
+            serde_json::to_string_pretty(&snapshot).expect("snapshot renders"),
+        )
+        .expect("test setup should succeed");
+
+        let second_exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("second check should rebuild stale incremental snapshot");
+
+        (first_exit_code, second_exit_code)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(result, (ExitCode::SUCCESS, ExitCode::SUCCESS));
+}
+
+#[test]
 fn run_with_pipeline_check_persists_effect_metadata_sidecar() {
     let project_dir = temp_project_dir("run_with_pipeline_check_persists_effect_metadata_sidecar");
     let result = {

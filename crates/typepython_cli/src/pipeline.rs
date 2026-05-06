@@ -660,8 +660,9 @@ fn load_previous_analysis_cache(config: &ConfigHandle) -> Result<Option<Analysis
     }
     let rendered = fs::read_to_string(&cache_path)
         .with_context(|| format!("unable to read {}", cache_path.display()))?;
-    let cache: AnalysisCache = serde_json::from_str(&rendered)
-        .with_context(|| format!("unable to decode analysis cache {}", cache_path.display()))?;
+    let Ok(cache) = serde_json::from_str::<AnalysisCache>(&rendered) else {
+        return Ok(None);
+    };
     if cache.schema_version != ANALYSIS_CACHE_SCHEMA_VERSION {
         return Ok(None);
     }
@@ -677,10 +678,9 @@ fn load_previous_materialized_build_manifest(
     }
     let rendered = fs::read_to_string(&manifest_path)
         .with_context(|| format!("unable to read {}", manifest_path.display()))?;
-    let manifest: MaterializedBuildManifest =
-        serde_json::from_str(&rendered).with_context(|| {
-            format!("unable to decode materialized build manifest {}", manifest_path.display())
-        })?;
+    let Ok(manifest) = serde_json::from_str::<MaterializedBuildManifest>(&rendered) else {
+        return Ok(None);
+    };
     if manifest.schema_version != MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION {
         return Ok(None);
     }
@@ -1024,9 +1024,10 @@ fn load_previous_incremental_state(config: &ConfigHandle) -> Result<Option<Incre
     }
     let rendered = fs::read_to_string(&snapshot_path)
         .with_context(|| format!("unable to read {}", snapshot_path.display()))?;
-    decode_snapshot(&rendered)
-        .map(Some)
-        .map_err(|error| anyhow::anyhow!("unable to decode {}: {}", snapshot_path.display(), error))
+    match decode_snapshot(&rendered) {
+        Ok(snapshot) => Ok(Some(snapshot)),
+        Err(_) => Ok(None),
+    }
 }
 
 pub(crate) fn collect_parse_diagnostics(
