@@ -194,6 +194,29 @@ fn check_rejects_none_literal_assignment_when_strict_nulls_is_disabled() {
 }
 
 #[test]
+fn check_rejects_none_literal_union_assignment_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "from typing import Literal\n\nvalue: Literal[1] | Literal[2] = None\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_none_mixed_literal_union_assignment_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "from typing import Literal\n\nvalue: int | Literal[1] = None\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_assignment_into_unknown_boundary() {
     let result = check_temp_typepython_source("value: unknown = 1\n");
 

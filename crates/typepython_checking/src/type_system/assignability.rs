@@ -421,6 +421,9 @@ fn semantic_type_is_none(ty: &SemanticType) -> bool {
 
 fn semantic_type_accepts_implicit_none(ty: &SemanticType) -> bool {
     let ty = ty.strip_annotated();
+    if let Some(branches) = semantic_union_branches(ty) {
+        return branches.iter().any(semantic_type_accepts_implicit_none);
+    }
     if semantic_type_is_never(ty) || semantic_type_is_literal_domain(ty) {
         return false;
     }
