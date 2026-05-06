@@ -77,7 +77,8 @@ function buildClient(context) {
 
   const clientOptions = {
     documentSelector: [
-      { scheme: "file", language: "typepython" }
+      { scheme: "file", language: "typepython" },
+      { scheme: "file", language: "python" }
     ],
     outputChannelName: "TypePython",
     traceOutputChannel: vscode.window.createOutputChannel("TypePython Trace"),

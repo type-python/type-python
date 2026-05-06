@@ -2,8 +2,9 @@
 
 This directory contains the official source-installable VS Code language client
 for TypePython. It is intentionally thin: the extension starts the bundled
-`typepython lsp` server, registers `.tpy` files, exposes a restart command, and
-routes server output to VS Code output channels.
+`typepython lsp` server, registers `.tpy` files, attaches to VS Code Python
+documents for `.py` / `.pyi` project files, exposes a restart command, and routes
+server output to VS Code output channels.
 
 ## Install from Source
 

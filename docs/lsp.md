@@ -125,8 +125,10 @@ npm run package
 code --install-extension typepython-vscode-0.4.0.vsix
 ```
 
-The extension launches `typepython lsp --project <workspace>` and registers
-`.tpy` as the `typepython` language. Configure `typepython.binaryPath` when the
+The extension launches `typepython lsp --project <workspace>`, registers `.tpy`
+as the `typepython` language, and attaches the TypePython LSP client to VS Code
+`python` documents so configured `.py` and `.pyi` files receive the same project
+diagnostics and formatting support. Configure `typepython.binaryPath` when the
 CLI is not on `PATH`, or set `TYPEPYTHON_BIN`.
 
 ### Neovim (nvim-lspconfig)

@@ -36,6 +36,7 @@ class EditorIntegrationTests(unittest.TestCase):
         self.assertEqual(language["id"], "typepython")
         self.assertIn(".tpy", language["extensions"])
         self.assertEqual(language["configuration"], "./language-configuration.json")
+        self.assertIn("onLanguage:python", package["activationEvents"])
 
         properties = package["contributes"]["configuration"]["properties"]
         self.assertIn("typepython.binaryPath", properties)
@@ -58,6 +59,7 @@ class EditorIntegrationTests(unittest.TestCase):
         self.assertIn("Trace.Messages", extension)
         self.assertIn("Trace.Verbose", extension)
         self.assertIn('args: ["lsp", "--project", workspaceProjectPath()]', extension)
+        self.assertIn('{ scheme: "file", language: "python" }', extension)
         self.assertIn("TYPEPYTHON_BIN", extension)
         self.assertIn("typepython.restartServer", extension)
         self.assertIn("createFileSystemWatcher", extension)
@@ -74,6 +76,7 @@ class EditorIntegrationTests(unittest.TestCase):
 
         self.assertIn("editors/vscode", lsp)
         self.assertIn("code --install-extension typepython-vscode-0.4.0.vsix", lsp)
+        self.assertIn("attaches the TypePython LSP client to VS Code", lsp)
         for editor in ("Neovim", "Helix", "Sublime Text", "Emacs"):
             self.assertIn(editor, lsp)
             self.assertIn(editor, readme)
