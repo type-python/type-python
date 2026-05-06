@@ -567,11 +567,11 @@ class RepoContractsTests(unittest.TestCase):
             pipeline,
         )
         self.assertIn(
-            "CheckerOptions::from_typing_config(&config.config.typing)",
+            "CheckerOptions::from_config(&config.config)",
             pipeline,
         )
         self.assertIn(
-            "CheckerOptions::from_typing_config(&self.config.config.typing)",
+            "CheckerOptions::from_config(&self.config.config)",
             lsp_lifecycle,
         )
         self.assertIn("TPY4029", coverage)

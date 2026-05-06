@@ -16,8 +16,9 @@ Experimental opt-in features share the same release contract:
 
 Roadmap / prototype rows are tracked here so they stay out of Core v1 product claims. They may appear
 in research fixtures, RFCs, or explicitly labeled diagnostics, but they are disabled for ordinary
-Core projects unless `[experimental].accepted_features` names the feature id. Promotion still
-requires tightening those gates before the slice can become a compatibility-stable feature.
+Core projects unless `[experimental].accepted_features` names the feature id. Any promotion
+requires adding or tightening explicit gates before the slice can become a compatibility-stable
+feature.
 
 ## Registry
 
