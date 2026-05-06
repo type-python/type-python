@@ -3,7 +3,8 @@
 TypePython's Beta claim is intentionally narrow: **Core v1 Beta**. The package may include Supported
 DX, Experimental opt-in, and Roadmap / prototype capabilities, but those surfaces are not part of the
 Beta compatibility promise until they are promoted explicitly. The canonical status vocabulary lives
-in [TypePython Feature Status](feature-status.md).
+in [TypePython Feature Status](feature-status.md). Editor and workflow maturity is tracked separately
+in [DX and LSP Stability](dx-stability.md).
 
 ## Stable Core v1 During Beta
 
@@ -33,6 +34,8 @@ The following features can be useful in Beta builds, but their UX, schemas, or h
 without a Beta-line compatibility guarantee:
 
 - LSP UX details, command names, and editor affordances.
+- LSP capability shape, formatter behavior, code-action details, and editor extension packaging
+  until promoted by the DX v1.0 gate.
 - Migration heuristics, type-budget scoring, and adoption dashboard details.
 - Cache internal schema, support indexes, and incremental snapshot layout.
 - `watch`, `compat`, `api-diff`, and `type-health` UX and report details.

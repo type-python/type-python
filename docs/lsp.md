@@ -2,6 +2,11 @@
 
 TypePython includes a built-in Language Server Protocol (LSP) server that provides real-time type checking and code intelligence in your editor.
 
+The server is a Supported Beta DX surface. Core authoring semantics are the stable
+Beta promise; editor UX, command names, formatter behavior, code-action details,
+and extension packaging remain non-stable until the
+[DX and LSP Stability](dx-stability.md) v1.0 gate is complete.
+
 ## Starting the LSP Server
 
 ```bash

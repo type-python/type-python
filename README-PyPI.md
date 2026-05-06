@@ -118,9 +118,10 @@ TypePython-aware consumer.
   downstream rechecks when only a body changes.
 - **Full toolchain** — `init`, `check`, `build`, `watch`, `clean`, `verify`,
   `compat`, `api-diff`, `type-health`, `migrate`, `lsp`.
-- **LSP server** — hover, go to definition, references, rename, completions,
-  signature help, real-time diagnostics, and code-action quick fixes.
-  Bring your own LSP-capable editor (VS Code, Neovim, Helix, Sublime, Emacs).
+- **Supported Beta LSP server** — hover, go to definition, references, rename,
+  completions, signature help, real-time diagnostics, and code-action quick fixes.
+  Editor UX and extension packaging are still outside the Core v1 Beta compatibility
+  promise.
 - **Standard, portable output** — emitted `.py` + `.pyi` work with mypy,
   pyright, and ty out of the box. PEP 561 `py.typed` is written automatically.
 - **Mixed projects** — `.tpy`, `.py`, and `.pyi` live in the same source tree.

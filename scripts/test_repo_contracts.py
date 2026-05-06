@@ -315,6 +315,37 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("peak RSS", beta)
         self.assertIn("p95/p99", beta)
 
+    def test_dx_and_lsp_stability_boundary_is_documented(self) -> None:
+        dx = read_text("docs/dx-stability.md")
+        beta = read_text("docs/beta-readiness.md")
+        lsp = read_text("docs/lsp.md")
+        readme = read_text("README.md")
+        pypi_readme = read_text("README-PyPI.md")
+
+        for expected in (
+            "Supported DX, non-stable",
+            "LSP capabilities",
+            "JSON schema",
+            "watch-mode tests",
+            "formatting and code-action golden tests",
+            "installable VS Code extension",
+            "copy-paste configuration for Neovim, Helix, Sublime Text, and Emacs",
+            "Logs and crash diagnostics",
+        ):
+            self.assertIn(expected, dx)
+
+        self.assertIn("DX and LSP Stability", beta)
+        self.assertIn("LSP capability shape, formatter behavior, code-action details", beta)
+        self.assertIn("Supported Beta DX surface", lsp)
+        self.assertIn("DX and LSP Stability", lsp)
+
+        self.assertIn("supported Beta stdio LSP server", readme)
+        self.assertIn("Supported Beta LSP server", pypi_readme)
+        for text in (readme, pypi_readme):
+            normalized = " ".join(text.split())
+            self.assertIn("extension packaging", text)
+            self.assertIn("Core v1 Beta compatibility promise", normalized)
+
     def test_conformance_beta_scope_classification_is_precise(self) -> None:
         conformance_report = load_script_module(
             "scripts/conformance_report.py",
