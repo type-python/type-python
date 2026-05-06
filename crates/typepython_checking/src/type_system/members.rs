@@ -378,7 +378,9 @@ pub(super) fn attach_missing_none_return_suggestion(
     let Some(without_none) = remove_none_branch(&inferred_actual) else {
         return diagnostic;
     };
-    if !direct_type_is_assignable(node, nodes, expected, &without_none) {
+    let expected_type = lower_type_text_or_name(expected);
+    let without_none_type = lower_type_text_or_name(&without_none);
+    if !semantic_type_is_assignable(node, nodes, &expected_type, &without_none_type) {
         return diagnostic;
     }
     if node.module_path.to_string_lossy().starts_with('<') {

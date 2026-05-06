@@ -7,12 +7,9 @@ pub(super) fn direct_type_matches(
     let mut types = TypeStore::default();
     let expected = types.intern(lower_type_text_or_name(expected));
     let actual = types.intern(lower_type_text_or_name(actual));
-    direct_semantic_type_matches(
-        node,
-        nodes,
+    TypeRelationContext::new(node, nodes).matches(
         types.get(expected).expect("interned semantic expected type"),
         types.get(actual).expect("interned semantic actual type"),
-        &mut BTreeSet::new(),
     )
 }
 
@@ -25,13 +22,9 @@ pub(super) fn direct_type_is_assignable(
     let mut types = TypeStore::default();
     let expected = types.intern(lower_type_text_or_name(expected));
     let actual = types.intern(lower_type_text_or_name(actual));
-    direct_semantic_type_is_assignable(
-        node,
-        nodes,
+    TypeRelationContext::new(node, nodes).is_assignable(
         types.get(expected).expect("interned semantic expected type"),
         types.get(actual).expect("interned semantic actual type"),
-        AssignabilityOptions::default(),
-        &mut BTreeSet::new(),
     )
 }
 
@@ -41,7 +34,7 @@ pub(super) fn semantic_type_matches(
     expected: &SemanticType,
     actual: &SemanticType,
 ) -> bool {
-    direct_semantic_type_matches(node, nodes, expected, actual, &mut BTreeSet::new())
+    TypeRelationContext::new(node, nodes).matches(expected, actual)
 }
 
 pub(super) fn semantic_type_is_assignable(
@@ -77,7 +70,64 @@ pub(super) fn semantic_type_is_assignable_with_options(
     actual: &SemanticType,
     options: AssignabilityOptions,
 ) -> bool {
-    direct_semantic_type_is_assignable(node, nodes, expected, actual, options, &mut BTreeSet::new())
+    TypeRelationContext::with_options(node, nodes, options).is_assignable(expected, actual)
+}
+
+pub(super) struct TypeRelationContext<'a> {
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
+    options: AssignabilityOptions,
+}
+
+impl<'a> TypeRelationContext<'a> {
+    pub(super) fn new(
+        node: &'a typepython_graph::ModuleNode,
+        nodes: &'a [typepython_graph::ModuleNode],
+    ) -> Self {
+        Self::with_options(node, nodes, AssignabilityOptions::default())
+    }
+
+    pub(super) fn with_options(
+        node: &'a typepython_graph::ModuleNode,
+        nodes: &'a [typepython_graph::ModuleNode],
+        options: AssignabilityOptions,
+    ) -> Self {
+        Self { node, nodes, options }
+    }
+
+    pub(super) fn matches(&self, expected: &SemanticType, actual: &SemanticType) -> bool {
+        direct_semantic_type_matches(self.node, self.nodes, expected, actual, &mut BTreeSet::new())
+    }
+
+    pub(super) fn is_assignable(&self, expected: &SemanticType, actual: &SemanticType) -> bool {
+        direct_semantic_type_is_assignable(
+            self.node,
+            self.nodes,
+            expected,
+            actual,
+            self.options,
+            &mut BTreeSet::new(),
+        )
+    }
+
+    pub(super) fn invariant_matches(
+        &self,
+        expected: &SemanticType,
+        actual: &SemanticType,
+    ) -> bool {
+        (self.matches(expected, actual) && self.matches(actual, expected))
+            || recursive_type_alias_head_semantic(self.node, self.nodes, expected)
+                .is_some_and(|_| self.is_assignable(expected, actual))
+    }
+}
+
+pub(super) fn semantic_invariant_type_matches(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &SemanticType,
+    actual: &SemanticType,
+) -> bool {
+    TypeRelationContext::new(node, nodes).invariant_matches(expected, actual)
 }
 
 fn direct_semantic_type_matches(
@@ -347,7 +397,7 @@ fn taint_qualified_assignability(
         (None, Some(_)) | (Some(_), None) => Some(false),
         (Some((expected_inner, expected_context)), Some((actual_inner, actual_context))) => {
             Some(
-                render_semantic_type(expected_context) == render_semantic_type(actual_context)
+                semantic_invariant_type_matches(node, nodes, expected_context, actual_context)
                     && direct_semantic_type_is_assignable(
                         node,
                         nodes,
@@ -400,7 +450,12 @@ pub(super) fn nominal_subclass_assignable(
     };
     actual_decl.rendered_class_bases().iter().any(|base| {
         normalize_type_text(base) == expected
-            || direct_type_is_assignable(actual_node, nodes, expected, base)
+            || semantic_type_is_assignable(
+                actual_node,
+                nodes,
+                &lower_type_text_or_name(expected),
+                &lower_type_text_or_name(base),
+            )
     })
 }
 
@@ -701,9 +756,7 @@ fn assignable_semantic_generic_bridge(
                 ));
             }
             let element = if actual_head == "tuple" {
-                lower_type_text_or_name(&join_branch_types(
-                    actual_args.iter().map(render_semantic_type).collect(),
-                ))
+                join_semantic_type_candidates(actual_args.to_vec())
             } else {
                 actual_args
                     .first()
@@ -720,12 +773,8 @@ fn assignable_semantic_generic_bridge(
         }
         ("Mapping", "dict") if expected_args.len() == 2 && actual_args.len() == 2 => {
             return Some(
-                invariant_type_matches(
-                    node,
-                    nodes,
-                    &render_semantic_type(&expected_args[0]),
-                    &render_semantic_type(&actual_args[0]),
-                ) && semantic_type_is_assignable_with_options(
+                semantic_invariant_type_matches(node, nodes, &expected_args[0], &actual_args[0])
+                    && semantic_type_is_assignable_with_options(
                     node,
                     nodes,
                     &expected_args[1],
@@ -768,12 +817,9 @@ fn same_head_semantic_generic_assignable(
     let variances = variances_for_generic_head(head, expected_args.len());
     Some(expected_args.iter().zip(actual_args.iter()).zip(variances).all(
         |((expected_arg, actual_arg), variance)| match variance {
-            GenericVariance::Invariant => invariant_type_matches(
-                node,
-                nodes,
-                &render_semantic_type(expected_arg),
-                &render_semantic_type(actual_arg),
-            ),
+            GenericVariance::Invariant => {
+                semantic_invariant_type_matches(node, nodes, expected_arg, actual_arg)
+            }
             GenericVariance::Covariant => semantic_type_is_assignable_with_options(
                 node,
                 nodes,
@@ -937,28 +983,16 @@ fn callable_semantic_annotation_assignable(
     callable_structural_params_assignable(node, nodes, expected_params, actual_params, options)
 }
 
-pub(super) fn invariant_type_matches(
+fn recursive_type_alias_head_semantic(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    expected: &str,
-    actual: &str,
-) -> bool {
-    (direct_type_matches(node, nodes, expected, actual)
-        && direct_type_matches(node, nodes, actual, expected))
-        || recursive_type_alias_head(node, nodes, expected)
-            .is_some_and(|_| direct_type_is_assignable(node, nodes, expected, actual))
-}
-
-pub(super) fn recursive_type_alias_head(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    text: &str,
+    ty: &SemanticType,
 ) -> Option<String> {
-    let normalized = lower_type_text_or_name(text);
-    let head = normalized
-        .generic_parts()
-        .map(|(head, _)| head.to_owned())
-        .unwrap_or_else(|| render_semantic_type(&normalized));
+    let head = match ty.strip_annotated() {
+        SemanticType::Name(name) => name.clone(),
+        SemanticType::Generic { head, .. } => head.clone(),
+        _ => return None,
+    };
     let (alias_node, alias_decl) = resolve_direct_type_alias(nodes, node, &head)?;
     let mut visiting = BTreeSet::new();
     type_alias_eventually_mentions(
@@ -980,7 +1014,7 @@ fn expand_semantic_type_alias_once(
     let (head, args) = match stripped {
         SemanticType::Name(name) => (name.clone(), Vec::new()),
         SemanticType::Generic { head, args } => (head.clone(), args.clone()),
-        _ => (render_semantic_type(stripped), Vec::new()),
+        _ => return None,
     };
     let (alias_node, alias_decl) = resolve_direct_type_alias(nodes, node, &head)?;
     let substitutions = alias_type_param_substitutions_semantic(alias_decl, &args)?;
@@ -1070,9 +1104,12 @@ fn semantic_type_mentions_alias(
                 .any(|arg| semantic_type_mentions_alias(node, nodes, arg, target, visiting));
     }
 
-    let normalized = render_semantic_type(ty);
-    normalized == target
-        || type_alias_eventually_mentions(node, nodes, &normalized, target, visiting)
+    match ty {
+        SemanticType::Name(name) => {
+            name == target || type_alias_eventually_mentions(node, nodes, name, target, visiting)
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn variances_for_generic_head(head: &str, arity: usize) -> Vec<GenericVariance> {
