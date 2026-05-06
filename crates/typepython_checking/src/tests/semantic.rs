@@ -1,5 +1,32 @@
 use super::*;
 
+fn check_temp_typepython_source_with_effect_rows(
+    source_text: &str,
+    strict: bool,
+) -> crate::CheckResult {
+    check_temp_typepython_source_with_checker_options(
+        source_text,
+        ParseOptions::default(),
+        crate::CheckerOptions {
+            strict,
+            experimental_effect_rows: true,
+            ..crate::CheckerOptions::default()
+        },
+    )
+}
+
+fn check_temp_typepython_source_with_taint(source_text: &str, strict: bool) -> crate::CheckResult {
+    check_temp_typepython_source_with_checker_options(
+        source_text,
+        ParseOptions::default(),
+        crate::CheckerOptions {
+            strict,
+            experimental_taint: true,
+            ..crate::CheckerOptions::default()
+        },
+    )
+}
+
 #[test]
 fn check_reports_implicit_dynamic_function_and_method_params_when_enabled() {
     let result = check_temp_typepython_source_with_checker_options(
@@ -327,7 +354,7 @@ fn check_reports_unsafe_boundary_with_source_overrides_without_backing_file() {
 
 #[test]
 fn check_warns_when_pure_function_uses_effectful_result() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_effect_rows(
         concat!(
             "from typing import Callable\n\n",
             "def effect_io_net[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
@@ -342,12 +369,7 @@ fn check_warns_when_pure_function_uses_effectful_result() {
             "    value = fetch()\n",
             "    return value\n",
         ),
-        ParseOptions::default(),
-        false,
         true,
-        DiagnosticLevel::Warning,
-        true,
-        false,
     );
 
     let rendered = result.diagnostics.as_text();
@@ -358,7 +380,7 @@ fn check_warns_when_pure_function_uses_effectful_result() {
 
 #[test]
 fn check_warns_for_explicit_effect_decorator_surface() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_effect_rows(
         concat!(
             "from typing import Callable\n\n",
             "def effect(label: str):\n",
@@ -374,12 +396,7 @@ fn check_warns_for_explicit_effect_decorator_surface() {
             "def parse() -> str:\n",
             "    return fetch()\n",
         ),
-        ParseOptions::default(),
-        false,
         true,
-        DiagnosticLevel::Warning,
-        true,
-        false,
     );
 
     let rendered = result.diagnostics.as_text();
@@ -389,7 +406,7 @@ fn check_warns_for_explicit_effect_decorator_surface() {
 
 #[test]
 fn check_warns_for_qualified_explicit_effect_decorator_surface() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_effect_rows(
         concat!(
             "from typing import Callable\n\n",
             "class tpy:\n",
@@ -407,12 +424,7 @@ fn check_warns_for_qualified_explicit_effect_decorator_surface() {
             "def parse() -> str:\n",
             "    return fetch()\n",
         ),
-        ParseOptions::default(),
-        false,
         true,
-        DiagnosticLevel::Warning,
-        true,
-        false,
     );
 
     let rendered = result.diagnostics.as_text();
@@ -422,7 +434,7 @@ fn check_warns_for_qualified_explicit_effect_decorator_surface() {
 
 #[test]
 fn check_allows_unsafe_effect_inside_unsafe_capability_scope() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_effect_rows(
         concat!(
             "from typing import Callable\n\n",
             "def effect_unsafe[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
@@ -438,12 +450,7 @@ fn check_allows_unsafe_effect_inside_unsafe_capability_scope() {
             "        value = inspect_dynamic()\n",
             "        return value\n",
         ),
-        ParseOptions::default(),
-        false,
         true,
-        DiagnosticLevel::Warning,
-        true,
-        false,
     );
 
     let rendered = result.diagnostics.as_text();
@@ -506,32 +513,35 @@ fn check_accepts_tainted_source_after_sanitizer_before_sink() {
 
 #[test]
 fn check_uses_source_sink_and_sanitizer_decorators_for_taint_slice() {
-    let result = check_temp_typepython_source(concat!(
-        "from typing import Callable\n\n",
-        "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
-        "    return fn\n\n",
-        "def sink[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
-        "    return fn\n\n",
-        "def sanitizer[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
-        "    return fn\n\n",
-        "@source\n",
-        "def request_body() -> Tainted[str, \"html\"]:\n",
-        "    ...\n\n",
-        "@sanitizer\n",
-        "def escape_html(value: Tainted[str, \"html\"]) -> str:\n",
-        "    ...\n\n",
-        "@sink\n",
-        "def render_html(value: str) -> None:\n",
-        "    ...\n\n",
-        "render_html(escape_html(request_body()))\n",
-    ));
+    let result = check_temp_typepython_source_with_taint(
+        concat!(
+            "from typing import Callable\n\n",
+            "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "def sink[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "def sanitizer[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@source\n",
+            "def request_body() -> Tainted[str, \"html\"]:\n",
+            "    ...\n\n",
+            "@sanitizer\n",
+            "def escape_html(value: Tainted[str, \"html\"]) -> str:\n",
+            "    ...\n\n",
+            "@sink\n",
+            "def render_html(value: str) -> None:\n",
+            "    ...\n\n",
+            "render_html(escape_html(request_body()))\n",
+        ),
+        false,
+    );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }
 
 #[test]
 fn check_rejects_decorated_source_flowing_through_local_to_sink() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_taint(
         concat!(
             "from typing import Callable\n\n",
             "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
@@ -547,12 +557,7 @@ fn check_rejects_decorated_source_flowing_through_local_to_sink() {
             "raw = request_body()\n",
             "render_html(raw)\n",
         ),
-        ParseOptions::default(),
-        false,
         true,
-        DiagnosticLevel::Warning,
-        true,
-        false,
     );
 
     let rendered = result.diagnostics.as_text();
@@ -562,7 +567,7 @@ fn check_rejects_decorated_source_flowing_through_local_to_sink() {
 
 #[test]
 fn check_does_not_leak_decorated_source_taint_between_functions() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_taint(
         concat!(
             "from typing import Callable\n\n",
             "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
@@ -582,12 +587,7 @@ fn check_does_not_leak_decorated_source_taint_between_functions() {
             "    raw = \"safe\"\n",
             "    render_html(raw)\n",
         ),
-        ParseOptions::default(),
-        false,
         true,
-        DiagnosticLevel::Warning,
-        true,
-        false,
     );
 
     let rendered = result.diagnostics.as_text();
@@ -596,7 +596,7 @@ fn check_does_not_leak_decorated_source_taint_between_functions() {
 
 #[test]
 fn check_uses_framework_adapter_taint_source_and_sink_capabilities() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_taint(
         concat!(
             "from typing import Callable\n\n",
             "def framework_transform(**kwargs):\n",
@@ -618,12 +618,7 @@ fn check_uses_framework_adapter_taint_source_and_sink_capabilities() {
             "raw = request_body()\n",
             "render_html(raw)\n",
         ),
-        ParseOptions::default(),
-        false,
         true,
-        DiagnosticLevel::Warning,
-        true,
-        false,
     );
 
     let rendered = result.diagnostics.as_text();
@@ -633,7 +628,7 @@ fn check_uses_framework_adapter_taint_source_and_sink_capabilities() {
 
 #[test]
 fn check_rejects_decorated_source_passed_directly_to_decorated_sink() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_taint(
         concat!(
             "from typing import Callable\n\n",
             "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
@@ -648,12 +643,7 @@ fn check_rejects_decorated_source_passed_directly_to_decorated_sink() {
             "    ...\n\n",
             "render_html(request_body())\n",
         ),
-        ParseOptions::default(),
-        false,
         true,
-        DiagnosticLevel::Warning,
-        true,
-        false,
     );
 
     let rendered = result.diagnostics.as_text();
