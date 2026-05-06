@@ -221,6 +221,45 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("No primary README differentiator", experimental)
         self.assertIn("Promotion Checklist", experimental)
 
+    def test_experimental_scope_is_guarded(self) -> None:
+        readme = read_text("README.md")
+        pypi_readme = read_text("README-PyPI.md")
+        beta = read_text("docs/beta-readiness.md")
+        diagnostics = read_text("docs/diagnostics.md")
+        experimental = read_text("docs/experimental-features.md")
+        author_time = read_text("docs/author-time-semantics.md")
+        config = read_text("crates/typepython_config/src/lib.rs")
+
+        for text in (readme, pypi_readme):
+            self.assertIn("Experimental Feature Registry", text)
+            self.assertIn("Experimental opt-in", text)
+            self.assertIn("Roadmap / prototype", text)
+
+        self.assertIn(
+            "| [`research-roadmap-demo/`](examples/research-roadmap-demo/) | Roadmap / prototype slices only; not a Core v1 stability claim |",
+            readme,
+        )
+
+        for code in ("TPY4026", "TPY4028"):
+            section = diagnostics.split(f"#### {code}", maxsplit=1)[1].split("#### ", maxsplit=1)[0]
+            self.assertIn("Roadmap / prototype diagnostic", section)
+            self.assertIn("not part of Stable Core v1", section)
+
+        self.assertIn("experimental scope contract", beta)
+        self.assertIn("test_experimental_scope_is_guarded", beta)
+        self.assertIn("validate_experimental_features", config)
+        self.assertIn("accepted_features", config)
+        self.assertIn("EXPERIMENTAL_RUNTIME_VALIDATORS", config)
+
+        self.assertIn("Experimental opt-in features share the same release contract", experimental)
+        self.assertIn("Roadmap / prototype rows are tracked here", experimental)
+        self.assertIn(
+            "promotion requires adding or tightening explicit gates",
+            " ".join(experimental.split()),
+        )
+        self.assertIn("P0 effect rows, P3 taint, and P4 validator", author_time)
+        self.assertIn("not Stable Core v1 promises", author_time)
+
     def test_author_time_semantics_are_not_marketed_as_external_guarantees(self) -> None:
         readme = read_text("README.md")
         pypi_readme = read_text("README-PyPI.md")

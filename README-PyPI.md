@@ -25,7 +25,8 @@ downstream checkers.
 > `clean`/`verify`, Core checker semantics, diagnostic code identity, and emitted
 > `.py`/`.pyi` compatibility are the stable Beta surfaces. Supported DX,
 > Experimental opt-in, and Roadmap / prototype features remain outside the Beta
-> compatibility promise.
+> compatibility promise and are tracked separately in the Experimental Feature
+> Registry.
 > Bug reports and contributions are very welcome.
 
 ## Install
@@ -162,6 +163,7 @@ downstream `.py` checkers enforce TypePython-only facts.
 - [Framework Adapters](https://github.com/type-python/type-python/blob/main/docs/framework-adapters.md)
 - [Beta Readiness](https://github.com/type-python/type-python/blob/main/docs/beta-readiness.md)
 - [Feature Status](https://github.com/type-python/type-python/blob/main/docs/feature-status.md)
+- [Experimental Feature Registry](https://github.com/type-python/type-python/blob/main/docs/experimental-features.md)
 - [Language Spec v1](https://github.com/type-python/type-python/blob/main/docs/spec/language-spec-v1.md)
 
 ## Links

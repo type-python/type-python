@@ -24,6 +24,9 @@ The default consumer model is conservative: downstream users of the emitted pack
 
 ## Implemented Slices
 
+These slices document current research behavior. P0 effect rows, P3 taint, and P4 validator
+witnesses remain Roadmap / prototype surfaces, not Stable Core v1 promises.
+
 | Slice | What users can try now | Output behavior |
 | --- | --- | --- |
 | P0 Effect / capability rows | Mark callables with `@effect("io.net")`, `@effect_pure`, lifecycle decorators, or framework effect capabilities; uncovered effect calls report `TPY4026` and LSP hover/code actions explain the row. | Effect facts are author-time diagnostics and `.typepython/cache/effects.json` metadata; emitted Python remains standard. |

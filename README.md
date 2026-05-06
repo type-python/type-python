@@ -210,7 +210,9 @@ TypePython is **Core v1 Beta** (v0.4.0). The Beta claim is deliberately scoped: 
 checker semantics, configuration, `init`/`check`/`build`/`clean`/`verify`, diagnostic code identity,
 and emitted `.py`/`.pyi` compatibility are the stable surfaces. Supported DX, Experimental opt-in,
 and Roadmap / prototype features ship for feedback but are not compatibility-stable. See
-[`docs/beta-readiness.md`](docs/beta-readiness.md) and [`docs/feature-status.md`](docs/feature-status.md).
+[`docs/beta-readiness.md`](docs/beta-readiness.md),
+[`docs/feature-status.md`](docs/feature-status.md), and
+[`docs/experimental-features.md`](docs/experimental-features.md).
 
 The breakdown:
 
@@ -261,7 +263,7 @@ Full reference: [`docs/configuration.md`](docs/configuration.md).
 | [`config-loader/`](examples/config-loader/) | `unknown`, unsafe boundaries, trust-boundary parsing patterns |
 | [`event-system/`](examples/event-system/)   | sealed events, interfaces, data classes, generics             |
 | [`showcase/`](examples/showcase/)           | multi-file feature showcase                                   |
-| [`research-roadmap-demo/`](examples/research-roadmap-demo/) | effect rows, Shape projection, restricted evaluator, taint, validator witnesses |
+| [`research-roadmap-demo/`](examples/research-roadmap-demo/) | Roadmap / prototype slices only; not a Core v1 stability claim |
 
 Framework and downstream-checker fixtures: [`test-fixtures/downstream-checkers/`](test-fixtures/downstream-checkers/).
 
@@ -303,6 +305,7 @@ Full guide: [`docs/migration-guide.md`](docs/migration-guide.md).
 | You're a framework author                    | [Framework Adapters](docs/framework-adapters.md) |
 | You're evaluating Beta stability             | [Beta Readiness](docs/beta-readiness.md)         |
 | You're checking feature stability            | [Feature Status](docs/feature-status.md)         |
+| You're checking experimental gates           | [Experimental Feature Registry](docs/experimental-features.md) |
 | You want the crate map / pipeline diagram    | [Architecture](docs/architecture.md)             |
 | You're evaluating the P0-P4 research slices  | [Author-Time Semantics](docs/author-time-semantics.md) |
 | You're sending a PR                          | [Contributing](docs/contributing.md)             |

@@ -289,6 +289,9 @@ c["name"] = "new"          # TPY4016: Cannot assign to read-only TypedDict key '
 
 #### TPY4026 -- Effect capability mismatch
 
+Status: Roadmap / prototype diagnostic. The diagnostic code is documented for research builds, but
+effect-row semantics beyond the stable `unsafe:` fence are not part of Stable Core v1.
+
 In strict `.tpy` checking, decorator-declared and adapter-declared effect rows are tracked as author-time facts. A function warns when it directly calls, returns, or assigns the result of a callable whose effect row is not covered by the caller's own effect declaration. `@effect_pure` callers are the strictest case because they cover no effects, but the same diagnostic also applies to non-pure callers whose declared row is incomplete.
 
 ```python
@@ -315,6 +318,9 @@ typealias Names = MapValues[User, Callable]  # TPY4027: unsupported wrapper in t
 **Fix:** use a supported reducible form such as decidable `TypeIf[IsSubtype[...], A, B]`, `KeyOf`, `RequiredKeys`, `OptionalKeys`, `Pick`, `Omit`, or `MapValues` with the built-in `Optional` / `Readonly` wrappers; otherwise materialize the alias as a standard Python type.
 
 #### TPY4028 -- Tainted source reaches sink
+
+Status: Roadmap / prototype diagnostic. The diagnostic code is documented for research builds, but
+taint analysis is not part of Stable Core v1.
 
 Raised when the checker can see a direct source-to-sink taint flow that does not pass through an explicit sanitizer. Contextual decorators such as `@source("html")`, `@sink("html")`, and `@sanitizer("html")` are checked against matching taint contexts; bare decorators remain wildcard facts.
 

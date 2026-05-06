@@ -5,7 +5,7 @@ part of the Core v1 compatibility promise unless a later promotion change update
 `docs/feature-status.md`, `docs/beta-readiness.md`, the conformance matrix when applicable, and any
 README or PyPI claims in the same commit series.
 
-Experimental features share the same release contract:
+Experimental opt-in features share the same release contract:
 
 - disabled by default for ordinary Core v1 projects
 - explicit opt-in before they can affect parsing, checking, lowering, emit, or diagnostics
@@ -13,6 +13,10 @@ Experimental features share the same release contract:
 - No primary README differentiator unless and until the feature is promoted
 - no compatibility-stable JSON, LSP, runtime, or emitted-surface contract beyond the documented
   narrow slice
+
+Roadmap / prototype rows are tracked here so they stay out of Core v1 product claims. They may appear
+in research fixtures, RFCs, or explicitly labeled diagnostics, but promotion requires adding or
+tightening explicit gates before they can become a compatibility-stable feature.
 
 ## Registry
 

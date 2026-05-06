@@ -85,6 +85,8 @@ A Beta release candidate must pass the tracked release gate before the classifie
   candidate, recording cold check, warm check, single-file implementation edit, public surface edit,
   and peak RSS; plus the 512-module `typepython_lsp` incremental Criterion suite with p95/p99
   hover-session latency evidence
+- experimental scope contract: `python3 -m unittest scripts.test_repo_contracts.RepoContractsTests.test_experimental_scope_is_guarded`
+  so Experimental opt-in and Roadmap / prototype features cannot drift into Core v1 claims silently
 
 The GitHub `rust` workflow has the authoritative `beta-release-gate` job and depends on these
 families, including interpreter- and platform-specific smoke jobs that require GitHub-hosted Python
