@@ -38,8 +38,13 @@ pub(super) fn direct_member_access_diagnostics(
                     .filter(|branch| context.strict_nulls || !semantic_branch_is_none(branch))
                     .filter_map(|branch| {
                         let branch_name = semantic_nominal_owner_name(branch)?;
-                        type_has_readable_member(node, nodes, &branch_name, &access.member)
-                            .then_some(branch_name)
+                        type_has_readable_member_with_context(
+                            context,
+                            node,
+                            &branch_name,
+                            &access.member,
+                        )
+                        .then_some(branch_name)
                     })
                     .collect::<Vec<_>>();
                 if available.len() == member_required_branches.len() {
@@ -82,9 +87,9 @@ pub(super) fn direct_member_access_diagnostics(
                 &access.member,
             )
             .is_some()
-                || framework_generated_member_semantic_type(
+                || framework_generated_member_semantic_type_with_context(
+                    context,
                     node,
-                    nodes,
                     &owner_type_name,
                     &access.member,
                 )
@@ -102,7 +107,7 @@ pub(super) fn direct_member_access_diagnostics(
                 );
                 let mut visiting = BTreeSet::new();
                 if let Some(shape) = resolve_framework_transform_class_shape_from_decl_with_context(
-                    &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+                    context,
                     nodes,
                     class_node,
                     class_decl,
@@ -132,17 +137,29 @@ fn semantic_branch_is_none(branch: &SemanticType) -> bool {
     matches!(branch.strip_annotated(), SemanticType::Name(name) if name == "None")
 }
 
+#[allow(dead_code)]
 pub(super) fn type_has_readable_member(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     type_name: &str,
     member: &str,
 ) -> bool {
-    let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, type_name) else {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    type_has_readable_member_with_context(&context, node, type_name, member)
+}
+
+pub(super) fn type_has_readable_member_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    type_name: &str,
+    member: &str,
+) -> bool {
+    let Some((class_node, class_decl)) = resolve_direct_base(context.nodes, node, type_name) else {
         return false;
     };
-    find_owned_readable_member_declaration(nodes, class_node, class_decl, member).is_some()
-        || framework_generated_member_semantic_type(node, nodes, type_name, member).is_some()
+    find_owned_readable_member_declaration(context.nodes, class_node, class_decl, member).is_some()
+        || framework_generated_member_semantic_type_with_context(context, node, type_name, member)
+            .is_some()
 }
 
 pub(super) fn union_member_guard_suggestion(

@@ -2,6 +2,7 @@
     clippy::too_many_arguments,
     reason = "member reference resolution needs source metadata and scope context"
 )]
+#[allow(dead_code)]
 pub(super) fn resolve_direct_member_reference_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -13,6 +14,38 @@ pub(super) fn resolve_direct_member_reference_semantic_type(
     owner_name: &str,
     member_name: &str,
     through_instance: bool,
+) -> Option<SemanticType> {
+    resolve_direct_member_reference_semantic_type_with_options(
+        node,
+        nodes,
+        signature,
+        exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        owner_name,
+        member_name,
+        through_instance,
+        AssignabilityOptions::default(),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "member reference resolution needs source metadata and scope context"
+)]
+pub(super) fn resolve_direct_member_reference_semantic_type_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    owner_name: &str,
+    member_name: &str,
+    through_instance: bool,
+    options: AssignabilityOptions,
 ) -> Option<SemanticType> {
     if !through_instance
         && let Some(reference_type) = resolve_imported_module_member_reference_semantic_type(
@@ -50,9 +83,21 @@ pub(super) fn resolve_direct_member_reference_semantic_type(
         class_decl,
         member_name,
     ) else {
-        return framework_generated_member_semantic_type(
-            node,
+        if !options.framework_adapters {
+            return None;
+        }
+        let context = CheckerContext::new_with_bound_surface_facts_and_options(
             nodes,
+            None,
+            None,
+            CheckerOptions {
+                experimental_framework_adapters: true,
+                ..CheckerOptions::default()
+            },
+        );
+        return framework_generated_member_semantic_type_with_context(
+            &context,
+            node,
             &owner_type_name,
             member_name,
         );

@@ -193,6 +193,9 @@ pub(super) fn resolve_framework_transform_class_shape_with_context(
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<DataclassTransformClassShape> {
+    if !context.framework_adapters_enabled() {
+        return None;
+    }
     let (class_node, class_decl) = resolve_direct_base(nodes, node, callee)?;
     resolve_framework_transform_class_shape_from_decl_with_context(
         context,
@@ -213,24 +216,33 @@ pub(super) fn resolve_known_framework_transform_shape_from_type_with_context(
     resolve_framework_transform_class_shape_with_context(context, node, nodes, &type_name)
 }
 
+#[allow(dead_code)]
 pub(super) fn framework_transform_class_supports_generated_members(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     type_name: &str,
 ) -> bool {
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    framework_transform_class_supports_generated_members_with_context(&context, node, type_name)
+}
+
+pub(super) fn framework_transform_class_supports_generated_members_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    type_name: &str,
+) -> bool {
     let type_name = annotated_inner(type_name).unwrap_or_else(|| normalize_type_text(type_name));
-    let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &type_name) else {
+    let Some((class_node, class_decl)) = resolve_direct_base(context.nodes, node, &type_name) else {
         return false;
     };
-    let Some(info) = load_dataclass_transform_module_info_with_context(&context, class_node) else {
+    let Some(info) = load_dataclass_transform_module_info_with_context(context, class_node) else {
         return false;
     };
     let Some(class_site) = info.classes.iter().find(|class_site| class_site.name == class_decl.name)
     else {
         return false;
     };
-    resolve_framework_class_shape_provider_with_context(&context, nodes, class_node, class_site)
+    resolve_framework_class_shape_provider_with_context(context, context.nodes, class_node, class_site)
         .is_some_and(|provider| {
             provider
                 .capabilities
@@ -303,6 +315,9 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
     class_decl: &Declaration,
     visiting: &mut BTreeSet<(String, String)>,
 ) -> Option<DataclassTransformClassShape> {
+    if !context.framework_adapters_enabled() {
+        return None;
+    }
     let key = (class_node.module_key.clone(), class_decl.name.clone());
     if !visiting.insert(key) {
         return None;
@@ -759,6 +774,9 @@ fn resolve_framework_transform_provider_with_context(
     node: &typepython_graph::ModuleNode,
     name: &str,
 ) -> Option<typepython_syntax::FrameworkTransformProviderSite> {
+    if !context.framework_adapters_enabled() {
+        return None;
+    }
     if let Some(local) = context
         .load_framework_transform_module_info(node)?
         .providers

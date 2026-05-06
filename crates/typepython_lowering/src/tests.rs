@@ -16,6 +16,7 @@ fn compat_options(version: &str) -> LoweringOptions {
         target_python: PythonTarget::parse(version).expect("test target should parse"),
         emit_style: EmitStyle::Compat,
         experimental_shape_transforms: false,
+        experimental_sync_async_dual_emit: false,
     }
 }
 
@@ -24,11 +25,16 @@ fn native_options(version: &str) -> LoweringOptions {
         target_python: PythonTarget::parse(version).expect("test target should parse"),
         emit_style: EmitStyle::Native,
         experimental_shape_transforms: false,
+        experimental_sync_async_dual_emit: false,
     }
 }
 
 fn experimental_shape_options() -> LoweringOptions {
     LoweringOptions { experimental_shape_transforms: true, ..LoweringOptions::default() }
+}
+
+fn experimental_dual_emit_options() -> LoweringOptions {
+    LoweringOptions { experimental_sync_async_dual_emit: true, ..LoweringOptions::default() }
 }
 
 #[test]
@@ -39,6 +45,29 @@ fn lower_dual_emit_decorator_generates_sync_and_async_pair() {
         "    response = await client.get(user_id)\n",
         "    return decode_user(response)\n",
     );
+    let tree = parse(SourceFile {
+        path: PathBuf::from("dual.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("dual"),
+        text: source.to_owned(),
+    });
+    let lowered = lower_with_options(&tree, &experimental_dual_emit_options());
+
+    let rendered = lowered.module.python_source;
+    assert!(rendered.contains("def fetch_user(client: Client, user_id: str) -> User:"));
+    assert!(rendered.contains("response = client.get(user_id)"));
+    assert!(rendered.contains("async def afetch_user(client: AsyncClient, user_id: str) -> User:"));
+    assert!(rendered.contains("response = await client.get(user_id)"));
+    assert!(!rendered.contains("@dual_emit"));
+}
+
+#[test]
+fn lower_keeps_dual_emit_decorator_without_experimental_gate() {
+    let source = concat!(
+        "@dual_emit\n",
+        "async def fetch_user(client: AsyncClient) -> User:\n",
+        "    return User()\n",
+    );
     let lowered = lower(&parse(SourceFile {
         path: PathBuf::from("dual.tpy"),
         kind: SourceKind::TypePython,
@@ -47,11 +76,9 @@ fn lower_dual_emit_decorator_generates_sync_and_async_pair() {
     }));
 
     let rendered = lowered.module.python_source;
-    assert!(rendered.contains("def fetch_user(client: Client, user_id: str) -> User:"));
-    assert!(rendered.contains("response = client.get(user_id)"));
-    assert!(rendered.contains("async def afetch_user(client: AsyncClient, user_id: str) -> User:"));
-    assert!(rendered.contains("response = await client.get(user_id)"));
-    assert!(!rendered.contains("@dual_emit"));
+    assert!(rendered.contains("@dual_emit"));
+    assert!(rendered.contains("async def fetch_user(client: AsyncClient) -> User:"));
+    assert!(!rendered.contains("def fetch_user(client: Client) -> User:"));
 }
 
 #[test]

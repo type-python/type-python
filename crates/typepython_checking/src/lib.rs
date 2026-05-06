@@ -22,8 +22,9 @@ use std::{
 
 use typepython_binding::{BindingTable, Declaration, DeclarationKind, DeclarationOwnerKind};
 use typepython_config::{
-    Config, DiagnosticLevel, EXPERIMENTAL_EFFECT_ROWS, EXPERIMENTAL_TAINT,
-    EXPERIMENTAL_VALIDATOR_WITNESSES, ImportFallback, TypingConfig,
+    Config, DiagnosticLevel, EXPERIMENTAL_EFFECT_ROWS, EXPERIMENTAL_FRAMEWORK_ADAPTERS,
+    EXPERIMENTAL_SYNC_ASYNC_DUAL_EMIT, EXPERIMENTAL_TAINT, EXPERIMENTAL_VALIDATOR_WITNESSES,
+    ImportFallback, TypingConfig,
 };
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionApplicability};
 use typepython_graph::ModuleGraph;
@@ -57,8 +58,11 @@ pub(crate) use self::generic_solver::*;
 pub(crate) use self::semantic::*;
 pub(crate) use self::source_facts::*;
 pub use self::stubs::{
-    collect_effective_callable_stub_overrides, collect_effective_value_stub_overrides,
-    collect_synthetic_method_stubs, collect_synthetic_value_stubs,
+    collect_effective_callable_stub_overrides,
+    collect_effective_callable_stub_overrides_with_options, collect_effective_value_stub_overrides,
+    collect_effective_value_stub_overrides_with_options, collect_synthetic_method_stubs,
+    collect_synthetic_method_stubs_with_options, collect_synthetic_value_stubs,
+    collect_synthetic_value_stubs_with_options,
 };
 pub(crate) use self::type_core::*;
 pub(crate) use self::type_system::*;
@@ -140,6 +144,8 @@ pub struct CheckerOptions {
     pub experimental_effect_rows: bool,
     pub experimental_taint: bool,
     pub experimental_validator_witnesses: bool,
+    pub experimental_sync_async_dual_emit: bool,
+    pub experimental_framework_adapters: bool,
 }
 
 impl Default for CheckerOptions {
@@ -156,6 +162,8 @@ impl Default for CheckerOptions {
             experimental_effect_rows: false,
             experimental_taint: false,
             experimental_validator_witnesses: false,
+            experimental_sync_async_dual_emit: false,
+            experimental_framework_adapters: false,
         }
     }
 }
@@ -175,6 +183,8 @@ impl CheckerOptions {
             experimental_effect_rows: false,
             experimental_taint: false,
             experimental_validator_witnesses: false,
+            experimental_sync_async_dual_emit: false,
+            experimental_framework_adapters: false,
         }
     }
 
@@ -186,6 +196,10 @@ impl CheckerOptions {
         options.experimental_taint = config.experimental.accepts_feature(EXPERIMENTAL_TAINT);
         options.experimental_validator_witnesses =
             config.experimental.accepts_feature(EXPERIMENTAL_VALIDATOR_WITNESSES);
+        options.experimental_sync_async_dual_emit =
+            config.experimental.accepts_feature(EXPERIMENTAL_SYNC_ASYNC_DUAL_EMIT);
+        options.experimental_framework_adapters =
+            config.experimental.accepts_feature(EXPERIMENTAL_FRAMEWORK_ADAPTERS);
         options
     }
 
@@ -205,6 +219,18 @@ impl CheckerOptions {
         self.experimental_effect_rows = effect_rows;
         self.experimental_taint = taint;
         self.experimental_validator_witnesses = validator_witnesses;
+        self
+    }
+
+    #[must_use]
+    pub fn with_sync_async_dual_emit(mut self, enabled: bool) -> Self {
+        self.experimental_sync_async_dual_emit = enabled;
+        self
+    }
+
+    #[must_use]
+    pub fn with_framework_adapters(mut self, enabled: bool) -> Self {
+        self.experimental_framework_adapters = enabled;
         self
     }
 }
@@ -260,6 +286,8 @@ struct CheckerContext<'a> {
     experimental_effect_rows: bool,
     experimental_taint: bool,
     experimental_validator_witnesses: bool,
+    experimental_sync_async_dual_emit: bool,
+    experimental_framework_adapters: bool,
     source_facts: CheckerSourceFactsProvider<'a>,
 }
 
@@ -317,6 +345,8 @@ impl<'a> CheckerContext<'a> {
             experimental_effect_rows: options.experimental_effect_rows,
             experimental_taint: options.experimental_taint,
             experimental_validator_witnesses: options.experimental_validator_witnesses,
+            experimental_sync_async_dual_emit: options.experimental_sync_async_dual_emit,
+            experimental_framework_adapters: options.experimental_framework_adapters,
             source_facts: CheckerSourceFactsProvider::new(source_overrides, bound_surface_facts),
         }
     }
@@ -333,6 +363,14 @@ impl<'a> CheckerContext<'a> {
         self.experimental_validator_witnesses
     }
 
+    fn sync_async_dual_emit_enabled(&self) -> bool {
+        self.experimental_sync_async_dual_emit
+    }
+
+    fn framework_adapters_enabled(&self) -> bool {
+        self.experimental_framework_adapters
+    }
+
     fn import_fallback_type(&self) -> &'static str {
         match self.import_fallback {
             ImportFallback::Unknown => "unknown",
@@ -341,7 +379,10 @@ impl<'a> CheckerContext<'a> {
     }
 
     fn assignability_options(&self) -> AssignabilityOptions {
-        AssignabilityOptions { strict_nulls: self.strict_nulls }
+        AssignabilityOptions {
+            strict_nulls: self.strict_nulls,
+            framework_adapters: self.framework_adapters_enabled(),
+        }
     }
 
     fn semantic_type_is_assignable(
@@ -398,6 +439,9 @@ impl<'a> CheckerContext<'a> {
         &self,
         node: &typepython_graph::ModuleNode,
     ) -> Option<typepython_syntax::FrameworkTransformModuleInfo> {
+        if !self.framework_adapters_enabled() {
+            return None;
+        }
         self.source_facts.framework_transform_module_info(node)
     }
 
@@ -1535,7 +1579,7 @@ fn collect_node_assignment_diagnostics(
     );
     push_diagnostics(
         diagnostics,
-        simple_name_augmented_assignment_diagnostics(node, context.nodes),
+        simple_name_augmented_assignment_diagnostics(context, node, context.nodes),
     );
     push_unique_diagnostics(
         diagnostics,

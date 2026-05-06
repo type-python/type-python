@@ -332,6 +332,10 @@ impl AnalysisHost {
                 target_python: config.config.project.target_python,
                 emit_style: config.config.emit.emit_style,
                 experimental_shape_transforms: config.config.experimental.shape_transforms,
+                experimental_sync_async_dual_emit: config
+                    .config
+                    .experimental
+                    .accepts_feature(typepython_config::EXPERIMENTAL_SYNC_ASYNC_DUAL_EMIT),
             },
         );
         if lowering.diagnostics.has_errors() {

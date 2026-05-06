@@ -10,3 +10,6 @@ strict_nulls = true
 [emit]
 emit_pyi = true
 no_emit_on_error = true
+
+[experimental]
+accepted_features = ["framework_adapters"]

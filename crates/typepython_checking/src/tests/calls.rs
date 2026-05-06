@@ -1,5 +1,13 @@
 use super::*;
 
+fn check_temp_typepython_framework_source(source_text: &str) -> crate::CheckResult {
+    check_temp_typepython_source_with_checker_options(
+        source_text,
+        ParseOptions::default(),
+        crate::CheckerOptions::default().with_framework_adapters(true),
+    )
+}
+
 #[test]
 fn check_substitutes_source_authored_paramspec_in_return_type() {
     let result = check_temp_typepython_source(concat!(
@@ -111,7 +119,7 @@ fn check_accepts_dataclass_transform_metaclass_constructor_call() {
 
 #[test]
 fn check_accepts_framework_class_decorator_constructor_call() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n    age: int = 1\n\nuser: User = User(\"Ada\")\n",
     );
 
@@ -120,8 +128,18 @@ fn check_accepts_framework_class_decorator_constructor_call() {
 }
 
 #[test]
-fn check_accepts_framework_base_class_constructor_call() {
+fn check_requires_framework_adapters_gate_for_framework_constructor_shape() {
     let result = check_temp_typepython_source(
+        "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nuser: User = User(\"Ada\")\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_framework_base_class_constructor_call() {
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\"))\nclass ModelBase:\n    pass\n\nclass User(ModelBase):\n    name: str\n\nuser: User = User(\"Ada\")\n",
     );
 
@@ -131,7 +149,7 @@ fn check_accepts_framework_base_class_constructor_call() {
 
 #[test]
 fn check_accepts_pydantic_like_base_model_field_constructor_call() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\ndef Field(*, default=None, default_factory=None, alias=None):\n    return default\n\n@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\", \"alias_handling\", \"required_optional_fields\"))\nclass BaseModel:\n    pass\n\nclass User(BaseModel):\n    id: int = Field(alias=\"user_id\")\n    name: str = Field(default=\"Ada\")\n    tags: object = Field(default_factory=list)\n\nuser: User = User(user_id=1)\nuser_with_defaults: User = User(user_id=1, name=\"Grace\", tags=object())\n",
     );
 
@@ -141,7 +159,7 @@ fn check_accepts_pydantic_like_base_model_field_constructor_call() {
 
 #[test]
 fn check_reports_pydantic_like_base_model_missing_required_alias_field() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\ndef Field(*, default=None, default_factory=None, alias=None):\n    return default\n\n@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\", \"alias_handling\", \"required_optional_fields\"))\nclass BaseModel:\n    pass\n\nclass User(BaseModel):\n    id: int = Field(alias=\"user_id\")\n    name: str = Field(default=\"Ada\")\n\nuser: User = User()\n",
     );
 
@@ -155,7 +173,7 @@ fn check_reports_pydantic_like_base_model_missing_required_alias_field() {
 
 #[test]
 fn check_accepts_framework_metaclass_constructor_call() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"metaclass\", capabilities=(\"field_collection\", \"constructor_generation\"))\nclass ModelMeta:\n    pass\n\nclass User(metaclass=ModelMeta):\n    name: str\n\nuser: User = User(\"Ada\")\n",
     );
 
@@ -165,7 +183,7 @@ fn check_accepts_framework_metaclass_constructor_call() {
 
 #[test]
 fn check_reports_framework_class_decorator_constructor_type_mismatch() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    age: int\n\nuser: User = User(\"oops\")\n",
     );
 
@@ -185,7 +203,7 @@ fn check_reports_framework_class_decorator_constructor_type_mismatch() {
 
 #[test]
 fn check_accepts_framework_field_alias_kw_only_and_init_exclusion() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\ndef field(*, default=None, default_factory=None, init=True, kw_only=False, alias=None):\n    return default\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"alias_handling\", \"required_optional_fields\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    id: int = field(alias=\"user_id\")\n    name: str = field(kw_only=True)\n    cache: str = field(init=False)\n\nuser: User = User(1, name=\"Ada\")\nuser_alias: User = User(user_id=1, name=\"Ada\")\n",
     );
 
@@ -195,7 +213,7 @@ fn check_accepts_framework_field_alias_kw_only_and_init_exclusion() {
 
 #[test]
 fn check_reports_framework_keyword_only_field_passed_positionally() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\ndef field(*, kw_only=False):\n    return None\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"required_optional_fields\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    id: int\n    name: str = field(kw_only=True)\n\nuser: User = User(1, \"Ada\")\n",
     );
 
@@ -206,7 +224,7 @@ fn check_reports_framework_keyword_only_field_passed_positionally() {
 
 #[test]
 fn check_reports_framework_readonly_field_assignment_after_init() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"readonly_fields\"), frozen_default=True)\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nuser: User = User(\"Ada\")\nuser.name = \"Grace\"\n",
     );
 
@@ -217,7 +235,7 @@ fn check_reports_framework_readonly_field_assignment_after_init() {
 
 #[test]
 fn check_reports_pydantic_like_field_level_frozen_assignment_after_init() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\ndef Field(*, default=None, default_factory=None, alias=None, frozen=False):\n    return default\n\n@framework_transform(kind=\"base_class\", capabilities=(\"field_collection\", \"constructor_generation\", \"alias_handling\", \"required_optional_fields\", \"readonly_fields\"))\nclass BaseModel:\n    pass\n\nclass User(BaseModel):\n    id: int = Field(alias=\"user_id\", frozen=True)\n    name: str\n\nuser: User = User(user_id=1, name=\"Ada\")\nuser.id = 2\nuser.name = \"Grace\"\n",
     );
 
@@ -229,7 +247,7 @@ fn check_reports_pydantic_like_field_level_frozen_assignment_after_init() {
 
 #[test]
 fn check_excludes_descriptor_defaults_from_framework_fields_when_advertised() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\nclass Descriptor:\n    def __get__(self, instance, owner):\n        return 0\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"descriptor_backed_attributes\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: int = Descriptor()\n\nuser: User = User()\n",
     );
 
@@ -239,7 +257,7 @@ fn check_excludes_descriptor_defaults_from_framework_fields_when_advertised() {
 
 #[test]
 fn check_accepts_framework_generated_class_attributes_when_advertised() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"method_synthesis\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nmanager: object = User.objects\nmetadata: dict[str, object] = User.metadata\nvalidators: dict[str, object] = User.validators\n",
     );
 
@@ -249,7 +267,7 @@ fn check_accepts_framework_generated_class_attributes_when_advertised() {
 
 #[test]
 fn check_reports_framework_generated_class_attribute_type_mismatch() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\", \"method_synthesis\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nmetadata: int = User.metadata\n",
     );
 
@@ -260,7 +278,7 @@ fn check_reports_framework_generated_class_attribute_type_mismatch() {
 
 #[test]
 fn check_reports_framework_generated_class_attribute_without_capability() {
-    let result = check_temp_typepython_source(
+    let result = check_temp_typepython_framework_source(
         "def framework_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@framework_transform(kind=\"class_decorator\", capabilities=(\"field_collection\", \"constructor_generation\"))\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nmanager = User.objects\n",
     );
 

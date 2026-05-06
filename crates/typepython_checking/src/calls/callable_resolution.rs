@@ -507,14 +507,16 @@ pub(super) fn undecidable_decorator_diagnostics(
             {
                 return None;
             }
-            if decorated.decorators.iter().any(|decorator| {
+            if context.sync_async_dual_emit_enabled()
+                && decorated.decorators.iter().any(|decorator| {
                 decorator.rsplit('.').next().unwrap_or(decorator) == "dual_emit"
-            }) {
+            })
+            {
                 return None;
             }
             if let Some(result) = framework_owned_decorator_diagnostic(
+                context,
                 node,
-                nodes,
                 declaration,
                 &decorated,
             ) {
@@ -581,8 +583,8 @@ fn decorator_is_semantic_metadata_only(decorator: &str) -> bool {
 }
 
 fn framework_owned_decorator_diagnostic(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
     declaration: &Declaration,
     decorated: &typepython_syntax::DecoratedCallableSite,
 ) -> Option<Option<Diagnostic>> {
@@ -591,7 +593,8 @@ fn framework_owned_decorator_diagnostic(
         .decorators
         .iter()
         .find_map(|decorator| framework_owned_decorator_kind(decorator))?;
-    if !framework_transform_class_supports_generated_members(node, nodes, &owner.name) {
+    if !framework_transform_class_supports_generated_members_with_context(context, node, &owner.name)
+    {
         return None;
     }
     match kind.signature_diagnostic(node, declaration, decorated) {

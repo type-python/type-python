@@ -10,6 +10,7 @@ fn check_temp_typepython_source_with_effect_rows(
         crate::CheckerOptions {
             strict,
             experimental_effect_rows: true,
+            experimental_framework_adapters: true,
             ..crate::CheckerOptions::default()
         },
     )
@@ -22,9 +23,14 @@ fn check_temp_typepython_source_with_taint(source_text: &str, strict: bool) -> c
         crate::CheckerOptions {
             strict,
             experimental_taint: true,
+            experimental_framework_adapters: true,
             ..crate::CheckerOptions::default()
         },
     )
+}
+
+fn framework_adapters_check_options() -> crate::CheckerOptions {
+    crate::CheckerOptions::default().with_framework_adapters(true)
 }
 
 #[test]
@@ -776,7 +782,7 @@ fn check_warns_for_ignored_must_use_result() {
 
 #[test]
 fn check_accepts_dual_emit_decorator_as_typepython_lowering_marker() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "class User:\n",
             "    name: str\n\n",
@@ -805,7 +811,7 @@ fn check_accepts_dual_emit_decorator_as_typepython_lowering_marker() {
 
 #[test]
 fn check_reports_unsupported_dual_emit_async_constructs() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import AsyncIterator, Callable\n\n",
             "def dual_emit[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
@@ -840,6 +846,30 @@ fn check_reports_unsupported_dual_emit_async_constructs() {
     assert!(rendered.contains("collect"), "{rendered}");
     assert!(rendered.contains("async with"), "{rendered}");
     assert!(rendered.contains("async for"), "{rendered}");
+}
+
+#[test]
+fn check_ignores_dual_emit_lowering_diagnostics_without_experimental_gate() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def dual_emit[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@dual_emit\n",
+            "async def collect(stream) -> int:\n",
+            "    async with stream:\n",
+            "        return 1\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4025"), "{rendered}");
 }
 
 #[test]
@@ -878,7 +908,7 @@ fn check_warns_for_unclosed_lifecycle_resource() {
 
 #[test]
 fn check_reports_unsupported_framework_transform_provider_in_strict_mode() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "@framework_transform(kind=\"function_to_object_decorator\")\n",
             "def celery_task(fn):\n",
@@ -903,7 +933,7 @@ fn check_reports_unsupported_framework_transform_provider_in_strict_mode() {
 
 #[test]
 fn check_accepts_supported_framework_class_shape_provider_in_strict_mode() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "def framework_transform(*args, **kwargs):\n",
             "    def wrap(obj):\n",
@@ -959,7 +989,11 @@ fn framework_class_shape_provider_emits_synthetic_init_stub() {
     );
     let binding = bind(&tree);
     let graph = build(&[binding]);
-    let methods = crate::collect_synthetic_method_stubs(&graph);
+    assert!(crate::collect_synthetic_method_stubs(&graph).is_empty());
+    let methods = crate::collect_synthetic_method_stubs_with_options(
+        &graph,
+        framework_adapters_check_options(),
+    );
 
     assert_eq!(methods.len(), 1);
     assert_eq!(methods[0].owner_type_name, "User");
@@ -1003,7 +1037,10 @@ fn pydantic_like_base_model_provider_emits_field_alias_and_default_init_stub() {
     );
     let binding = bind(&tree);
     let graph = build(&[binding]);
-    let methods = crate::collect_synthetic_method_stubs(&graph);
+    let methods = crate::collect_synthetic_method_stubs_with_options(
+        &graph,
+        framework_adapters_check_options(),
+    );
     let user_init = methods
         .iter()
         .find(|method| method.owner_type_name == "User" && method.name == "__init__")
@@ -1047,7 +1084,10 @@ fn pydantic_like_base_model_provider_emits_model_construct_stub() {
     );
     let binding = bind(&tree);
     let graph = build(&[binding]);
-    let methods = crate::collect_synthetic_method_stubs(&graph);
+    let methods = crate::collect_synthetic_method_stubs_with_options(
+        &graph,
+        framework_adapters_check_options(),
+    );
     let construct = methods
         .iter()
         .find(|method| method.owner_type_name == "User" && method.name == "model_construct")
@@ -1096,7 +1136,10 @@ fn pydantic_like_computed_field_emits_value_stub_override() {
     );
     let binding = bind(&tree);
     let graph = build(&[binding]);
-    let overrides = crate::collect_effective_value_stub_overrides(&graph);
+    let overrides = crate::collect_effective_value_stub_overrides_with_options(
+        &graph,
+        framework_adapters_check_options(),
+    );
     let display_name = overrides
         .iter()
         .find(|override_value| override_value.annotation == "str")
@@ -1104,7 +1147,7 @@ fn pydantic_like_computed_field_emits_value_stub_override() {
 
     assert_eq!(display_name.module_key, "app");
 
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         source_text,
         ParseOptions::default(),
         false,
@@ -1120,7 +1163,7 @@ fn pydantic_like_computed_field_emits_value_stub_override() {
 
 #[test]
 fn check_accepts_pydantic_like_validator_and_serializer_decorators() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "def framework_transform(*args, **kwargs):\n",
             "    def wrap(obj):\n",
@@ -1175,7 +1218,7 @@ fn check_accepts_pydantic_like_validator_and_serializer_decorators() {
 
 #[test]
 fn check_reports_malformed_pydantic_like_validator_decorator_signature() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "def framework_transform(*args, **kwargs):\n",
             "    def wrap(obj):\n",
@@ -1211,7 +1254,7 @@ fn check_reports_malformed_pydantic_like_validator_decorator_signature() {
 
 #[test]
 fn check_reports_pydantic_like_dynamic_field_alias() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "def framework_transform(*args, **kwargs):\n",
             "    def wrap(obj):\n",
@@ -1242,7 +1285,7 @@ fn check_reports_pydantic_like_dynamic_field_alias() {
 
 #[test]
 fn check_warns_for_untyped_framework_model_field() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "def framework_transform(*args, **kwargs):\n",
             "    def wrap(obj):\n",
@@ -1297,7 +1340,10 @@ fn framework_method_synthesis_provider_emits_synthetic_value_stubs() {
     );
     let binding = bind(&tree);
     let graph = build(&[binding]);
-    let values = crate::collect_synthetic_value_stubs(&graph);
+    let values = crate::collect_synthetic_value_stubs_with_options(
+        &graph,
+        framework_adapters_check_options(),
+    );
 
     assert_eq!(values.len(), 3);
     assert_eq!(values[0].owner_type_name, "User");
@@ -1758,18 +1804,16 @@ fn framework_marked_function_to_object_decorator_uses_existing_stub_transform() 
     );
     let binding = bind(&tree);
     let graph = build(&[binding]);
-    let result = check_with_options(
-        &graph,
-        false,
-        true,
-        DiagnosticLevel::Warning,
-        true,
-        false,
-        ImportFallback::Unknown,
+    let result = crate::check_with_checker_options(
+        &normalize_test_graph(&graph),
+        crate::CheckerOptions { strict: true, ..framework_adapters_check_options() },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
-    let overrides = crate::collect_effective_value_stub_overrides(&graph);
+    let overrides = crate::collect_effective_value_stub_overrides_with_options(
+        &graph,
+        framework_adapters_check_options(),
+    );
     assert_eq!(overrides.len(), 1);
     assert_eq!(overrides[0].annotation, "Task[[int], int]");
 }

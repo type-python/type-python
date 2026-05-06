@@ -267,7 +267,10 @@ pub(super) fn unsupported_framework_transform_diagnostics(
     node: &typepython_graph::ModuleNode,
     strict: bool,
 ) -> Vec<Diagnostic> {
-    if !strict || node.module_kind != SourceKind::TypePython {
+    if !strict
+        || !context.framework_adapters_enabled()
+        || node.module_kind != SourceKind::TypePython
+    {
         return Vec::new();
     }
 
@@ -302,7 +305,10 @@ pub(super) fn dynamic_framework_alias_diagnostics(
     node: &typepython_graph::ModuleNode,
     strict: bool,
 ) -> Vec<Diagnostic> {
-    if !strict || node.module_kind != SourceKind::TypePython {
+    if !strict
+        || !context.framework_adapters_enabled()
+        || node.module_kind != SourceKind::TypePython
+    {
         return Vec::new();
     }
 
@@ -343,7 +349,10 @@ pub(super) fn untyped_framework_field_diagnostics(
     nodes: &[typepython_graph::ModuleNode],
     strict: bool,
 ) -> Vec<Diagnostic> {
-    if !strict || node.module_kind != SourceKind::TypePython {
+    if !strict
+        || !context.framework_adapters_enabled()
+        || node.module_kind != SourceKind::TypePython
+    {
         return Vec::new();
     }
 
@@ -472,7 +481,7 @@ pub(super) fn unsupported_dual_emit_async_construct_diagnostics(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
 ) -> Vec<Diagnostic> {
-    if node.module_kind != SourceKind::TypePython {
+    if !context.sync_async_dual_emit_enabled() || node.module_kind != SourceKind::TypePython {
         return Vec::new();
     }
 

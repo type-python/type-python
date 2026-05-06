@@ -1,13 +1,14 @@
 use std::collections::BTreeSet;
 
-use typepython_config::ImportFallback;
 use typepython_graph::ModuleGraph;
 use typepython_syntax::{FunctionParam, MethodKind, SourceKind};
 
 use crate::{
-    CheckerContext, EffectiveCallableStubOverride, EffectiveValueStubOverride, SyntheticMethodStub,
-    SyntheticValueStub, decorated_function_return_type_from_callable_annotation,
+    CheckerContext, CheckerOptions, EffectiveCallableStubOverride, EffectiveValueStubOverride,
+    SyntheticMethodStub, SyntheticValueStub,
+    decorated_function_return_type_from_callable_annotation,
     direct_function_signature_sites_from_callable_annotation,
+    framework_transform_class_supports_generated_members_with_context,
     resolve_dataclass_transform_class_shape_from_decl_with_context,
     resolve_decorated_callable_annotation_for_declaration_with_context,
     resolve_decorated_callable_semantic_type_for_declaration_with_context,
@@ -19,7 +20,16 @@ use crate::{
 pub fn collect_effective_callable_stub_overrides(
     graph: &ModuleGraph,
 ) -> Vec<EffectiveCallableStubOverride> {
-    let context = CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
+    collect_effective_callable_stub_overrides_with_options(graph, CheckerOptions::default())
+}
+
+#[must_use]
+pub fn collect_effective_callable_stub_overrides_with_options(
+    graph: &ModuleGraph,
+    options: CheckerOptions,
+) -> Vec<EffectiveCallableStubOverride> {
+    let context =
+        CheckerContext::new_with_bound_surface_facts_and_options(&graph.nodes, None, None, options);
     let mut overrides = graph
         .nodes
         .iter()
@@ -70,12 +80,19 @@ pub fn collect_effective_callable_stub_overrides(
 pub fn collect_effective_value_stub_overrides(
     graph: &ModuleGraph,
 ) -> Vec<EffectiveValueStubOverride> {
-    let context = CheckerContext::new_with_bound_surface_facts_and_strict(
+    collect_effective_value_stub_overrides_with_options(graph, CheckerOptions::default())
+}
+
+#[must_use]
+pub fn collect_effective_value_stub_overrides_with_options(
+    graph: &ModuleGraph,
+    options: CheckerOptions,
+) -> Vec<EffectiveValueStubOverride> {
+    let context = CheckerContext::new_with_bound_surface_facts_and_options(
         &graph.nodes,
-        ImportFallback::Unknown,
         None,
         None,
-        true,
+        CheckerOptions { strict: true, ..options },
     );
     let mut overrides = graph
         .nodes
@@ -91,7 +108,7 @@ pub fn collect_effective_value_stub_overrides(
                     let site =
                         resolve_decorated_callable_site_with_context(&context, node, declaration)?;
                     if let Some(annotation) =
-                        computed_field_value_stub_annotation(graph, node, declaration, &site)
+                        computed_field_value_stub_annotation(&context, node, declaration, &site)
                     {
                         return Some(EffectiveValueStubOverride {
                             module_key: node.module_key.clone(),
@@ -125,7 +142,7 @@ pub fn collect_effective_value_stub_overrides(
 }
 
 fn computed_field_value_stub_annotation(
-    graph: &ModuleGraph,
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     declaration: &typepython_binding::Declaration,
     site: &typepython_syntax::DecoratedCallableSite,
@@ -134,8 +151,11 @@ fn computed_field_value_stub_annotation(
     if !site.decorators.iter().any(|decorator| is_computed_field_decorator_name(decorator)) {
         return None;
     }
-    if !crate::framework_transform_class_supports_generated_members(node, &graph.nodes, &owner.name)
-    {
+    if !framework_transform_class_supports_generated_members_with_context(
+        context,
+        node,
+        &owner.name,
+    ) {
         return None;
     }
     declaration
@@ -150,7 +170,16 @@ fn is_computed_field_decorator_name(name: &str) -> bool {
 
 #[must_use]
 pub fn collect_synthetic_value_stubs(graph: &ModuleGraph) -> Vec<SyntheticValueStub> {
-    let context = CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
+    collect_synthetic_value_stubs_with_options(graph, CheckerOptions::default())
+}
+
+#[must_use]
+pub fn collect_synthetic_value_stubs_with_options(
+    graph: &ModuleGraph,
+    options: CheckerOptions,
+) -> Vec<SyntheticValueStub> {
+    let context =
+        CheckerContext::new_with_bound_surface_facts_and_options(&graph.nodes, None, None, options);
     let mut values = graph
         .nodes
         .iter()
@@ -163,9 +192,9 @@ pub fn collect_synthetic_value_stubs(graph: &ModuleGraph) -> Vec<SyntheticValueS
                 .filter(|declaration| {
                     declaration.owner.is_none()
                         && declaration.kind == typepython_binding::DeclarationKind::Class
-                        && crate::framework_transform_class_supports_generated_members(
+                        && framework_transform_class_supports_generated_members_with_context(
+                            &context,
                             node,
-                            &graph.nodes,
                             &declaration.name,
                         )
                 })
@@ -212,7 +241,16 @@ fn generated_class_value_stubs(
 
 #[must_use]
 pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMethodStub> {
-    let context = CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
+    collect_synthetic_method_stubs_with_options(graph, CheckerOptions::default())
+}
+
+#[must_use]
+pub fn collect_synthetic_method_stubs_with_options(
+    graph: &ModuleGraph,
+    options: CheckerOptions,
+) -> Vec<SyntheticMethodStub> {
+    let context =
+        CheckerContext::new_with_bound_surface_facts_and_options(&graph.nodes, None, None, options);
     let mut methods = graph
         .nodes
         .iter()
@@ -296,9 +334,9 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
                         returns: Some(String::from("None")),
                     }];
                     if framework_shape.is_some()
-                        && crate::framework_transform_class_supports_generated_members(
+                        && framework_transform_class_supports_generated_members_with_context(
+                            &context,
                             node,
-                            &graph.nodes,
                             &declaration.name,
                         )
                     {

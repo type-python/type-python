@@ -124,6 +124,7 @@ pub struct LoweringOptions {
     pub target_python: PythonTarget,
     pub emit_style: EmitStyle,
     pub experimental_shape_transforms: bool,
+    pub experimental_sync_async_dual_emit: bool,
 }
 
 impl Default for LoweringOptions {
@@ -132,6 +133,7 @@ impl Default for LoweringOptions {
             target_python: PythonTarget::default(),
             emit_style: EmitStyle::Compat,
             experimental_shape_transforms: false,
+            experimental_sync_async_dual_emit: false,
         }
     }
 }
@@ -640,7 +642,11 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         lowered_lines.extend(replacement_lines);
     }
 
-    let lowered_text = apply_dual_emit_decorator_lowering(&lowered_lines.join("\n"));
+    let lowered_text = if options.experimental_sync_async_dual_emit {
+        apply_dual_emit_decorator_lowering(&lowered_lines.join("\n"))
+    } else {
+        lowered_lines.join("\n")
+    };
     let mut lowered = normalize_runtime_intrinsic_types(&lowered_text);
     if normalized_source.ends_with('\n') {
         lowered.push('\n');

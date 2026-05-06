@@ -500,7 +500,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
         .or_else(|| {
             value_member_owner_name.and_then(|owner_name| {
                 value_member_name.and_then(|member_name| {
-                    resolve_direct_member_reference_semantic_type(
+                    resolve_direct_member_reference_semantic_type_with_options(
                         node,
                         nodes,
                         signature,
@@ -511,6 +511,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                         owner_name,
                         member_name,
                         value_member_through_instance,
+                        options,
                     )
                 })
             })
@@ -813,13 +814,28 @@ pub(super) fn find_owned_readable_member_declaration<'a>(
     })
 }
 
+#[allow(dead_code)]
 pub(super) fn framework_generated_member_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     type_name: &str,
     member_name: &str,
 ) -> Option<SemanticType> {
-    if !framework_transform_class_supports_generated_members(node, nodes, type_name) {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    framework_generated_member_semantic_type_with_context(&context, node, type_name, member_name)
+}
+
+pub(super) fn framework_generated_member_semantic_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    type_name: &str,
+    member_name: &str,
+) -> Option<SemanticType> {
+    if !framework_transform_class_supports_generated_members_with_context(
+        context,
+        node,
+        type_name,
+    ) {
         return None;
     }
     match member_name {

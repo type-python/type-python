@@ -57,11 +57,12 @@ pub(super) fn semantic_type_is_assignable(
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(super) struct AssignabilityOptions {
     pub(super) strict_nulls: bool,
+    pub(super) framework_adapters: bool,
 }
 
 impl Default for AssignabilityOptions {
     fn default() -> Self {
-        Self { strict_nulls: true }
+        Self { strict_nulls: true, framework_adapters: false }
     }
 }
 

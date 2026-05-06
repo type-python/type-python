@@ -144,7 +144,9 @@ pub(super) fn check_with_experimental_binding_metadata(
             import_fallback,
             ..crate::CheckerOptions::default()
         }
-        .with_experimental_features(true, true, true),
+        .with_experimental_features(true, true, true)
+        .with_sync_async_dual_emit(true)
+        .with_framework_adapters(true),
         source_overrides,
     )
 }
@@ -200,7 +202,9 @@ pub(super) fn check_with_experimental_source_overrides(
             import_fallback,
             ..crate::CheckerOptions::default()
         }
-        .with_experimental_features(true, true, true),
+        .with_experimental_features(true, true, true)
+        .with_sync_async_dual_emit(true)
+        .with_framework_adapters(true),
         source_overrides,
     )
 }
@@ -236,7 +240,9 @@ pub(super) fn semantic_incremental_state_with_experimental_binding_metadata(
         bindings,
         crate::CheckerOptions::default()
             .with_import_fallback(import_fallback)
-            .with_experimental_features(true, true, true),
+            .with_experimental_features(true, true, true)
+            .with_sync_async_dual_emit(true)
+            .with_framework_adapters(true),
         source_overrides,
         stdlib_snapshot,
         metadata,
@@ -394,7 +400,9 @@ pub(super) fn check_temp_typepython_source_with_experimental_check_options(
             import_fallback: ImportFallback::Unknown,
             ..crate::CheckerOptions::default()
         }
-        .with_experimental_features(true, true, true),
+        .with_experimental_features(true, true, true)
+        .with_sync_async_dual_emit(true)
+        .with_framework_adapters(true),
     );
 
     let _ = fs::remove_dir_all(&root);

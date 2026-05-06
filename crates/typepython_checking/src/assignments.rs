@@ -195,6 +195,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
 }
 
 pub(super) fn simple_name_augmented_assignment_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -255,6 +256,7 @@ pub(super) fn simple_name_augmented_assignment_diagnostics(
                 &assignment.name,
             )?;
             let actual = resolve_augmented_assignment_result_semantic_type(
+                context,
                 node,
                 nodes,
                 None,
@@ -905,6 +907,7 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
     for entry in entries {
         if entry.is_expansion {
             let Some(expansion_type) = resolve_assignment_expression_semantic_type(
+                context,
                 node,
                 nodes,
                 signature,
@@ -1048,6 +1051,7 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
         };
 
         if let Some(actual_type) = resolve_assignment_expression_semantic_type(
+            context,
             node,
             nodes,
             signature,
@@ -1225,6 +1229,7 @@ pub(super) fn direct_expr_metadata_for_known_type(
 
 #[allow(clippy::too_many_arguments)]
 fn resolve_assignment_expression_semantic_type(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -1233,7 +1238,7 @@ fn resolve_assignment_expression_semantic_type(
     line: usize,
     metadata: &typepython_syntax::DirectExprMetadata,
 ) -> Option<SemanticType> {
-    resolve_direct_expression_semantic_type_from_metadata(
+    resolve_direct_expression_semantic_type_from_metadata_with_options(
         node,
         nodes,
         signature,
@@ -1241,11 +1246,13 @@ fn resolve_assignment_expression_semantic_type(
         current_owner_type_name,
         line,
         metadata,
+        context.assignability_options(),
     )
 }
 
 #[allow(clippy::too_many_arguments)]
 fn resolve_augmented_assignment_result_semantic_type(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -1270,6 +1277,7 @@ fn resolve_augmented_assignment_result_semantic_type(
     )
     .or_else(|| {
         resolve_assignment_expression_semantic_type(
+            context,
             node,
             nodes,
             signature,
@@ -1291,6 +1299,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
         .into_iter()
         .filter_map(|site| {
             let owner_type = resolve_assignment_expression_semantic_type(
+                context,
                 node,
                 nodes,
                 None,
@@ -1397,6 +1406,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                     }
 
                     let actual = resolve_assignment_expression_semantic_type(
+                        context,
                         node,
                         nodes,
                         None,
@@ -1433,6 +1443,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                     let value = site.value.as_ref()?;
                     let rendered_expected = field.rendered_value_type();
                     let actual = resolve_augmented_assignment_result_semantic_type(
+                        context,
                         node,
                         nodes,
                         None,
@@ -1542,6 +1553,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
             }
 
             let owner_type = resolve_assignment_expression_semantic_type(
+                context,
                 node,
                 nodes,
                 None,
@@ -1583,6 +1595,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                 ),
                 WritableSubscriptSignature::Writable { key_type, value_type } => {
                     let actual_key = resolve_assignment_expression_semantic_type(
+                        context,
                         node,
                         nodes,
                         None,
@@ -1657,6 +1670,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                 return None;
                             }
                             let actual_value = resolve_assignment_expression_semantic_type(
+                                context,
                                 node,
                                 nodes,
                                 None,
@@ -1719,6 +1733,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                 );
                             };
                             let actual_value = resolve_augmented_assignment_result_semantic_type(
+                                context,
                                 node,
                                 nodes,
                                 None,
@@ -1776,6 +1791,7 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
         .into_iter()
         .filter_map(|site| {
             let target_type = resolve_assignment_expression_semantic_type(
+                context,
                 node,
                 nodes,
                 None,
@@ -1855,6 +1871,7 @@ pub(super) fn frozen_plain_dataclass_mutation_diagnostics(
         .into_iter()
         .filter_map(|site| {
             let target_type = resolve_assignment_expression_semantic_type(
+                context,
                 node,
                 nodes,
                 None,
@@ -2039,6 +2056,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
             }
 
             let target_type = resolve_assignment_expression_semantic_type(
+                context,
                 node,
                 nodes,
                 None,
@@ -2113,6 +2131,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 });
                             }
                             let actual = resolve_assignment_expression_semantic_type(
+                                context,
                                 node,
                                 nodes,
                                 None,
@@ -2144,6 +2163,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                         }
                         typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => {
                             let actual = resolve_augmented_assignment_result_semantic_type(
+                                context,
                                 node,
                                 nodes,
                                 None,
@@ -2222,6 +2242,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 });
                             }
                             let actual = resolve_assignment_expression_semantic_type(
+                                context,
                                 node,
                                 nodes,
                                 None,
@@ -2278,8 +2299,9 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 );
                             };
                             let readable_type =
-            resolve_readable_member_semantic_type(node, nodes, readable, &target_type)?;
+                                resolve_readable_member_semantic_type(node, nodes, readable, &target_type)?;
                             let actual = resolve_augmented_assignment_result_semantic_type(
+                                context,
                                 node,
                                 nodes,
                                 None,

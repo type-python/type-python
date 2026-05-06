@@ -75,7 +75,9 @@ mod flow_tests {
             nodes,
             None,
             None,
-            CheckerOptions::default().with_experimental_features(false, false, true),
+            CheckerOptions::default()
+                .with_experimental_features(false, false, true)
+                .with_framework_adapters(true),
         )
     }
 

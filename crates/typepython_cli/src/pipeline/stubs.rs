@@ -4,6 +4,7 @@ pub(super) fn build_typepython_stub_contexts(
     syntax_trees: &[typepython_syntax::SyntaxTree],
     _lowered_modules: &[LoweredModule],
     graph: &typepython_graph::ModuleGraph,
+    checker_options: CheckerOptions,
 ) -> BTreeMap<PathBuf, TypePythonStubContext> {
     let mut contexts = syntax_trees
         .iter()
@@ -21,7 +22,9 @@ pub(super) fn build_typepython_stub_contexts(
         .map(|tree| (tree.source.logical_module.clone(), tree.source.path.clone()))
         .collect::<BTreeMap<_, _>>();
 
-    for override_signature in collect_effective_callable_stub_overrides(graph) {
+    for override_signature in
+        collect_effective_callable_stub_overrides_with_options(graph, checker_options)
+    {
         let Some(path) = module_paths.get(&override_signature.module_key) else {
             continue;
         };
@@ -37,7 +40,10 @@ pub(super) fn build_typepython_stub_contexts(
         });
     }
 
-    for override_value in typepython_checking::collect_effective_value_stub_overrides(graph) {
+    for override_value in typepython_checking::collect_effective_value_stub_overrides_with_options(
+        graph,
+        checker_options,
+    ) {
         let Some(path) = module_paths.get(&override_value.module_key) else {
             continue;
         };
@@ -50,7 +56,7 @@ pub(super) fn build_typepython_stub_contexts(
         });
     }
 
-    for synthetic_method in collect_synthetic_method_stubs(graph) {
+    for synthetic_method in collect_synthetic_method_stubs_with_options(graph, checker_options) {
         let Some(path) = module_paths.get(&synthetic_method.module_key) else {
             continue;
         };
@@ -66,7 +72,9 @@ pub(super) fn build_typepython_stub_contexts(
         });
     }
 
-    for synthetic_value in typepython_checking::collect_synthetic_value_stubs(graph) {
+    for synthetic_value in
+        typepython_checking::collect_synthetic_value_stubs_with_options(graph, checker_options)
+    {
         let Some(path) = module_paths.get(&synthetic_value.module_key) else {
             continue;
         };

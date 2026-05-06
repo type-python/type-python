@@ -8,7 +8,7 @@ use typepython_graph::ModuleGraph;
 use typepython_syntax::{SourceKind, TypeExpr};
 use typepython_target::{RuntimeTypingForm, RuntimeTypingSemantics};
 
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 6;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SnapshotMetadata {
@@ -20,8 +20,16 @@ pub struct SnapshotMetadata {
     pub emit_style: Option<String>,
     #[serde(default)]
     pub support_snapshot: Option<String>,
+    #[serde(default)]
     pub experimental_effect_rows: bool,
+    #[serde(default)]
     pub experimental_taint: bool,
+    #[serde(default)]
+    pub experimental_validator_witnesses: bool,
+    #[serde(default)]
+    pub experimental_sync_async_dual_emit: bool,
+    #[serde(default)]
+    pub experimental_framework_adapters: bool,
 }
 
 /// Fingerprint of one summary-bearing module.
@@ -1402,6 +1410,9 @@ mod tests {
                 support_snapshot: Some(String::from("fnv1a64:support_hash")),
                 experimental_effect_rows: true,
                 experimental_taint: true,
+                experimental_validator_witnesses: true,
+                experimental_sync_async_dual_emit: true,
+                experimental_framework_adapters: true,
             },
         };
 

@@ -330,6 +330,9 @@ impl IncrementalWorkspace {
             support_snapshot: None,
             experimental_effect_rows: checker_options.experimental_effect_rows,
             experimental_taint: checker_options.experimental_taint,
+            experimental_validator_witnesses: checker_options.experimental_validator_witnesses,
+            experimental_sync_async_dual_emit: checker_options.experimental_sync_async_dual_emit,
+            experimental_framework_adapters: checker_options.experimental_framework_adapters,
         };
         let current_incremental = if force_full_check || self.incremental.summaries.is_empty() {
             semantic_incremental_state_with_binding_metadata_and_options(
