@@ -4,7 +4,7 @@ use std::{
     num::Wrapping,
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
-    time::UNIX_EPOCH,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
@@ -577,6 +577,7 @@ pub fn support_source_snapshot_identity(
 ) -> Result<String> {
     let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
     let external_roots = configured_external_type_roots(config)?;
+    let cache_path = support_source_index_cache_path(config, target_python);
     let mut files = bundled_stdlib_sources_for_root(&stdlib_root, target_python)?
         .into_iter()
         .map(|source| {
@@ -595,7 +596,15 @@ pub fn support_source_snapshot_identity(
         fnv1a64_mix_bytes(&mut hash, &bytes);
         fnv1a64_mix_byte(&mut hash, 0);
     }
-    let mut roots = support_root_signatures(&stdlib_root, &external_roots)?;
+    let mut roots = match load_cached_support_root_signatures(
+        &cache_path,
+        target_python,
+        &stdlib_root,
+        &external_roots,
+    )? {
+        Some(roots) => roots,
+        None => support_root_signatures(&stdlib_root, &external_roots)?,
+    };
     roots.sort();
     for root in roots {
         fnv1a64_mix_str(&mut hash, &root.kind);
@@ -879,6 +888,14 @@ struct CachedSupportFile {
     content_hash: String,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct CachedSupportFileMetadata {
+    path: String,
+    kind: String,
+    len: u64,
+    modified_unix_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 struct CachedSupportSource {
     path: String,
@@ -912,10 +929,9 @@ fn load_cached_support_source_index(
         Ok(cached) => cached,
         Err(_) => return Ok(None),
     };
-    let current_roots = support_root_signatures(stdlib_root, external_roots)?;
     if cached.version != SUPPORT_SOURCE_INDEX_VERSION
         || cached.target_python != target_python
-        || cached.roots != current_roots
+        || !cached_support_roots_match(stdlib_root, external_roots, &cached.roots)?
     {
         return Ok(None);
     }
@@ -936,6 +952,34 @@ fn load_cached_support_source_index(
             })
             .collect(),
     )))
+}
+
+fn load_cached_support_root_signatures(
+    cache_path: &Path,
+    target_python: &str,
+    stdlib_root: &Path,
+    external_roots: &[ExternalSupportRoot],
+) -> Result<Option<Vec<CachedSupportRoot>>> {
+    if !cache_path.is_file() {
+        return Ok(None);
+    }
+
+    let rendered = match fs::read_to_string(cache_path) {
+        Ok(rendered) => rendered,
+        Err(_) => return Ok(None),
+    };
+    let cached = match serde_json::from_str::<CachedSupportSourceIndex>(&rendered) {
+        Ok(cached) => cached,
+        Err(_) => return Ok(None),
+    };
+    if cached.version != SUPPORT_SOURCE_INDEX_VERSION
+        || cached.target_python != target_python
+        || !cached_support_roots_match(stdlib_root, external_roots, &cached.roots)?
+    {
+        return Ok(None);
+    }
+
+    Ok(Some(cached.roots))
 }
 
 fn write_cached_support_source_index(
@@ -984,6 +1028,106 @@ fn support_root_signatures(
     Ok(roots)
 }
 
+fn cached_support_roots_match(
+    stdlib_root: &Path,
+    external_roots: &[ExternalSupportRoot],
+    cached_roots: &[CachedSupportRoot],
+) -> Result<bool> {
+    let mut expected_roots =
+        vec![(String::from("bundled_stdlib"), stdlib_root.to_path_buf(), false)];
+    expected_roots.extend(
+        external_roots
+            .iter()
+            .map(|root| (String::from("external"), root.path.clone(), root.allow_untyped_runtime)),
+    );
+    expected_roots.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.display().to_string().cmp(&right.1.display().to_string()))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+
+    if cached_roots.len() != expected_roots.len() {
+        return Ok(false);
+    }
+
+    for (cached, (kind, path, allow_untyped_runtime)) in
+        cached_roots.iter().zip(expected_roots.iter())
+    {
+        if !cached_support_root_matches_current(cached, kind, path, *allow_untyped_runtime)? {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+fn cached_support_root_matches_current(
+    cached: &CachedSupportRoot,
+    kind: &str,
+    path: &Path,
+    allow_untyped_runtime: bool,
+) -> Result<bool> {
+    if cached.kind != kind
+        || cached.path != path.display().to_string()
+        || cached.allow_untyped_runtime != allow_untyped_runtime
+    {
+        return Ok(false);
+    }
+
+    let external_root = if kind == "external" {
+        Some(ExternalSupportRoot { path: path.to_path_buf(), allow_untyped_runtime })
+    } else {
+        None
+    };
+    let mut current_files = Vec::new();
+    collect_support_signature_file_metadata(
+        path,
+        path,
+        external_root.as_ref(),
+        &mut current_files,
+    )?;
+    current_files.sort();
+
+    if current_files.len() != cached.files.len() {
+        return Ok(false);
+    }
+
+    let mut metadata_changed = false;
+    for (current, cached_file) in current_files.iter().zip(cached.files.iter()) {
+        if current.path != cached_file.path || current.kind != cached_file.kind {
+            return Ok(false);
+        }
+        let metadata_identical = current.len == cached_file.len
+            && current.modified_unix_ms == cached_file.modified_unix_ms;
+        if metadata_identical && support_signature_mtime_is_stable(current.modified_unix_ms) {
+            continue;
+        }
+
+        let content_hash = support_signature_file_content_hash(path, &current.path)?;
+        if content_hash != cached_file.content_hash {
+            return Ok(false);
+        }
+        metadata_changed |= !metadata_identical;
+    }
+
+    Ok(!metadata_changed)
+}
+
+fn support_signature_mtime_is_stable(modified_unix_ms: Option<u64>) -> bool {
+    let Some(modified_unix_ms) = modified_unix_ms else {
+        return false;
+    };
+    let Some(now_unix_ms) = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+    else {
+        return false;
+    };
+    now_unix_ms.saturating_sub(modified_unix_ms) > 2_000
+}
+
 fn cached_support_root(
     kind: &str,
     path: &Path,
@@ -1005,6 +1149,52 @@ fn cached_support_root(
         files,
         fingerprint,
     })
+}
+
+fn collect_support_signature_file_metadata(
+    root: &Path,
+    directory: &Path,
+    external_root: Option<&ExternalSupportRoot>,
+    files: &mut Vec<CachedSupportFileMetadata>,
+) -> Result<()> {
+    if !directory.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(directory).with_context(|| {
+        format!("unable to read support signature directory {}", directory.display())
+    })? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_support_signature_file_metadata(root, &path, external_root, files)?;
+            continue;
+        }
+
+        let Some(kind) = support_signature_file_kind(&path, external_root) else {
+            continue;
+        };
+        let relative_path = path
+            .strip_prefix(root)
+            .with_context(|| {
+                format!(
+                    "support signature path {} is outside root {}",
+                    path.display(),
+                    root.display()
+                )
+            })
+            .map(normalize_glob_path)?;
+        let metadata = fs::metadata(&path)
+            .with_context(|| format!("unable to stat support signature file {}", path.display()))?;
+        files.push(CachedSupportFileMetadata {
+            path: relative_path,
+            kind: kind.to_owned(),
+            len: metadata.len(),
+            modified_unix_ms: metadata_modified_unix_ms(&metadata),
+        });
+    }
+
+    Ok(())
 }
 
 fn collect_support_signature_files(
@@ -1054,6 +1244,13 @@ fn collect_support_signature_files(
     }
 
     Ok(())
+}
+
+fn support_signature_file_content_hash(root: &Path, relative_path: &str) -> Result<String> {
+    let path = root.join(relative_path);
+    let contents = fs::read(&path)
+        .with_context(|| format!("unable to read support signature file {}", path.display()))?;
+    Ok(fnv1a64_hash_bytes(&contents))
 }
 
 fn support_signature_file_kind(
