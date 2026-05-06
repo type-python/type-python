@@ -9,18 +9,16 @@ function extensionConfig() {
   return vscode.workspace.getConfiguration("typepython");
 }
 
-function workspaceProjectPath() {
+function configuredProjectPath() {
   const configured = extensionConfig().get("projectPath");
   if (configured && configured.trim() !== "") {
-    return configured;
+    return configured.trim();
   }
-  const folder = vscode.workspace.workspaceFolders?.[0];
-  return folder ? folder.uri.fsPath : ".";
+  return undefined;
 }
 
 function hasConfiguredProjectPath() {
-  const configured = extensionConfig().get("projectPath");
-  return Boolean(configured && configured.trim() !== "");
+  return configuredProjectPath() !== undefined;
 }
 
 function hasTypePythonProjectConfig(projectPath) {
@@ -39,8 +37,23 @@ function hasTypePythonProjectConfig(projectPath) {
   }
 }
 
+function projectConfigWorkspaceFolder() {
+  return vscode.workspace.workspaceFolders?.find((folder) =>
+    hasTypePythonProjectConfig(folder.uri.fsPath)
+  );
+}
+
+function workspaceProjectPath() {
+  const configured = configuredProjectPath();
+  if (configured !== undefined) {
+    return configured;
+  }
+  const folder = projectConfigWorkspaceFolder() || vscode.workspace.workspaceFolders?.[0];
+  return folder ? folder.uri.fsPath : ".";
+}
+
 function shouldStartServer() {
-  return hasConfiguredProjectPath() || hasTypePythonProjectConfig(workspaceProjectPath());
+  return hasConfiguredProjectPath() || projectConfigWorkspaceFolder() !== undefined;
 }
 
 function binaryPath() {
@@ -98,8 +111,18 @@ function buildClient(context) {
   return languageClient;
 }
 
+async function stopServer() {
+  if (!client) {
+    return;
+  }
+  const runningClient = client;
+  client = undefined;
+  await runningClient.stop();
+}
+
 async function startServer(context, explicit = false) {
   if (!shouldStartServer()) {
+    await stopServer();
     if (explicit) {
       vscode.window.showWarningMessage(
         "TypePython project config not found. Add typepython.toml, [tool.typepython], or set typepython.projectPath."
@@ -108,10 +131,45 @@ async function startServer(context, explicit = false) {
     return;
   }
   if (client) {
-    await client.stop();
+    await stopServer();
   }
   client = buildClient(context);
   await client.start();
+}
+
+function reportServerStartError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  vscode.window.showErrorMessage(`TypePython language server failed to start: ${message}`);
+}
+
+function restartServer(context, explicit = false) {
+  startServer(context, explicit).catch(reportServerStartError);
+}
+
+function registerProjectConfigWatchers(context) {
+  const restart = () => restartServer(context);
+  for (const pattern of ["**/typepython.toml", "**/pyproject.toml"]) {
+    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+    context.subscriptions.push(
+      watcher,
+      watcher.onDidCreate(restart),
+      watcher.onDidChange(restart),
+      watcher.onDidDelete(restart)
+    );
+  }
+}
+
+function registerConfigurationWatchers(context) {
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("typepython")) {
+        restartServer(context);
+      }
+    }),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      restartServer(context);
+    })
+  );
 }
 
 async function activate(context) {
@@ -120,6 +178,8 @@ async function activate(context) {
       await startServer(context, true);
     })
   );
+  registerProjectConfigWatchers(context);
+  registerConfigurationWatchers(context);
   await startServer(context);
 }
 

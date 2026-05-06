@@ -44,7 +44,7 @@
         "typepython.projectPath": {
           "type": "string",
           "default": "",
-          "description": "Project directory passed to typepython lsp --project. Defaults to the first workspace folder."
+          "description": "Project directory passed to typepython lsp --project. Defaults to the first workspace folder with TypePython config, then the first workspace folder."
         },
         "typepython.trace.server": {
           "type": "string",

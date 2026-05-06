@@ -128,8 +128,12 @@ code --install-extension typepython-vscode-0.4.0.vsix
 The extension launches `typepython lsp --project <workspace>`, registers `.tpy`
 as the `typepython` language, and attaches the TypePython LSP client to VS Code
 `python` documents so configured `.py` and `.pyi` files receive the same project
-diagnostics and formatting support. Configure `typepython.binaryPath` when the
-CLI is not on `PATH`, or set `TYPEPYTHON_BIN`.
+diagnostics and formatting support. When `typepython.projectPath` is unset, the
+extension chooses the first workspace folder with `typepython.toml` or
+`[tool.typepython]`, then falls back to the first workspace folder. It restarts
+the language server after TypePython setting changes, workspace-folder changes,
+or project config file create/change/delete events. Configure
+`typepython.binaryPath` when the CLI is not on `PATH`, or set `TYPEPYTHON_BIN`.
 
 ### Neovim (nvim-lspconfig)
 
