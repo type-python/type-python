@@ -18,7 +18,7 @@ Those facts are either reduced, erased, or written to TypePython-owned metadata 
 
 The default consumer model is conservative: downstream users of the emitted package get standard Python typing, not transitive enforcement of every TypePython-only author-time fact.
 
-- Standard consumers use the generated `.py`, `.pyi`, and `py.typed` files with mypy, pyright, ty, IDEs, and packaging tools.
+- Standard consumers use the generated `.py`, `.pyi`, and `py.typed` files with mypy, pyright, basedpyright, ty, IDEs, and packaging tools.
 - TypePython-aware consumers may opt into sidecar metadata, checker plugins, or direct TypePython checking if a future package chooses to publish those facts.
 - If no TypePython-aware channel is present, external sealed exhaustiveness, `unknown` strictness, `unsafe:` fences, taint, effect, and witness facts are not guaranteed beyond the standard emitted type surface.
 

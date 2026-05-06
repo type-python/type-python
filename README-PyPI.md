@@ -99,7 +99,7 @@ sealed exhaustiveness or `unknown` strictness.
 | First-class `interface` / `data class` / `typealias`    |    via      |     via        |    via        |     keyword           |
 | Inline generics `def f[T]` on **any** target ≥ 3.10     |     3.12+   |     3.12+      |     3.12+     |          ✅           |
 | `TypedDict` transforms (`Partial`, `Pick`, `Readonly`…) |      —      |       —        |       —       |          ✅           |
-| Output consumed by mypy / pyright / ty unmodified       |     N/A     |     N/A        |       ✅       |          ✅           |
+| Output consumed by mypy / pyright / basedpyright / ty unmodified | N/A | N/A | ✅ | ✅ |
 
 TypePython doesn't replace those checkers. It sits **one step earlier**: you
 author in `.tpy`, the compiler emits standard typed Python that those tools

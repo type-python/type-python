@@ -246,6 +246,36 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("## External Consumer Model", author_time)
         self.assertIn("Standard consumers use the generated `.py`, `.pyi`, and `py.typed`", author_time)
 
+    def test_downstream_interop_gate_is_documented(self) -> None:
+        beta = read_text("docs/beta-readiness.md")
+        contributing = read_text("docs/contributing.md")
+        cli_reference = read_text("docs/cli-reference.md")
+        readme = read_text("README.md")
+        pypi_readme = read_text("README-PyPI.md")
+        normalized_beta = " ".join(beta.split())
+
+        self.assertIn("mypy strict", beta)
+        self.assertIn("pyright strict", beta)
+        self.assertIn("basedpyright strict", beta)
+        self.assertIn("ty strict", beta)
+        self.assertIn("Python 3.10 through 3.14 target lowering", beta)
+        self.assertIn("typeshed-heavy imports", beta)
+        self.assertIn("implicit namespace packages", beta)
+        self.assertIn("partial-stub metadata", normalized_beta)
+        self.assertIn("allowlist_expires", beta)
+
+        for fixture_name in (
+            "typeshed-heavy-package",
+            "namespace-package",
+            "pep561-partial-stub-package",
+            "ecosystem-patterns-package",
+        ):
+            self.assertIn(fixture_name, contributing)
+
+        self.assertIn("mypy,pyright,basedpyright,ty", cli_reference)
+        self.assertIn("basedpyright", readme)
+        self.assertIn("basedpyright", pypi_readme)
+
     def test_conformance_beta_scope_classification_is_precise(self) -> None:
         conformance_report = load_script_module(
             "scripts/conformance_report.py",

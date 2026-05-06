@@ -11,8 +11,8 @@ or execute adapter Python code.
 Adapters are a checker-neutral shipping surface, not a replacement for framework runtime code. A
 framework can distribute `typepython-framework.toml` plus golden fixtures alongside its package or in
 a companion metadata package, and TypePython validates that data into ordinary `.py`/`.pyi` outputs
-for mypy, pyright, ty, and IDEs. No mypy plugin, pyright extension, or TypePython-specific runtime is
-part of the contract.
+for mypy, pyright, basedpyright, ty, and IDEs. No mypy plugin, pyright extension, or
+TypePython-specific runtime is part of the contract.
 
 The SDK remains prototype-only. The only accepted stability marker today is `prototype`, and adapter
 authors should treat every manifest as a local contract until multiple independently maintained

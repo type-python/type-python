@@ -65,7 +65,8 @@ A Beta release candidate must pass the tracked release gate before the classifie
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo test --workspace`
 - CLI verification suite: `cargo test -p typepython-cli tests::verification::`
-- downstream checker smoke: `python scripts/downstream_checker_smoke.py` with mypy, pyright, and ty
+- downstream checker smoke: `python scripts/downstream_checker_smoke.py` with mypy strict,
+  pyright strict, basedpyright strict, and ty strict
 - roadmap demo smoke: `python scripts/research_roadmap_demo_smoke.py`, which checks and builds the
   P0-P4 author-time semantics example and asserts portable output
 - fuzz smoke: `parser`, `type_expr`, and `lowering_stub`
@@ -94,7 +95,13 @@ workflow run containing a successful `beta-release-gate` job.
 
 ## Checker interoperability baseline
 
-The downstream checker matrix is the Beta baseline for emitted artifacts. It covers a library package,
-standard typing/TypedDict transforms, Pydantic-like shapes, FastAPI-like routes, task decorator
-transforms, native/compat emit styles, dual emit, and negative consumer cases. Known checker
-disagreements must stay explicit in the matrix or allowlist with a reason and review horizon.
+The downstream checker matrix is the Beta baseline for emitted artifacts. It covers basic and rich
+packages, standard typing/TypedDict transforms, Python 3.10 through 3.14 target lowering, Pydantic-like
+shapes, FastAPI-like routes, task decorator transforms, native/compat emit styles, sync/async dual
+emit, typeshed-heavy imports, implicit namespace packages, PEP 561 typed-package and partial-stub
+metadata, attrs/SQLAlchemy/Django-style framework patterns, and negative consumer cases.
+
+Known checker disagreements must stay explicit in `test-fixtures/downstream-checkers/matrix.json`
+with `allowlist_reason` and a non-expired `allowlist_expires` date. The smoke runner rejects expired
+allowlists before invoking external checkers so release candidates cannot silently carry stale
+checker disagreements.

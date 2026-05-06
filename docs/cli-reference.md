@@ -336,7 +336,7 @@ typepython compat [OPTIONS]
 | ------------------------ | ------------------------------------------------------------------------------------------- |
 | `--project PATH`         | Project directory                                                                           |
 | `--format FORMAT`        | Output format: `text` or `json`                                                             |
-| `--checkers LIST`        | Comma-separated checker list; default `all` expands to `mypy,pyright,ty`                    |
+| `--checkers LIST`        | Comma-separated checker list; default `all` expands to `mypy,pyright,basedpyright,ty`       |
 | `--profile NAME`         | Named checker profile: `library-portable`, `app-strict`, `pyright-first`, `mypy-compatible`, or `experimental-checkers` |
 | `--strict-portability`   | Keep portability failures build-blocking for every configured checker rejection              |
 | `--checker-allowlist PATH` | TOML allowlist of known checker disagreements that should remain visible but non-blocking   |
@@ -345,8 +345,9 @@ Supported checker names use checker-specific CLI conventions:
 
 - `mypy` -> `mypy --python-version <target> <build-dir>`
 - `pyright` -> `pyright --pythonversion <target> <build-dir>`
+- `basedpyright` -> `basedpyright --pythonversion <target> <build-dir>`
 - `ty` -> `ty check --no-progress --python-version <target> <build-dir>`
-- optional local tools: `pyrefly`, `basedpyright`, and `zuban`
+- optional local tools: `pyrefly` and `zuban`
 
 Unknown checker values are treated as custom command paths and receive the generated build directory as their only argument.
 

@@ -105,7 +105,7 @@ The comparison below is about `.tpy` authoring inside the package checked by Typ
 | First-class `interface` / `data class` / `typealias`    |    via      |     via        |    via        |     keyword           |
 | Inline generics `def f[T]` on **any** target ≥ 3.10     |     3.12+   |     3.12+      |     3.12+     |          ✅           |
 | `TypedDict` transforms (`Partial`, `Pick`, `Readonly`…) |      —      |       —        |       —       |          ✅           |
-| Output consumed by mypy / pyright / ty unmodified       |     N/A     |     N/A        |       ✅       |          ✅           |
+| Output consumed by mypy / pyright / basedpyright / ty unmodified | N/A | N/A | ✅ | ✅ |
 
 TypePython doesn't replace those checkers. It sits **one step earlier**: you author in `.tpy`, the compiler emits standard typed Python that those tools then consume normally.
 
@@ -167,7 +167,7 @@ The stronger guarantee is for the package while it is authored and checked by Ty
 | `TypedDict` transforms              | Stable Core v1                  | expanded to standard `TypedDict` shapes        |
 | effect, taint, and witness facts    | Roadmap / prototype             | checked at author-time; erased or sidecar-only |
 
-This trade is intentional: **the author package gets stronger checks before publish; consumers get clean, portable Python they can read with mypy, pyright, ty, IDEs, and any PEP 561 tool**. Carrying TypePython-only semantics across that boundary would require an opt-in sidecar, checker plugin, or TypePython-aware consumer. See [`docs/interop.md`](docs/interop.md), [`docs/feature-status.md`](docs/feature-status.md), and [`docs/author-time-semantics.md`](docs/author-time-semantics.md).
+This trade is intentional: **the author package gets stronger checks before publish; consumers get clean, portable Python they can read with mypy, pyright, basedpyright, ty, IDEs, and any PEP 561 tool**. Carrying TypePython-only semantics across that boundary would require an opt-in sidecar, checker plugin, or TypePython-aware consumer. See [`docs/interop.md`](docs/interop.md), [`docs/feature-status.md`](docs/feature-status.md), and [`docs/author-time-semantics.md`](docs/author-time-semantics.md).
 
 ## For library and framework authors
 

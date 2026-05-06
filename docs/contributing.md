@@ -196,7 +196,7 @@ make test-fast
 # Heavy CLI verification suite only
 make test-cli-verification
 
-# Checker-backed end-to-end smoke suite (.tpy -> build -> mypy/pyright/ty)
+# Checker-backed end-to-end smoke suite (.tpy -> build -> mypy/pyright/basedpyright/ty)
 make test-downstream-checkers
 
 # Workspace coverage report (requires `cargo install cargo-llvm-cov` or CI's install action)
@@ -416,10 +416,12 @@ Together these jobs cover the repository validation path that `make ci` approxim
 
 The downstream checker smoke suite currently covers:
 
-- `basic-package` on Python 3.10
-- `rich-package` on Python 3.10 and 3.12
-- `compat-package` on Python 3.10, 3.11, and 3.12, with emitted import-source assertions before mypy / pyright / ty
-- `native-package` on Python 3.13+, with emitted native typing syntax assertions and publication-metadata checks
+- `basic-package`, `standard-typing-package`, and `compat-package` across Python 3.10 through 3.14
+- `rich-package`, `dual-emit-package`, task decorators, Pydantic-like shapes, FastAPI-like routes, and negative consumers
+- `typeshed-heavy-package`, `namespace-package`, `pep561-partial-stub-package`, and `ecosystem-patterns-package` for typeshed-heavy imports, implicit namespace packages, PEP 561 typed-package and partial-stub metadata, and attrs/SQLAlchemy/Django-style ecosystem patterns
+- strict downstream profiles for mypy, pyright, basedpyright, and ty by default; pyright-family configs focus on type portability rather than lint-only diagnostics
+- emitted fragment assertions before external checkers run, including non-`app/__init__.pyi` namespace package stubs
+- checker disagreement allowlists with `allowlist_reason` and a non-expired `allowlist_expires` date
 - Parser and bundled stdlib baselines are recorded in `stdlib/BASELINE.toml`; keep that file in sync when touching parser dependency versions or refreshing the bundled stdlib snapshot
 - Bundled stdlib refreshes are pinned to the upstream typeshed commit in `stdlib/BASELINE.toml`; run `python3 scripts/refresh_stdlib_stubs.py --typeshed-root <typeshed-checkout> --write` after copying a reviewed typeshed snapshot, then run `make stdlib-baseline-check` to verify `stdlib/REFRESH_STATS.json` and `stdlib/VERSIONS` are current
 
@@ -427,6 +429,7 @@ For focused local runs, `scripts/downstream_checker_smoke.py` accepts:
 
 - `TYPEPYTHON_DOWNSTREAM_FIXTURES=compat-package`
 - `TYPEPYTHON_DOWNSTREAM_CHECKERS=pyright,ty`
+- `TYPEPYTHON_DOWNSTREAM_PROFILES=strict`
 
 ## Common Contribution Tasks
 
