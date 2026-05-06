@@ -15622,7 +15622,11 @@ fn check_does_not_keep_except_binding_after_handler() {
         }],
     });
 
-    assert!(result.diagnostics.is_empty());
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("returns `unknown`"), "{rendered}");
+    assert!(rendered.contains("expects `ValueError`"), "{rendered}");
+    assert!(!rendered.contains("returns `ValueError`"), "{rendered}");
 }
 
 #[test]
