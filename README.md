@@ -73,6 +73,7 @@ typepython build --project .
 You now have `.typepython/build/` with `.py` + `.pyi` + `py.typed` ready for any Python interpreter, IDE, or downstream type checker.
 
 > **Wheels** are prebuilt for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64. Other platforms fall back to source and need Rust + `cargo`.
+> Wheels are tagged `py3-none-<platform>` because the bundled Rust CLI is platform-specific while the Python wrapper is ABI-independent.
 > **Python**: the package bridge supports 3.9+; generated projects target Python 3.10 through 3.14.
 
 ## What you actually write vs. what ships

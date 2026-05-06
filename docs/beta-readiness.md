@@ -74,7 +74,8 @@ A Beta release candidate must pass the tracked release gate before the classifie
   P0-P4 author-time semantics example and asserts portable output
 - fuzz smoke: `parser`, `type_expr`, and `lowering_stub`
 - package build and metadata check: `python -m build --sdist --wheel` and `python -m twine check dist/*`
-- installed wheel quickstart smoke, including `typepython --help`, `init`, `check`, `build`, and `verify`
+- installed wheel quickstart smoke, including `typepython --help`, `init`, `check`, `build`, and
+  `verify`, proving the installed wheel uses its bundled Rust CLI without `cargo`
 - Python 3.9 wrapper smoke
 - Python 3.13 and 3.14 target smoke
 - macOS and Windows platform smoke
@@ -97,6 +98,8 @@ workflow run containing a successful `beta-release-gate` job.
   arm64, and Linux x86_64.
 - Source distribution fallback is supported but requires Rust and `cargo` because the Rust CLI binary
   must be built locally.
+- Wheels are platform-specific `py3-none-<platform>` artifacts: they are not tied to a CPython ABI,
+  but they do include the Rust CLI for the target platform.
 - `pip install type-python && typepython --help` is the supported entry path for users.
 - The quickstart smoke creates a clean project and runs `check`, `build`, and `verify` before release.
 

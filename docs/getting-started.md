@@ -24,6 +24,10 @@ python -m typepython --help
 
 Published wheels are platform-specific because they bundle the Rust CLI binary. Supported releases publish prebuilt wheels for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64, so those platforms can install and run TypePython without Rust. Other platforms fall back to the source distribution and require Rust + `cargo`.
 
+The wheel tag is `py3-none-<platform>`: the bundled Rust CLI is
+platform-specific, but the Python wrapper does not bind to a CPython ABI. See
+[Packaging Contract](packaging.md) for the source-build and launcher behavior.
+
 ### Option 2: Local checkout installed as a package
 
 ```bash

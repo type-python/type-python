@@ -12,14 +12,21 @@ def _repo_root() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parent.parent
 
 
-def _cargo_typepython_command() -> list[str] | None:
+def _is_repo_checkout() -> bool:
     repo_root = _repo_root()
-    cargo_toml = repo_root / "Cargo.toml"
-    if not cargo_toml.exists():
+    return (
+        repo_root.joinpath("Cargo.toml").is_file()
+        and repo_root.joinpath("crates/typepython_cli/Cargo.toml").is_file()
+    )
+
+
+def _cargo_typepython_command() -> list[str] | None:
+    if not _is_repo_checkout():
         return None
     cargo = shutil.which("cargo")
     if cargo is None:
         return None
+    cargo_toml = _repo_root() / "Cargo.toml"
     return [cargo, "run", "--manifest-path", str(cargo_toml), "-p", "typepython-cli", "--"]
 
 
@@ -48,8 +55,18 @@ def _command() -> list[str]:
     cargo_command = _cargo_typepython_command()
     if cargo_command is not None:
         return cargo_command
+    if _is_repo_checkout():
+        raise RuntimeError(
+            "Unable to locate the TypePython Rust CLI in this source checkout. "
+            "Install Rust 1.94.0 with cargo via ./scripts/bootstrap-rust.sh, "
+            "build the CLI with `cargo build --release -p typepython-cli`, "
+            "or set TYPEPYTHON_BIN=/path/to/typepython."
+        )
     raise RuntimeError(
-        "Unable to locate the TypePython Rust CLI. Set TYPEPYTHON_BIN or run from a repository checkout with cargo available."
+        "Unable to locate the bundled TypePython Rust CLI in the installed package. "
+        "Reinstall a supported platform wheel, or build from the source distribution "
+        "with Rust 1.94.0 and cargo available. You can also set "
+        "TYPEPYTHON_BIN=/path/to/typepython."
     )
 
 

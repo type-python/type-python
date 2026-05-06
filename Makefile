@@ -67,7 +67,7 @@ diagnostic-coverage-check:
 	$(PYTHON) scripts/diagnostic_test_coverage.py --check
 
 repo-contracts:
-	$(PYTHON) -m unittest scripts/test_repo_contracts.py scripts/test_downstream_checker_matrix.py scripts/test_research_roadmap_demo_smoke.py scripts/test_industrial_perf_smoke.py scripts/test_editor_integrations.py
+	$(PYTHON) -m unittest scripts/test_repo_contracts.py scripts/test_downstream_checker_matrix.py scripts/test_research_roadmap_demo_smoke.py scripts/test_industrial_perf_smoke.py scripts/test_editor_integrations.py scripts/test_packaging_contracts.py
 
 bench:
 	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker

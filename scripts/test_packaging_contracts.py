@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+import os
+import pathlib
+import re
+import unittest
+from unittest import mock
+
+from typepython import _runner
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def read_text(relative_path: str) -> str:
+    return (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+
+
+class PackagingContractTests(unittest.TestCase):
+    def test_runner_distinguishes_installed_package_missing_binary(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(_runner, "_bundled_command", return_value=None),
+            mock.patch.object(_runner, "_cargo_typepython_command", return_value=None),
+            mock.patch.object(_runner, "_is_repo_checkout", return_value=False),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "installed package"):
+                _runner._command()
+
+    def test_runner_distinguishes_checkout_missing_cargo(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(_runner, "_bundled_command", return_value=None),
+            mock.patch.object(_runner, "_cargo_typepython_command", return_value=None),
+            mock.patch.object(_runner, "_is_repo_checkout", return_value=True),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "source checkout"):
+                _runner._command()
+
+    def test_runner_prefers_typepython_bin_override(self) -> None:
+        with mock.patch.dict(os.environ, {"TYPEPYTHON_BIN": "/opt/typepython/bin/typepython"}):
+            self.assertEqual(_runner._command(), ["/opt/typepython/bin/typepython"])
+
+    def test_packaging_docs_and_build_contract_explain_wheel_strategy(self) -> None:
+        pyproject = read_text("pyproject.toml")
+        setup = read_text("setup.py")
+        packaging = read_text("docs/packaging.md")
+        getting_started = read_text("docs/getting-started.md")
+        beta = read_text("docs/beta-readiness.md")
+        readme = read_text("README.md")
+        pypi_readme = read_text("README-PyPI.md")
+
+        self.assertRegex(pyproject, r'build = "cp312-\*"')
+        self.assertIn('return ("py3", "none", plat)', setup)
+        self.assertIn("Rust 1.94.0", setup)
+        self.assertIn("prebuilt type-python wheel", setup)
+
+        for text in (packaging, getting_started, beta, readme, pypi_readme):
+            normalized = " ".join(text.split())
+            self.assertIn("py3-none-<platform>", normalized)
+            self.assertIn("Rust CLI", normalized)
+
+        self.assertIn("without `cargo`", beta)
+        self.assertIn("Runtime Launcher Resolution", packaging)
+        self.assertIn("source checkout missing `cargo`", packaging)
+
+    def test_packaging_doc_version_matches_project(self) -> None:
+        pyproject = read_text("pyproject.toml")
+        version = re.search(r'(?m)^version = "([^"]+)"$', pyproject)
+        self.assertIsNotNone(version)
+        self.assertIn(
+            f"typepython-vscode-{version.group(1)}.vsix",
+            read_text("editors/vscode/README.md"),
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

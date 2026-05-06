@@ -36,7 +36,11 @@ class build_py(_build_py):
     def _copy_rust_cli(self) -> None:
         cargo = shutil.which("cargo")
         if cargo is None:
-            raise RuntimeError("cargo is required to build the TypePython wheel")
+            raise RuntimeError(
+                "cargo is required to build the TypePython wheel from source. "
+                "Install the workspace MSRV Rust 1.94.0 via ./scripts/bootstrap-rust.sh, "
+                "or install a prebuilt type-python wheel for a supported platform."
+            )
 
         subprocess.run(
             [cargo, "build", "--release", "-p", "typepython-cli"],
