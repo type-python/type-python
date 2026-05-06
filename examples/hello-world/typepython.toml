@@ -34,6 +34,11 @@ report_deprecated = "warning"
 require_explicit_overrides = false
 require_known_public_types = false
 infer_passthrough = false
+conditional_returns = false
+
+[experimental]
+accepted_features = []
+shape_transforms = false
 
 [watch]
 debounce_ms = 80

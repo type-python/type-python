@@ -226,7 +226,7 @@ fn run_pipeline_honors_experimental_shape_transform_gate() {
         fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
         fs::write(
             project_dir.join("typepython.toml"),
-            "[project]\nsrc = [\"src\"]\n\n[experimental]\nshape_transforms = true\n",
+            "[project]\nsrc = [\"src\"]\n\n[experimental]\naccepted_features = [\"shape_transforms\"]\nshape_transforms = true\n",
         )
         .expect("test setup should succeed");
         fs::write(
@@ -635,7 +635,7 @@ fn run_pipeline_accepts_conditional_returns_when_enabled() {
     let diagnostics = {
         fs::write(
             project_dir.join("typepython.toml"),
-            "[project]\nsrc = [\"src\"]\n\n[typing]\nconditional_returns = true\n",
+            "[project]\nsrc = [\"src\"]\n\n[typing]\nconditional_returns = true\n\n[experimental]\naccepted_features = [\"conditional_returns\"]\n",
         )
         .expect("test setup should succeed");
         fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
@@ -661,7 +661,7 @@ fn run_pipeline_uses_shadow_stubs_for_local_python_when_infer_passthrough_is_ena
     let (with_inference, shadow_stub) = {
         fs::write(
             project_dir.join("typepython.toml"),
-            "[project]\nsrc = [\"src\"]\n\n[typing]\ninfer_passthrough = true\n",
+            "[project]\nsrc = [\"src\"]\n\n[typing]\ninfer_passthrough = true\n\n[experimental]\naccepted_features = [\"infer_passthrough\"]\n",
         )
         .expect("test setup should succeed");
         fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
@@ -943,7 +943,7 @@ fn run_pipeline_invalidates_cache_when_runtime_validators_change() {
 
         fs::write(
             project_dir.join("typepython.toml"),
-            "[project]\nsrc = [\"src\"]\n\n[emit]\nruntime_validators = true\n",
+            "[project]\nsrc = [\"src\"]\n\n[emit]\nruntime_validators = true\n\n[experimental]\naccepted_features = [\"runtime_validators\"]\n",
         )
         .expect("test setup should succeed");
         let updated_config = load(&project_dir).expect("test setup should succeed");

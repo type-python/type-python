@@ -65,6 +65,8 @@ The following features are explicitly experimental in v1:
 If an implementation supports an experimental feature, it MUST:
 
 - gate it behind an explicit opt-in flag or config mechanism
+- reject an enabled config gate when the feature id is absent from
+  `[experimental].accepted_features`
 - document that it is outside Core v1 conformance
 - avoid changing the acceptance or rejection of Core v1 programs when the feature is disabled
 
@@ -134,7 +136,8 @@ At minimum:
 - Built-in type transform tests (`Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, composition, generic input, error cases)
 - Experimental conditional return lowering tests (coverage checking, generic conditional return, mutual exclusion with `overload def`)
 - Migration report output tests (coverage percentages, high-impact file ranking)
-- Experimental pass-through inference shadow stub tests (`infer_passthrough = true`)
+- Experimental pass-through inference shadow stub tests (`accepted_features = ["infer_passthrough"]`
+  and `infer_passthrough = true`)
 - Experimental runtime validator generation tests for `data class` only (supported types, unsupported type fallback, nested types)
 - Enhanced diagnostic quality tests (mismatch path, inference trace, suggested fix presence)
 

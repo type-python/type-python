@@ -131,7 +131,7 @@ Project discovery and configuration loading.
 | `[format]`     | `command`, `line_length`                                                                      |
 | `[emit]`       | `emit_pyi`, `emit_pyc`, `write_py_typed`, `no_emit_on_error`, `runtime_validators`            |
 | `[typing]`     | `profile`, `strict`, `strict_nulls`, `imports`, `warn_unsafe`, `enable_sealed_exhaustiveness` |
-| `[experimental]` | `shape_transforms`                                                                          |
+| `[experimental]` | `accepted_features`, `shape_transforms`                                                     |
 | `[watch]`      | `debounce_ms`                                                                                 |
 
 **Typing profiles:**

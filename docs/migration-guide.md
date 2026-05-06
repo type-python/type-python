@@ -53,6 +53,7 @@ This sets:
 - `require_known_public_types = false`
 - `infer_passthrough = false`
 - `conditional_returns = false`
+- `[experimental].accepted_features = []`
 
 The migration profile is lenient about implicit dynamic flow and public API completeness, but it still keeps nullability checks and unsafe-operation warnings enabled. Gradually tighten settings as you add types.
 

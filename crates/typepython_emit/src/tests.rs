@@ -211,7 +211,7 @@ fn write_runtime_outputs_adds_runtime_validators_only_when_enabled() {
     fs::create_dir_all(temp_dir.join("src/app")).expect("src/app should be created");
     fs::write(
         temp_dir.join("typepython.toml"),
-        "[project]\nsrc = [\"src\"]\n\n[emit]\nruntime_validators = true\n",
+        "[project]\nsrc = [\"src\"]\n\n[emit]\nruntime_validators = true\n\n[experimental]\naccepted_features = [\"runtime_validators\"]\n",
     )
     .expect("typepython.toml should be written");
     let _config = load(&temp_dir).expect("config should load");

@@ -133,7 +133,8 @@ preserve_comments = true
 no_emit_on_error = true
 
 # [Experimental] Emit runtime __tpy_validate__() methods on explicitly selected
-# data-class trust boundaries. Boundaries can be selected with
+# data-class trust boundaries. This also requires accepting "runtime_validators"
+# in [experimental].accepted_features. Boundaries can be selected with
 # # tpy:validate-boundary[:kind], __tpy_validate_boundary__ = True, or
 # __tpy_validation_boundary__ = "http_request" / "config_file" / related kinds.
 # Validators are emitted only when this flag is true, record the selected
@@ -214,11 +215,13 @@ require_explicit_overrides = false
 # Default: false
 require_known_public_types = false
 
-# [Experimental] Enable pass-through type inference for .py files.
+# [Experimental] Enable pass-through type inference for .py files. This also
+# requires accepting "infer_passthrough" in [experimental].accepted_features.
 # Default: false
 infer_passthrough = false
 
-# [Experimental] Enable conditional return type narrowing.
+# [Experimental] Enable conditional return type narrowing. This also requires
+# accepting "conditional_returns" in [experimental].accepted_features.
 # Default: false
 conditional_returns = false
 
@@ -228,9 +231,18 @@ conditional_returns = false
 # ============================================================================
 [experimental]
 
+# Accept unstable feature contracts before enabling their gates elsewhere.
+# Known feature ids:
+#   runtime_validators, conditional_returns, infer_passthrough,
+#   sync_async_dual_emit, shape_transforms, framework_adapters, effect_rows,
+#   taint, validator_witnesses, notebook_ingestion
+# Default: []
+accepted_features = []
+
 # Enable shape projection over non-TypedDict field-bearing sources such as
 # TypePython data classes. The emitted surface remains checker-neutral, but the
-# feature is not part of the Core v1 compatibility promise.
+# feature is not part of the Core v1 compatibility promise. This requires
+# accepting "shape_transforms" above.
 # Default: false
 shape_transforms = false
 
@@ -293,9 +305,10 @@ For gradual adoption in existing Python projects. It relaxes strictness, but it 
 
 Experimental defaults:
 
-| Setting            | Value   |
-| ------------------ | ------- |
-| `shape_transforms` | `false` |
+| Setting             | Value   |
+| ------------------- | ------- |
+| `accepted_features` | `[]`    |
+| `shape_transforms`  | `false` |
 
 ## pyproject.toml Embedding
 

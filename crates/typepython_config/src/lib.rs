@@ -14,6 +14,29 @@ use thiserror::Error;
 use typepython_target::{EmitStyle, PythonTarget};
 
 const NULL_SENTINEL: &str = "__TYPEPYTHON_NULL__";
+pub const EXPERIMENTAL_RUNTIME_VALIDATORS: &str = "runtime_validators";
+pub const EXPERIMENTAL_CONDITIONAL_RETURNS: &str = "conditional_returns";
+pub const EXPERIMENTAL_INFER_PASSTHROUGH: &str = "infer_passthrough";
+pub const EXPERIMENTAL_SYNC_ASYNC_DUAL_EMIT: &str = "sync_async_dual_emit";
+pub const EXPERIMENTAL_SHAPE_TRANSFORMS: &str = "shape_transforms";
+pub const EXPERIMENTAL_FRAMEWORK_ADAPTERS: &str = "framework_adapters";
+pub const EXPERIMENTAL_EFFECT_ROWS: &str = "effect_rows";
+pub const EXPERIMENTAL_TAINT: &str = "taint";
+pub const EXPERIMENTAL_VALIDATOR_WITNESSES: &str = "validator_witnesses";
+pub const EXPERIMENTAL_NOTEBOOK_INGESTION: &str = "notebook_ingestion";
+
+const KNOWN_EXPERIMENTAL_FEATURES: &[&str] = &[
+    EXPERIMENTAL_RUNTIME_VALIDATORS,
+    EXPERIMENTAL_CONDITIONAL_RETURNS,
+    EXPERIMENTAL_INFER_PASSTHROUGH,
+    EXPERIMENTAL_SYNC_ASYNC_DUAL_EMIT,
+    EXPERIMENTAL_SHAPE_TRANSFORMS,
+    EXPERIMENTAL_FRAMEWORK_ADAPTERS,
+    EXPERIMENTAL_EFFECT_ROWS,
+    EXPERIMENTAL_TAINT,
+    EXPERIMENTAL_VALIDATOR_WITNESSES,
+    EXPERIMENTAL_NOTEBOOK_INGESTION,
+];
 
 /// Resolved TypePython configuration source.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
@@ -269,8 +292,16 @@ impl Default for EmitConfig {
 /// Explicit opt-ins for experimental language slices.
 #[derive(Debug, Clone, Default)]
 pub struct ExperimentalConfig {
+    /// Explicitly accepted experimental feature ids.
+    pub accepted_features: Vec<String>,
     /// Enable shape projection over non-`TypedDict` field-bearing sources.
     pub shape_transforms: bool,
+}
+
+impl ExperimentalConfig {
+    pub fn accepts_feature(&self, feature_id: &str) -> bool {
+        self.accepted_features.iter().any(|accepted| accepted == feature_id)
+    }
 }
 
 /// Import typing fallback.
@@ -429,6 +460,7 @@ struct RawEmitConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawExperimentalConfig {
+    accepted_features: Option<Vec<String>>,
     shape_transforms: Option<bool>,
 }
 
@@ -512,6 +544,7 @@ impl Config {
 
         validate_emit_preserve_comments(config_path, self.emit.preserve_comments)?;
         validate_formatter_config(config_path, &self.format)?;
+        validate_experimental_features(config_path, self)?;
 
         Ok(())
     }
@@ -609,10 +642,13 @@ impl Config {
             config.watch.debounce_ms = debounce_ms;
         }
 
-        if let Some(experimental) = raw.experimental
-            && let Some(shape_transforms) = experimental.shape_transforms
-        {
-            config.experimental.shape_transforms = shape_transforms;
+        if let Some(experimental) = raw.experimental {
+            if let Some(accepted_features) = experimental.accepted_features {
+                config.experimental.accepted_features = accepted_features;
+            }
+            if let Some(shape_transforms) = experimental.shape_transforms {
+                config.experimental.shape_transforms = shape_transforms;
+            }
         }
 
         if let Some(boundaries) = raw.boundaries {
@@ -924,6 +960,70 @@ fn validate_emit_preserve_comments(
             path: config_path.to_path_buf(),
             message: String::from(
                 "emit.preserve_comments = false is not implemented yet; lowered output currently always preserves comments when available",
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_experimental_features(config_path: &Path, config: &Config) -> Result<(), ConfigError> {
+    for feature in &config.experimental.accepted_features {
+        if !KNOWN_EXPERIMENTAL_FEATURES.contains(&feature.as_str()) {
+            return Err(ConfigError::InvalidValue {
+                path: config_path.to_path_buf(),
+                message: format!(
+                    "experimental.accepted_features contains unknown feature `{feature}`; expected one of {}",
+                    KNOWN_EXPERIMENTAL_FEATURES.join(", ")
+                ),
+            });
+        }
+    }
+
+    require_accepted_experimental_feature(
+        config_path,
+        config,
+        config.emit.runtime_validators || !config.boundaries.is_empty(),
+        EXPERIMENTAL_RUNTIME_VALIDATORS,
+        "emit.runtime_validators or [[boundaries]]",
+    )?;
+    require_accepted_experimental_feature(
+        config_path,
+        config,
+        config.typing.conditional_returns,
+        EXPERIMENTAL_CONDITIONAL_RETURNS,
+        "typing.conditional_returns",
+    )?;
+    require_accepted_experimental_feature(
+        config_path,
+        config,
+        config.typing.infer_passthrough,
+        EXPERIMENTAL_INFER_PASSTHROUGH,
+        "typing.infer_passthrough",
+    )?;
+    require_accepted_experimental_feature(
+        config_path,
+        config,
+        config.experimental.shape_transforms,
+        EXPERIMENTAL_SHAPE_TRANSFORMS,
+        "experimental.shape_transforms",
+    )?;
+
+    Ok(())
+}
+
+fn require_accepted_experimental_feature(
+    config_path: &Path,
+    config: &Config,
+    enabled: bool,
+    feature_id: &str,
+    field_name: &str,
+) -> Result<(), ConfigError> {
+    if enabled && !config.experimental.accepts_feature(feature_id) {
+        return Err(ConfigError::InvalidValue {
+            path: config_path.to_path_buf(),
+            message: format!(
+                "{field_name} enables Experimental feature `{feature_id}`; add [experimental] accepted_features = [\"{feature_id}\"] to accept the unstable contract"
             ),
         });
     }
@@ -1635,8 +1735,16 @@ mod tests {
     #[test]
     fn loads_conditional_return_opt_in_from_typepython_toml() {
         let project_dir = temp_project_dir("loads_conditional_return_opt_in_from_typepython_toml");
-        fs::write(project_dir.join("typepython.toml"), "[typing]\nconditional_returns = true\n")
-            .expect("typepython.toml should be written");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!(
+                "[typing]\n",
+                "conditional_returns = true\n\n",
+                "[experimental]\n",
+                "accepted_features = [\"conditional_returns\"]\n"
+            ),
+        )
+        .expect("typepython.toml should be written");
 
         let load_result = load(&project_dir);
 
@@ -1649,8 +1757,16 @@ mod tests {
     #[test]
     fn loads_infer_passthrough_opt_in_from_typepython_toml() {
         let project_dir = temp_project_dir("loads_infer_passthrough_opt_in_from_typepython_toml");
-        fs::write(project_dir.join("typepython.toml"), "[typing]\ninfer_passthrough = true\n")
-            .expect("typepython.toml should be written");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!(
+                "[typing]\n",
+                "infer_passthrough = true\n\n",
+                "[experimental]\n",
+                "accepted_features = [\"infer_passthrough\"]\n"
+            ),
+        )
+        .expect("typepython.toml should be written");
 
         let load_result = load(&project_dir);
 
@@ -1704,6 +1820,7 @@ mod tests {
                     "infer_passthrough = true\n",
                     "conditional_returns = true\n\n",
                     "[experimental]\n",
+                    "accepted_features = [\"runtime_validators\", \"conditional_returns\", \"infer_passthrough\", \"shape_transforms\"]\n",
                     "shape_transforms = true\n\n",
                     "[watch]\n",
                     "debounce_ms = 125\n\n",
@@ -1776,6 +1893,15 @@ mod tests {
         assert!(handle.config.typing.require_known_public_types);
         assert!(handle.config.typing.infer_passthrough);
         assert!(handle.config.typing.conditional_returns);
+        assert_eq!(
+            handle.config.experimental.accepted_features,
+            vec![
+                String::from("runtime_validators"),
+                String::from("conditional_returns"),
+                String::from("infer_passthrough"),
+                String::from("shape_transforms"),
+            ]
+        );
         assert!(handle.config.experimental.shape_transforms);
         assert_eq!(handle.config.watch.debounce_ms, 125);
         assert_eq!(handle.config.boundaries.len(), 2);
@@ -1833,6 +1959,7 @@ mod tests {
                     "infer_passthrough = false\n",
                     "conditional_returns = false\n\n",
                     "[tool.typepython.experimental]\n",
+                    "accepted_features = []\n",
                     "shape_transforms = false\n\n",
                     "[tool.typepython.watch]\n",
                     "debounce_ms = 40\n"
@@ -1884,8 +2011,83 @@ mod tests {
         assert!(!handle.config.typing.require_known_public_types);
         assert!(!handle.config.typing.infer_passthrough);
         assert!(!handle.config.typing.conditional_returns);
+        assert!(handle.config.experimental.accepted_features.is_empty());
         assert!(!handle.config.experimental.shape_transforms);
         assert_eq!(handle.config.watch.debounce_ms, 40);
+    }
+
+    #[test]
+    fn rejects_enabled_experimental_features_without_acceptance() {
+        let cases = [
+            (
+                "runtime_validators",
+                concat!("[emit]\n", "runtime_validators = true\n"),
+                "runtime_validators",
+            ),
+            (
+                "boundaries",
+                concat!(
+                    "[[boundaries]]\n",
+                    "name = \"create_user_request\"\n",
+                    "kind = \"http_request\"\n",
+                    "validator = \"delegate\"\n"
+                ),
+                "runtime_validators",
+            ),
+            (
+                "conditional_returns",
+                concat!("[typing]\n", "conditional_returns = true\n"),
+                "conditional_returns",
+            ),
+            (
+                "infer_passthrough",
+                concat!("[typing]\n", "infer_passthrough = true\n"),
+                "infer_passthrough",
+            ),
+            (
+                "shape_transforms",
+                concat!("[experimental]\n", "shape_transforms = true\n"),
+                "shape_transforms",
+            ),
+        ];
+
+        for (case_name, config_text, feature_id) in cases {
+            let project_dir = temp_project_dir(&format!(
+                "rejects_enabled_experimental_features_without_acceptance_{case_name}"
+            ));
+            fs::write(project_dir.join("typepython.toml"), config_text)
+                .expect("typepython.toml should be written");
+
+            let load_result = load(&project_dir);
+
+            remove_temp_project_dir(&project_dir);
+
+            let error = load_result.expect_err("expected unaccepted experimental feature to fail");
+            let message = error.to_string();
+            assert!(message.contains("TPY1002"));
+            assert!(message.contains(feature_id), "{message}");
+            assert!(message.contains("accepted_features"), "{message}");
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_accepted_experimental_features() {
+        let project_dir = temp_project_dir("rejects_unknown_accepted_experimental_features");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[experimental]\naccepted_features = [\"future_magic\"]\n",
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected unknown accepted feature to fail");
+        let message = error.to_string();
+        assert!(message.contains("TPY1002"));
+        assert!(message.contains("future_magic"));
+        assert!(message.contains("runtime_validators"));
     }
 
     #[test]

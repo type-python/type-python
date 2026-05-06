@@ -1725,7 +1725,7 @@ fn execute_command_previews_current_file_emit_outputs() {
 fn execute_command_preview_honors_experimental_shape_transform_gate() {
     let config = temp_workspace_with_config(
         "execute_command_preview_honors_experimental_shape_transform_gate",
-        "[project]\nsrc = [\"src\"]\n\n[experimental]\nshape_transforms = true\n",
+        "[project]\nsrc = [\"src\"]\n\n[experimental]\naccepted_features = [\"shape_transforms\"]\nshape_transforms = true\n",
         &[(
             "src/app/__init__.tpy",
             "data class User:\n    id: int\n    name: str\n\n\
@@ -2762,7 +2762,7 @@ fn incremental_workspace_reports_module_collision_diagnostics() {
 fn incremental_workspace_uses_shadow_stubs_for_local_python_when_infer_passthrough_is_enabled() {
     let config = temp_workspace_with_config(
         "incremental_workspace_uses_shadow_stubs_for_local_python_when_infer_passthrough_is_enabled",
-        "[project]\nsrc = [\"src\"]\n\n[typing]\ninfer_passthrough = true\n",
+        "[project]\nsrc = [\"src\"]\n\n[typing]\ninfer_passthrough = true\n\n[experimental]\naccepted_features = [\"infer_passthrough\"]\n",
         &[
             (
                 "src/app/helpers.py",

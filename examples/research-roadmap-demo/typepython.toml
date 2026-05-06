@@ -15,6 +15,7 @@ imports = "unknown"
 warn_unsafe = true
 
 [experimental]
+accepted_features = ["shape_transforms"]
 shape_transforms = true
 
 [emit]

@@ -150,7 +150,8 @@ The `frozen` attribute is controlled by the standard `@dataclass(frozen=True)` p
 
 **Runtime validators (experimental):**
 
-When `emit.runtime_validators = true`, selected data-class boundaries gain a classmethod
+When `[experimental].accepted_features` includes `"runtime_validators"` and
+`emit.runtime_validators = true`, selected data-class boundaries gain a classmethod
 `__tpy_validate__()` method. The generated runtime code records which adapter owns validation:
 
 ```python

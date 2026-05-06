@@ -113,6 +113,11 @@ report_deprecated = "warning"                    # "ignore", "warning", or "erro
 require_explicit_overrides = false               # Require @override on overriding members
 require_known_public_types = false               # Disallow exported dynamic/unknown types
 infer_passthrough = false                        # Experimental: best-effort inference for .py files
+conditional_returns = false                      # Experimental: conditional return syntax
+
+[experimental]
+accepted_features = []                           # Experimental feature ids explicitly accepted by the project
+shape_transforms = false                         # Experimental: non-TypedDict shape projections
 
 [watch]
 debounce_ms = 80                                 # Debounce delay in ms
@@ -157,7 +162,7 @@ If `python_executable` is configured and its resolved Python major/minor version
 | `write_py_typed`     | bool | Emit `py.typed` marker for typed packages                       |
 | `preserve_comments`  | bool | Reserved toggle for future comment-stripping control; current implementations always preserve comments when available |
 | `no_emit_on_error`   | bool | Block best-effort output after semantic/public-surface errors; discovery/parse/lowering remain hard blockers |
-| `runtime_validators` | bool | Experimental: emit `__tpy_validate__` classmethod on explicitly selected data-class trust boundaries |
+| `runtime_validators` | bool | Experimental: emit `__tpy_validate__` classmethod on explicitly selected data-class trust boundaries; requires `runtime_validators` in `[experimental].accepted_features` |
 | `emit_style`         | string | Lowering strategy: `compat` preserves broad legacy compatibility, `native` preserves target-native typing syntax when supported |
 
 **`[typing]` fields:**
@@ -174,7 +179,15 @@ If `python_executable` is configured and its resolved Python major/minor version
 | `report_deprecated`            | string         | Severity for deprecated-symbol use: `ignore`, `warning`, or `error`                   |
 | `require_explicit_overrides`   | bool           | Require `@override` on overriding methods and properties                              |
 | `require_known_public_types`   | bool           | Diagnose exported surfaces containing `dynamic` or unresolved `unknown`               |
-| `infer_passthrough`            | bool           | Experimental best-effort type inference for pass-through `.py` files (Section 18.8.2) |
+| `infer_passthrough`            | bool           | Experimental best-effort type inference for pass-through `.py` files (Section 18.8.2); requires `infer_passthrough` in `[experimental].accepted_features` |
+| `conditional_returns`          | bool           | Experimental conditional return syntax; requires `conditional_returns` in `[experimental].accepted_features` |
+
+**`[experimental]` fields:**
+
+| Field               | Type           | Semantics                                                                            |
+| ------------------- | -------------- | ------------------------------------------------------------------------------------ |
+| `accepted_features` | list of string | Experimental feature ids whose unstable contract the project explicitly accepts      |
+| `shape_transforms`  | bool           | Experimental non-`TypedDict` shape projection; requires `shape_transforms` acceptance |
 
 **`[watch]` fields:**
 
@@ -191,6 +204,8 @@ At minimum:
 - unknown top-level tables MUST be diagnosed
 - unknown keys inside a recognized table MUST be diagnosed
 - implementations MUST reject values whose types do not match the declared schema
+- implementations MUST reject enabled Experimental v1 gates whose feature id is absent from
+  `[experimental].accepted_features`
 - implementations MUST apply CLI overrides only after configuration-file parsing and schema validation complete
 - implementations MUST NOT silently reinterpret an invalid key as a profile expansion, alias, or deprecated spelling
 
@@ -682,7 +697,7 @@ These requirements are about publishability and downstream-tool consumption, not
 
 #### 13.6.5 Runtime Validator Emission
 
-Runtime validator emission is Experimental v1. When `emit.runtime_validators = true`, the emitter MUST generate a `__tpy_validate__` classmethod only for explicitly selected data-class trust boundaries in the emitted `.py`. Selected boundaries may be marked with `# tpy:validate-boundary`, `# tpy:validate-boundary:<kind>`, `__tpy_validate_boundary__ = True`, or `__tpy_validation_boundary__ = "<kind>"`. Supported boundary kinds are `http_request`, `http_response`, `cli_param`, `config_file`, `message_payload`, `plugin_entrypoint`, and `serialized_payload`.
+Runtime validator emission is Experimental v1. When `[experimental].accepted_features` contains `"runtime_validators"` and `emit.runtime_validators = true`, the emitter MUST generate a `__tpy_validate__` classmethod only for explicitly selected data-class trust boundaries in the emitted `.py`. Selected boundaries may be marked with `# tpy:validate-boundary`, `# tpy:validate-boundary:<kind>`, `__tpy_validate_boundary__ = True`, or `__tpy_validation_boundary__ = "<kind>"`. Supported boundary kinds are `http_request`, `http_response`, `cli_param`, `config_file`, `message_payload`, `plugin_entrypoint`, and `serialized_payload`.
 
 ```python
 # Input (.tpy)
@@ -692,7 +707,7 @@ data class UserInput:
     age: int
     email: str | None = None
 
-# Emitted .py (with runtime_validators = true)
+# Emitted .py (with runtime_validators accepted and enabled)
 from dataclasses import dataclass
 
 @dataclass
@@ -1108,7 +1123,7 @@ The report MUST be available in both human-readable and structured JSON formats.
 
 #### 18.8.2 Pass-Through Inference
 
-Pass-through inference is Experimental v1. When `typing.infer_passthrough = true` is configured and the implementation supports the experimental feature, the compiler SHOULD perform best-effort type inference on pass-through `.py` files in the project:
+Pass-through inference is Experimental v1. When `[experimental].accepted_features` contains `"infer_passthrough"`, `typing.infer_passthrough = true` is configured, and the implementation supports the experimental feature, the compiler SHOULD perform best-effort type inference on pass-through `.py` files in the project:
 
 - Inferred types are stored as **shadow stubs** in the cache directory, not written to the source `.py` files.
 - Shadow stubs are used as the typing surface for the inferred module during compilation of dependent `.tpy` files.

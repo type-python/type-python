@@ -31,7 +31,9 @@ dimensions:
 | `serialized_payload` | JSON/YAML/TOML blob | explicit serializer adapter |
 
 The built-in `emit.runtime_validators = true` option remains opt-in and intentionally narrow by
-default: it emits data-class runtime validators for project-owned generated code. Selected
+default: the project must also list `"runtime_validators"` in
+`[experimental].accepted_features`. When both gates are present, it emits data-class runtime
+validators for project-owned generated code. Selected
 boundaries can now opt into adapter delegation by setting `__tpy_validate_boundary__ = True` and
 `__tpy_validation_adapter__ = "builtin" | "pydantic" | "msgspec" | "cattrs"` on the generated
 runtime class. Non-built-in adapters delegate to the framework/library-owned validation entrypoint

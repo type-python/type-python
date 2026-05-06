@@ -134,7 +134,7 @@ fn cli_and_lsp_agree_when_infer_passthrough_eliminates_errors() {
     let (cli_codes, lsp_codes) = {
         fs::write(
             project_dir.join("typepython.toml"),
-            "[project]\nsrc = [\"src\"]\n\n[typing]\ninfer_passthrough = true\n",
+            "[project]\nsrc = [\"src\"]\n\n[typing]\ninfer_passthrough = true\n\n[experimental]\naccepted_features = [\"infer_passthrough\"]\n",
         )
         .expect("test setup should succeed");
         fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");

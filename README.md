@@ -243,6 +243,9 @@ strict_nulls = true
 [emit]
 emit_pyi = true
 no_emit_on_error = true
+
+[experimental]
+accepted_features = []          # add feature ids before enabling unstable gates
 ```
 
 Full reference: [`docs/configuration.md`](docs/configuration.md).
