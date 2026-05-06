@@ -276,6 +276,45 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("basedpyright", readme)
         self.assertIn("basedpyright", pypi_readme)
 
+    def test_industrial_performance_gate_is_documented(self) -> None:
+        architecture = read_text("docs/architecture.md")
+        benchmarks = read_text("docs/benchmarks.md")
+        beta = read_text("docs/beta-readiness.md")
+        normalized_beta = " ".join(beta.split())
+        makefile = read_text("Makefile")
+        project = read_text("crates/typepython_project/src/lib.rs")
+        lsp_bench = read_text("crates/typepython_lsp/benches/incremental.rs")
+
+        self.assertIn("scripts/industrial_perf_smoke.py", benchmarks)
+        self.assertIn("cold check", benchmarks)
+        self.assertIn("warm check", benchmarks)
+        self.assertIn("single-file implementation edit", benchmarks)
+        self.assertIn("public surface edit", benchmarks)
+        self.assertIn("peak RSS", benchmarks)
+        self.assertIn("p95/p99", benchmarks)
+        self.assertIn("make perf-smoke", benchmarks)
+        self.assertIn("perf-smoke:", makefile)
+        self.assertIn("scripts/test_industrial_perf_smoke.py", makefile)
+
+        self.assertIn("lsp_incremental_impl_edit_session_512_modules", benchmarks)
+        self.assertIn("lsp_incremental_public_edit_session_512_modules", benchmarks)
+        self.assertIn("bench_incremental_implementation_edit_session_large", lsp_bench)
+        self.assertIn("bench_incremental_public_edit_session_large", lsp_bench)
+
+        self.assertIn("recursive file manifest", architecture)
+        self.assertIn("content hash", architecture)
+        self.assertIn("const SUPPORT_SOURCE_INDEX_VERSION: u32 = 2", project)
+        self.assertIn("struct CachedSupportFile", project)
+        self.assertIn("content_hash", project)
+
+        self.assertIn("industrial performance evidence", beta)
+        self.assertIn("cold check time", normalized_beta)
+        self.assertIn("warm check time", normalized_beta)
+        self.assertIn("single-file implementation edit latency", normalized_beta)
+        self.assertIn("public surface edit latency", normalized_beta)
+        self.assertIn("peak RSS", beta)
+        self.assertIn("p95/p99", beta)
+
     def test_conformance_beta_scope_classification_is_precise(self) -> None:
         conformance_report = load_script_module(
             "scripts/conformance_report.py",

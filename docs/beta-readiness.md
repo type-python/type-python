@@ -75,6 +75,10 @@ A Beta release candidate must pass the tracked release gate before the classifie
 - Python 3.9 wrapper smoke
 - Python 3.13 and 3.14 target smoke
 - macOS and Windows platform smoke
+- industrial performance evidence: `python scripts/industrial_perf_smoke.py` on the release
+  candidate, recording cold check, warm check, single-file implementation edit, public surface edit,
+  and peak RSS; plus the 512-module `typepython_lsp` incremental Criterion suite with p95/p99
+  hover-session latency evidence
 
 The GitHub `rust` workflow has the authoritative `beta-release-gate` job and depends on these
 families, including interpreter- and platform-specific smoke jobs that require GitHub-hosted Python
@@ -105,3 +109,15 @@ Known checker disagreements must stay explicit in `test-fixtures/downstream-chec
 with `allowlist_reason` and a non-expired `allowlist_expires` date. The smoke runner rejects expired
 allowlists before invoking external checkers so release candidates cannot silently carry stale
 checker disagreements.
+
+## Industrial performance baseline
+
+The repository distinguishes micro-benchmark coverage from industrial-scale evidence. The
+parse/lower/graph/checker Criterion suites are useful regression sentinels, but they are not enough
+to claim monorepo maturity. Before v1.0, release notes must include a checked artifact from
+`scripts/industrial_perf_smoke.py` and the 512-module LSP incremental bench.
+
+The minimum recorded fields are cold check time, warm check time, single-file implementation edit
+latency, public surface edit latency, peak RSS, target Python version, module count, external stub
+package count, and the TypePython command used. If a platform cannot report RSS or p95/p99, the
+release note must say so explicitly instead of implying coverage.

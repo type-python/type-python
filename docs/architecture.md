@@ -332,7 +332,10 @@ Shared project/discovery support used by the CLI and LSP layers.
 **Responsibilities:**
 
 - Project source discovery with `include` / `exclude` handling
-- External support source indexing and Python executable resolution
+- External support source indexing and Python executable resolution. The support index cache uses
+  a recursive file manifest over discovered support-source inputs (`.pyi`, eligible `.py`, and
+  `py.typed`) with per-file length, modified time, and content hash; root-directory mtime is not
+  treated as sufficient cache identity.
 - Inferred shadow-stub generation for local `.py` files when `typing.infer_passthrough = true`
 - Shadow-stub cache materialization for incremental reuse
 

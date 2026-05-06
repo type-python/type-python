@@ -52,18 +52,40 @@ Checked-in baseline evidence for the current checker suite lives in
 
 ### incremental (`typepython_lsp`)
 
-Measures end-to-end LSP edit sessions over a 48-module workspace using the
-stdio JSON-RPC server path.
+Measures end-to-end LSP edit sessions over 48-module and 512-module workspaces
+using the stdio JSON-RPC server path.
 
 | Benchmark                                        | Input                                                   |
 | ------------------------------------------------ | ------------------------------------------------------- |
 | `lsp_incremental_impl_edit_session_48_modules`   | An implementation-only edit followed by a hover request |
 | `lsp_incremental_public_edit_session_48_modules` | A public-signature edit followed by a hover request     |
+| `lsp_incremental_impl_edit_session_512_modules`  | Same session shape over a larger workspace              |
+| `lsp_incremental_public_edit_session_512_modules` | Same session shape over a larger workspace             |
 
 The checked-in end-to-end incremental benchmark currently targets the longest-lived
 incremental session path (`typepython_lsp`). One-shot CLI commands now use the same
 affected-module invalidation rules for selective check/lower/emit, and that behavior
 is covered by the CLI pipeline test suite rather than a separate Criterion target.
+
+### industrial smoke (`scripts/industrial_perf_smoke.py`)
+
+Generates a synthetic large workspace and measures full CLI pipeline behavior
+outside Criterion. The fixture includes a chain of `.tpy` modules, a configured
+external `typestubs` root, implicit namespace-package stubs, a partial stub
+package, and a deterministic Python probe so local `site-packages` does not
+pollute the run.
+
+The smoke records:
+
+- cold check time
+- warm check time
+- single-file implementation edit recheck time
+- public surface edit recheck time
+- peak RSS when `/usr/bin/time` is available
+
+The script writes machine-readable JSON when `--json-out` is provided. Use this
+for large-workspace release evidence; do not treat the 48-module LSP session or
+the checker micro-benchmark as an industrial-scale proof by itself.
 
 ## Running benchmarks
 
@@ -78,6 +100,28 @@ Run the LSP incremental suite separately:
 ```sh
 cargo bench -p typepython-lsp --bench incremental
 ```
+
+Run the industrial CLI smoke with the default 512-module, 128-external-stub
+fixture:
+
+```sh
+make perf-smoke
+```
+
+Record a larger v1 release-candidate sample:
+
+```sh
+python scripts/industrial_perf_smoke.py \
+  --modules 1000 \
+  --external-stubs 500 \
+  --target-python 3.13 \
+  --json-out perf/industrial-1000-3.13.json
+```
+
+For LSP latency claims, record the 512-module implementation-edit and
+public-surface-edit Criterion runs and capture p95/p99 hover-session latency
+evidence from the benchmark output or the external profiling tool used for the
+release candidate.
 
 Compile-check benchmarks without running them (used in CI):
 
@@ -118,3 +162,4 @@ suites. The LSP incremental benchmark is intentionally documented separately.
 | `make bench-check`    | Compile all workspace benchmarks without running them |
 | `make bench-baseline` | Save the v0.1.0 baseline for the core suites          |
 | `make bench-compare`  | Compare the core suites against the v0.1.0 baseline   |
+| `make perf-smoke`     | Run the industrial CLI cold/warm/edit smoke           |
