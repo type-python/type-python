@@ -732,21 +732,6 @@ fn finalize_generic_solution_detailed(
     Ok(substitutions)
 }
 
-pub(crate) fn finalize_generic_type_param_substitutions_detailed(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    function: &Declaration,
-    substitutions: GenericTypeParamSubstitutions,
-) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
-    finalize_generic_type_param_substitutions_detailed_with_options(
-        node,
-        nodes,
-        function,
-        substitutions,
-        AssignabilityOptions::default(),
-    )
-}
-
 pub(crate) fn finalize_generic_type_param_substitutions_detailed_with_options(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],

@@ -873,6 +873,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
     declaration: &Declaration,
     signature: &[SemanticCallableParam],
     actual: &SemanticType,
+    options: AssignabilityOptions,
 ) -> Result<GenericTypeParamSubstitutions, DirectCallResolutionFailure> {
     if declaration.type_params.is_empty() {
         return Ok(GenericTypeParamSubstitutions::default());
@@ -956,7 +957,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
                 &type_names,
                 &param_spec_names,
                 &substitutions,
-                AssignabilityOptions::default(),
+                options,
             )
             .ok_or_else(|| {
                 DirectCallResolutionFailure::GenericSolve(
@@ -971,7 +972,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
             node,
             nodes,
             &mut substitutions,
-            AssignabilityOptions::default(),
+            options,
             param_spec_bindings,
         )
         .ok_or_else(|| {
@@ -989,7 +990,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
             &type_names,
             &substitutions,
             &type_pack_names,
-            AssignabilityOptions::default(),
+            options,
         )
         .ok_or_else(|| {
             DirectCallResolutionFailure::GenericSolve(GenericSolveFailure::TypeBindingInferenceFailed {
@@ -1001,7 +1002,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
             node,
             nodes,
             &mut substitutions,
-            AssignabilityOptions::default(),
+            options,
             return_bindings,
         )
         .ok_or_else(|| {
@@ -1021,7 +1022,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
             &type_names,
             &substitutions,
             &type_pack_names,
-            AssignabilityOptions::default(),
+            options,
         )
         .ok_or_else(|| {
             DirectCallResolutionFailure::GenericSolve(GenericSolveFailure::TypeBindingInferenceFailed {
@@ -1033,7 +1034,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
             node,
             nodes,
             &mut substitutions,
-            AssignabilityOptions::default(),
+            options,
             generic_bindings,
         )
         .ok_or_else(|| {
@@ -1042,8 +1043,14 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
             })
         })?;
     }
-    finalize_generic_type_param_substitutions_detailed(node, nodes, declaration, substitutions)
-        .map_err(DirectCallResolutionFailure::GenericSolve)
+    finalize_generic_type_param_substitutions_detailed_with_options(
+        node,
+        nodes,
+        declaration,
+        substitutions,
+        options,
+    )
+    .map_err(DirectCallResolutionFailure::GenericSolve)
 }
 
 fn generic_param_name_sets(
@@ -1077,6 +1084,7 @@ fn augment_semantic_callable_paramlist_substitutions(
     signature: &[SemanticCallableParam],
     actual: &SemanticType,
     mut substitutions: GenericTypeParamSubstitutions,
+    options: AssignabilityOptions,
 ) -> GenericTypeParamSubstitutions {
     let (_type_names, param_spec_names, _type_pack_names) = generic_param_name_sets(declaration);
     if param_spec_names.is_empty() || !substitutions.param_lists.is_empty() {
@@ -1108,7 +1116,7 @@ fn augment_semantic_callable_paramlist_substitutions(
         &BTreeSet::new(),
         &param_spec_names,
         &substitutions,
-        AssignabilityOptions::default(),
+        options,
     ) else {
         return substitutions;
     };
@@ -1116,7 +1124,7 @@ fn augment_semantic_callable_paramlist_substitutions(
         node,
         nodes,
         &mut substitutions,
-        AssignabilityOptions::default(),
+        options,
         bindings,
     );
     substitutions
@@ -1127,6 +1135,7 @@ fn resolve_direct_single_semantic_argument_candidate_detailed<'a>(
     nodes: &[typepython_graph::ModuleNode],
     declaration: &'a Declaration,
     actual: &SemanticType,
+    options: AssignabilityOptions,
 ) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
     let callable = declaration_callable_semantics(declaration).ok_or_else(|| {
         DirectCallResolutionFailure::SignatureInstantiationFailed {
@@ -1142,6 +1151,7 @@ fn resolve_direct_single_semantic_argument_candidate_detailed<'a>(
         declaration,
         &semantic_signature,
         actual,
+        options,
     )?;
     let substitutions = augment_semantic_callable_paramlist_substitutions(
         node,
@@ -1150,6 +1160,7 @@ fn resolve_direct_single_semantic_argument_candidate_detailed<'a>(
         &semantic_signature,
         actual,
         substitutions,
+        options,
     );
     let signature_sites = if declaration.type_params.is_empty() {
         signature
@@ -1192,6 +1203,7 @@ fn decorator_candidate_accepts_semantic_callable(
     nodes: &[typepython_graph::ModuleNode],
     candidate: &ResolvedDirectCallCandidate<'_>,
     current_callable: &SemanticType,
+    options: AssignabilityOptions,
 ) -> bool {
     let synthetic_call = synthetic_single_positional_call(&candidate.declaration.name);
     if !call_signature_params_are_applicable(node, nodes, &synthetic_call, &candidate.signature_params)
@@ -1207,7 +1219,7 @@ fn decorator_candidate_accepts_semantic_callable(
     let Some(annotation) = param.annotation.as_ref() else {
         return true;
     };
-    semantic_type_is_assignable(node, nodes, annotation, current_callable)
+    semantic_type_is_assignable_with_options(node, nodes, annotation, current_callable, options)
 }
 
 fn substitute_single_paramspec_from_semantic_callable(
@@ -1276,20 +1288,28 @@ pub(super) fn apply_named_callable_decorator_transform_semantic(
 }
 
 pub(super) fn apply_named_callable_decorator_transform_semantic_with_context(
-    _context: &CheckerContext<'_>,
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     decorator_name: &str,
     current_callable: &SemanticType,
 ) -> Option<SemanticType> {
     let (decorator_node, decorator) = resolve_function_provider_with_node(nodes, node, decorator_name)?;
+    let options = context.assignability_options();
     let resolved =
-        resolve_direct_single_semantic_argument_candidate_detailed(decorator_node, nodes, decorator, current_callable).ok()?;
+        resolve_direct_single_semantic_argument_candidate_detailed(
+            decorator_node,
+            nodes,
+            decorator,
+            current_callable,
+            options,
+        ).ok()?;
     if !decorator_candidate_accepts_semantic_callable(
         decorator_node,
         nodes,
         &resolved,
         current_callable,
+        options,
     ) {
         return None;
     }

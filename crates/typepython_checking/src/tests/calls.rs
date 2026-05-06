@@ -33,6 +33,29 @@ fn check_accepts_keyword_and_default_arguments_in_direct_calls() {
 }
 
 #[test]
+fn check_decorated_callable_transform_honors_strict_nulls_option() {
+    let result = check_temp_typepython_source_with_checker_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "def keep(fn: Callable[[int], int]) -> Callable[[int], int]:\n",
+            "    return fn\n\n",
+            "@keep\n",
+            "def maybe(value: int) -> None:\n",
+            "    return None\n",
+        ),
+        ParseOptions::default(),
+        crate::CheckerOptions {
+            strict: true,
+            strict_nulls: false,
+            ..crate::CheckerOptions::default()
+        },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
 fn check_reports_positional_only_parameter_passed_as_keyword() {
     let result =
         check_temp_typepython_source("def takes(x: int, /):\n    return x\n\ntakes(x=1)\n");
