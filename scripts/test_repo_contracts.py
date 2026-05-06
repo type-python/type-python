@@ -327,6 +327,51 @@ class RepoContractsTests(unittest.TestCase):
             conformance_script,
         )
 
+    def test_canonical_type_relation_boundaries_are_enforced(self) -> None:
+        architecture = read_text("docs/architecture.md")
+        assignability = read_text(
+            "crates/typepython_checking/src/type_system/assignability.rs"
+        )
+
+        self.assertIn("Canonical type model boundary", architecture)
+        self.assertIn("`SemanticType` is the checker relationship shape", architecture)
+        self.assertIn("pub(super) struct TypeRelationContext", assignability)
+        self.assertIn(
+            "semantic_invariant_type_matches(node, nodes, expected_arg, actual_arg)",
+            assignability,
+        )
+        self.assertIn("join_semantic_type_candidates(actual_args.to_vec())", assignability)
+
+        for forbidden in (
+            "fn invariant_type_matches",
+            "fn direct_type_matches",
+            "render_semantic_type(expected_arg)",
+            "render_semantic_type(actual_arg)",
+            "actual_args.iter().map(render_semantic_type)",
+        ):
+            self.assertNotIn(forbidden, assignability)
+
+        allowed_direct_assignability = {
+            pathlib.Path("crates/typepython_checking/src/type_system/assignability.rs"),
+            pathlib.Path("crates/typepython_checking/src/calls/reporting.rs"),
+        }
+        offenders: list[str] = []
+        for path in (REPO_ROOT / "crates/typepython_checking/src").glob("**/*.rs"):
+            relative_path = path.relative_to(REPO_ROOT)
+            if "/tests/" in relative_path.as_posix():
+                continue
+            text = path.read_text(encoding="utf-8")
+            if re.search(r"\bdirect_type_matches\s*\(", text):
+                offenders.append(relative_path.as_posix())
+                continue
+            if (
+                relative_path not in allowed_direct_assignability
+                and re.search(r"\bdirect_type_is_assignable\s*\(", text)
+            ):
+                offenders.append(relative_path.as_posix())
+
+        self.assertEqual(offenders, [])
+
     def test_insta_snapshots_are_limited_to_emission_golden_outputs(self) -> None:
         allowed_prefixes = (
             "crates/typepython_emit/src/snapshots/",
