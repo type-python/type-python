@@ -340,6 +340,32 @@ fn check_reports_dataclass_transform_constructor_type_mismatch() {
 }
 
 #[test]
+fn check_accepts_dataclass_transform_constructor_none_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    age: int\n\nuser: User = User(None)\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_rejects_dataclass_transform_constructor_tainted_keyword_when_taint_is_enabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nraw: Tainted[str, \"html\"]\nuser: User = User(name=raw)\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { experimental_taint: true, ..crate::CheckerOptions::default() },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("Tainted[str, \"html\"]"), "{rendered}");
+    assert!(rendered.contains("synthesized keyword `name`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_dataclass_transform_constructor_keyword_type_mismatch() {
     let result = check_temp_typepython_source(
         "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    age: int\n\nuser: User = User(age=\"oops\")\n",

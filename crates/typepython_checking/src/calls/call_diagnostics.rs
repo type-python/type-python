@@ -127,6 +127,7 @@ pub(super) fn direct_call_type_diagnostics(
                     nodes,
                     call,
                     &shape,
+                    context.assignability_options(),
                 );
             }
             if let Some(failure) = direct_imported_call_unresolved_typepack_failure(node, nodes, call) {
@@ -1565,25 +1566,33 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     shape: &DataclassTransformClassShape,
+    options: AssignabilityOptions,
 ) -> Vec<Diagnostic> {
     let positional_fields = shape.fields.iter().filter(|field| !field.kw_only).collect::<Vec<_>>();
-    let positional_arg_types = call.positional_arg_type_texts();
+    let positional_expected_types = positional_fields
+        .iter()
+        .take(call.arg_count)
+        .map(|field| field.semantic_annotation())
+        .collect::<Vec<_>>();
+    let positional_arg_types = resolved_call_arg_semantic_types_with_expected_semantic(
+        node,
+        nodes,
+        call,
+        &positional_expected_types,
+    );
     let mut diagnostics = positional_fields
         .iter()
         .take(call.arg_count)
-        .zip(positional_arg_types.iter().map(|ty| lower_type_text_or_name(ty)))
+        .zip(positional_arg_types.iter())
         .filter(|(field, arg_ty)| {
+            let Some(field_ty) = field.semantic_annotation() else {
+                return false;
+            };
             !semantic_type_missing(arg_ty)
-                && field.semantic_annotation().is_some()
-                && !semantic_type_matches(
-                    node,
-                    nodes,
-                    &field.semantic_annotation().unwrap_or_else(|| SemanticType::Name(String::new())),
-                    arg_ty,
-                )
+                && !semantic_type_is_assignable_with_options(node, nodes, &field_ty, arg_ty, options)
         })
         .map(|(field, arg_ty)| {
-            let arg_text = diagnostic_type_text(&arg_ty);
+            let arg_text = diagnostic_type_text(arg_ty);
             with_dataclass_transform_shape_origin(
                 Diagnostic::error(
                     "TPY4001",
@@ -1602,25 +1611,35 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
         })
         .collect::<Vec<_>>();
 
-    let keyword_arg_types = call.keyword_arg_type_texts();
-    for (keyword, arg_ty) in call
+    let keyword_expected_types = call
         .keyword_names
         .iter()
-        .zip(keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)))
+        .map(|keyword| {
+            shape
+                .fields
+                .iter()
+                .find(|field| field.keyword_name == *keyword)
+                .and_then(|field| field.semantic_annotation())
+        })
+        .collect::<Vec<_>>();
+    let keyword_arg_types =
+        resolved_keyword_arg_semantic_types_with_expected_semantic(node, nodes, call, &keyword_expected_types);
+    for ((keyword, arg_ty), expected_ty) in call
+        .keyword_names
+        .iter()
+        .zip(keyword_arg_types.iter())
+        .zip(keyword_expected_types.iter())
     {
         let Some(field) = shape.fields.iter().find(|field| field.keyword_name == *keyword) else {
             continue;
         };
-        if !semantic_type_missing(&arg_ty)
-            && field.semantic_annotation().is_some()
-            && !semantic_type_matches(
-                node,
-                nodes,
-                &field.semantic_annotation().unwrap_or_else(|| SemanticType::Name(String::new())),
-                &arg_ty,
-            )
+        let Some(field_ty) = expected_ty.as_ref() else {
+            continue;
+        };
+        if !semantic_type_missing(arg_ty)
+            && !semantic_type_is_assignable_with_options(node, nodes, field_ty, arg_ty, options)
         {
-            let arg_text = diagnostic_type_text(&arg_ty);
+            let arg_text = diagnostic_type_text(arg_ty);
             diagnostics.push(with_dataclass_transform_shape_origin(
                 Diagnostic::error(
                     "TPY4001",
