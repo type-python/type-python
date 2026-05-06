@@ -10,6 +10,18 @@ TypePython follows a single rule for its output:
 
 This means tools that understand the emitted standard typing constructs can consume TypePython's output without modification. In practice, TypePython output relies on a broader set of standard typing features than just PEP 484 / PEP 561, including constructs such as `Protocol`, `ParamSpec`, `TypeAlias`, `Required` / `NotRequired`, and `ReadOnly`.
 
+## Guarantee Levels
+
+TypePython separates the package author's checking environment from the public Python artifacts that are published to consumers:
+
+| Consumer | What is guaranteed |
+| -------- | ------------------ |
+| TypePython-checked author package | Core `.tpy` checker semantics apply before emit: sealed exhaustiveness, `unknown` narrowing, `unsafe:` fences, and supported `TypedDict` transforms are enforced by TypePython. |
+| Default external consumer | The consumer receives standard `.py`, `.pyi`, and `py.typed` artifacts. Their checker applies ordinary Python typing rules and does not automatically enforce TypePython-only constraints. |
+| TypePython-aware consumer | A future or opt-in consumer may read sidecar metadata, use a checker plugin, or run TypePython on source/metadata to recover stronger facts. This is not required for the default portable package contract. |
+
+The default publication contract is therefore **internal author-time safety plus portable external typing**, not transitive enforcement of every TypePython-only fact for ordinary downstream `.py` users.
+
 ## Lowering Map for `.pyi` Stubs
 
 Every TypePython-specific construct is lowered to an equivalent standard Python form before it appears in a `.pyi` file:
@@ -164,4 +176,4 @@ In the emitted `.pyi`, `PartialConfig` becomes a standalone `TypedDict` with all
 | typeshed coexistence     | No conflict -- bundled stdlib data is compile-time only                                                             |
 | PEP 561                  | Compliant -- `py.typed` markers emitted by default                                                                  |
 
-The design trade-off is intentional: **maximum interoperability at the cost of reduced guarantees when crossing the TypePython boundary.** The stronger safety properties (sealed exhaustiveness, unknown strictness, unsafe boundaries) are enforced at authoring time by the TypePython checker. External consumers get standard, well-typed Python artifacts.
+The design trade-off is intentional: **maximum interoperability at the cost of reduced guarantees when crossing the TypePython boundary.** The stronger safety properties (sealed exhaustiveness, unknown strictness, unsafe boundaries) are enforced for the author package by the TypePython checker. External consumers get standard, well-typed Python artifacts unless they explicitly opt into TypePython-aware metadata or checking.

@@ -10,8 +10,9 @@ in [TypePython Feature Status](feature-status.md).
 The following surfaces are compatibility-stable for the Core v1 Beta line:
 
 - `.tpy` Core syntax documented in the language spec.
-- Core checker semantics, including same-module `sealed class` closure, sealed-match exhaustiveness,
-  `unknown` narrowing requirements, `unsafe:` fences, and supported `TypedDict` transforms.
+- Core checker semantics for TypePython-checked author packages, including same-module `sealed`
+  class closure, sealed-match exhaustiveness, `unknown` narrowing requirements, `unsafe:` fences,
+  and supported `TypedDict` transforms.
 - `typepython.toml` Core configuration fields for project discovery, resolution, typing, and emit
   behavior used by `init`, `check`, `build`, `clean`, and `verify`.
 - CLI commands: `init`, `check`, `build`, `clean`, and `verify`.
@@ -19,6 +20,12 @@ The following surfaces are compatibility-stable for the Core v1 Beta line:
   may improve.
 - Emitted `.py` / `.pyi` compatibility contract: generated artifacts remain standard Python typing
   surfaces with no mandatory TypePython runtime dependency.
+
+The Beta line deliberately separates these two promises: TypePython enforces stronger facts before
+emit for the author package, while ordinary downstream consumers receive portable Python typing.
+Extending sealed, `unknown`, `unsafe:`, or transform provenance semantics across package boundaries
+requires an explicit TypePython-aware sidecar, checker plugin, or consumer mode; it is not part of
+the default emitted-artifact compatibility promise.
 
 ## Supported DX, Non-Stable
 
