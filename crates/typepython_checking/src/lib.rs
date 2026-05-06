@@ -1574,7 +1574,7 @@ fn collect_node_declaration_diagnostics(
         duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations),
     );
     push_diagnostics(diagnostics, override_diagnostics(node, context.nodes));
-    push_diagnostics(diagnostics, override_compatibility_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, override_compatibility_diagnostics(context, node, context.nodes));
     push_diagnostics(
         diagnostics,
         undecidable_decorator_diagnostics(context, node, context.nodes, options.strict),
@@ -1598,7 +1598,10 @@ fn collect_node_declaration_diagnostics(
     push_diagnostics(diagnostics, final_override_diagnostics(node, context.nodes));
     push_diagnostics(diagnostics, abstract_member_diagnostics(node, context.nodes));
     push_diagnostics(diagnostics, abstract_instantiation_diagnostics(node, context.nodes));
-    push_diagnostics(diagnostics, interface_implementation_diagnostics(node, context.nodes));
+    push_diagnostics(
+        diagnostics,
+        interface_implementation_diagnostics(context, node, context.nodes),
+    );
     if options.enable_sealed_exhaustiveness {
         push_diagnostics(
             diagnostics,

@@ -46,20 +46,29 @@ impl SemanticTypeAssignabilityFailure {
     }
 }
 
-pub(crate) fn semantic_type_assignability_failure(
+pub(crate) fn semantic_type_assignability_failure_with_options(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     expected: &SemanticType,
     actual: &SemanticType,
+    options: AssignabilityOptions,
 ) -> Option<SemanticTypeAssignabilityFailure> {
-    if semantic_type_is_assignable(node, nodes, expected, actual) {
+    if semantic_type_is_assignable_with_options(node, nodes, expected, actual, options) {
         return None;
     }
 
     let expected = diagnostic_type_text(expected);
     let actual = diagnostic_type_text(actual);
     let mut mismatch_path = Vec::new();
-    let detail = first_type_mismatch_detail(node, nodes, &expected, &actual, &mut mismatch_path, 8);
+    let detail = first_type_mismatch_detail_with_options(
+        node,
+        nodes,
+        &expected,
+        &actual,
+        &mut mismatch_path,
+        8,
+        options,
+    );
     Some(SemanticTypeAssignabilityFailure { expected, actual, mismatch_path, detail })
 }
 
@@ -256,30 +265,33 @@ pub(super) fn type_supports_mismatch_path(text: &str) -> bool {
     union_branches(text).is_some() || split_generic_type(text).is_some()
 }
 
-pub(super) fn attach_type_mismatch_notes(
+pub(super) fn attach_type_mismatch_notes_with_options(
     diagnostic: Diagnostic,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     expected: &str,
     actual: &str,
+    options: AssignabilityOptions,
 ) -> Diagnostic {
-    semantic_type_assignability_failure(
+    semantic_type_assignability_failure_with_options(
         node,
         nodes,
         &lower_type_text_or_name(expected),
         &lower_type_text_or_name(actual),
+        options,
     )
     .map(|failure| failure.attach_notes(diagnostic.clone()))
     .unwrap_or(diagnostic)
 }
 
-pub(super) fn first_type_mismatch_detail(
+pub(super) fn first_type_mismatch_detail_with_options(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     expected: &str,
     actual: &str,
     path: &mut Vec<String>,
     depth: usize,
+    options: AssignabilityOptions,
 ) -> Option<String> {
     if depth == 0 {
         return None;
@@ -296,7 +308,15 @@ pub(super) fn first_type_mismatch_detail(
         && let Some(unmatched) = actual_branches.iter().find(|branch| {
             !expected_branches
                 .iter()
-                .any(|target_branch| direct_type_is_assignable(node, nodes, target_branch, branch))
+                .any(|target_branch| {
+                    direct_type_is_assignable_with_options(
+                        node,
+                        nodes,
+                        target_branch,
+                        branch,
+                        options,
+                    )
+                })
         }) {
             if path.last().is_none_or(|segment| segment != unmatched) {
                 path.push(unmatched.clone());
@@ -328,14 +348,21 @@ pub(super) fn first_type_mismatch_detail(
 
         if expected_head == actual_head && expected_args.len() == actual_args.len() {
             for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
-                if !direct_type_is_assignable(node, nodes, expected_arg, actual_arg) {
-                    return first_type_mismatch_detail(
+                if !direct_type_is_assignable_with_options(
+                    node,
+                    nodes,
+                    expected_arg,
+                    actual_arg,
+                    options,
+                ) {
+                    return first_type_mismatch_detail_with_options(
                         node,
                         nodes,
                         expected_arg,
                         actual_arg,
                         path,
                         depth - 1,
+                        options,
                     )
                     .or_else(|| {
                         Some(format!("`{}` is not assignable to `{}`", actual_arg, expected_arg))
@@ -358,14 +385,21 @@ pub(super) fn first_type_mismatch_detail(
                 } else {
                     actual_args.first().cloned().unwrap_or_default()
                 };
-                if !direct_type_is_assignable(node, nodes, &expected_args[0], &actual_element) {
-                    return first_type_mismatch_detail(
+                if !direct_type_is_assignable_with_options(
+                    node,
+                    nodes,
+                    &expected_args[0],
+                    &actual_element,
+                    options,
+                ) {
+                    return first_type_mismatch_detail_with_options(
                         node,
                         nodes,
                         &expected_args[0],
                         &actual_element,
                         path,
                         depth - 1,
+                        options,
                     )
                     .or_else(|| {
                         Some(format!(
@@ -376,14 +410,21 @@ pub(super) fn first_type_mismatch_detail(
                 }
             }
             ("Mapping", "dict") if expected_args.len() == 2 && actual_args.len() == 2 => {
-                if !direct_type_is_assignable(node, nodes, &expected_args[0], &actual_args[0]) {
-                    return first_type_mismatch_detail(
+                if !direct_type_is_assignable_with_options(
+                    node,
+                    nodes,
+                    &expected_args[0],
+                    &actual_args[0],
+                    options,
+                ) {
+                    return first_type_mismatch_detail_with_options(
                         node,
                         nodes,
                         &expected_args[0],
                         &actual_args[0],
                         path,
                         depth - 1,
+                        options,
                     )
                     .or_else(|| {
                         Some(format!(
@@ -392,14 +433,21 @@ pub(super) fn first_type_mismatch_detail(
                         ))
                     });
                 }
-                if !direct_type_is_assignable(node, nodes, &expected_args[1], &actual_args[1]) {
-                    return first_type_mismatch_detail(
+                if !direct_type_is_assignable_with_options(
+                    node,
+                    nodes,
+                    &expected_args[1],
+                    &actual_args[1],
+                    options,
+                ) {
+                    return first_type_mismatch_detail_with_options(
                         node,
                         nodes,
                         &expected_args[1],
                         &actual_args[1],
                         path,
                         depth - 1,
+                        options,
                     )
                     .or_else(|| {
                         Some(format!(

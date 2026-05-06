@@ -51,6 +51,7 @@ impl OverrideCompatibilityFailure {
 }
 
 pub(super) fn override_compatibility_diagnostics<'a>(
+    context: &CheckerContext<'_>,
     node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -70,8 +71,13 @@ pub(super) fn override_compatibility_diagnostics<'a>(
                             && declaration.name == member.name
                             && declaration.kind == member.kind
                     })
-                    && let Some(reason) =
-                        method_override_incompatibility(node, nodes, member, base_member)
+                    && let Some(reason) = method_override_incompatibility(
+                        node,
+                        nodes,
+                        member,
+                        base_member,
+                        context.assignability_options(),
+                    )
                 {
                     diagnostics.push(Diagnostic::error(
                              "TPY4005",
@@ -96,8 +102,9 @@ pub(super) fn methods_are_compatible_for_override(
     nodes: &[typepython_graph::ModuleNode],
     member: &Declaration,
     base_member: &Declaration,
+    options: AssignabilityOptions,
 ) -> bool {
-    method_override_incompatibility(node, nodes, member, base_member).is_none()
+    method_override_incompatibility(node, nodes, member, base_member, options).is_none()
 }
 
 pub(super) fn method_override_incompatibility(
@@ -105,6 +112,7 @@ pub(super) fn method_override_incompatibility(
     nodes: &[typepython_graph::ModuleNode],
     member: &Declaration,
     base_member: &Declaration,
+    options: AssignabilityOptions,
 ) -> Option<OverrideCompatibilityFailure> {
     if member.method_kind == base_member.method_kind {
         match (member.callable_signature(), base_member.callable_signature()) {
@@ -164,8 +172,13 @@ pub(super) fn method_override_incompatibility(
         }
         if let (Some(child_annotation), Some(base_annotation)) =
             (child.annotation.as_ref(), base.annotation.as_ref())
-            && let Some(reason) =
-                semantic_type_assignability_failure(node, nodes, child_annotation, base_annotation)
+            && let Some(reason) = semantic_type_assignability_failure_with_options(
+                node,
+                nodes,
+                child_annotation,
+                base_annotation,
+                options,
+            )
         {
             return Some(OverrideCompatibilityFailure::ParameterTypeMismatch {
                 parameter_name: child.name.clone(),
@@ -185,8 +198,14 @@ pub(super) fn method_override_incompatibility(
     let (Some(child_return), Some(base_return)) = (child_return, base_return) else {
         return None;
     };
-    semantic_type_assignability_failure(node, nodes, &base_return, &child_return)
-        .map(|reason| OverrideCompatibilityFailure::ReturnTypeMismatch { reason })
+    semantic_type_assignability_failure_with_options(
+        node,
+        nodes,
+        &base_return,
+        &child_return,
+        options,
+    )
+    .map(|reason| OverrideCompatibilityFailure::ReturnTypeMismatch { reason })
 }
 
 pub(super) fn missing_override_diagnostics<'a>(
@@ -1087,6 +1106,7 @@ pub(super) fn final_override_diagnostics<'a>(
 }
 
 pub(super) fn interface_implementation_diagnostics<'a>(
+    context: &CheckerContext<'_>,
     node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -1112,6 +1132,7 @@ pub(super) fn interface_implementation_diagnostics<'a>(
                     node,
                     class_declaration,
                     &requirement,
+                    context.assignability_options(),
                 ) {
                     diagnostics.push(Diagnostic::error(
                         "TPY4008",

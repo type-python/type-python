@@ -1,13 +1,30 @@
+#[cfg(test)]
 pub(super) fn direct_type_is_assignable(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     expected: &str,
     actual: &str,
 ) -> bool {
+    direct_type_is_assignable_with_options(
+        node,
+        nodes,
+        expected,
+        actual,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn direct_type_is_assignable_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &str,
+    actual: &str,
+    options: AssignabilityOptions,
+) -> bool {
     let mut types = TypeStore::default();
     let expected = types.intern(lower_type_text_or_name(expected));
     let actual = types.intern(lower_type_text_or_name(actual));
-    TypeRelationContext::new(node, nodes).is_assignable(
+    TypeRelationContext::with_options(node, nodes, options).is_assignable(
         types.get(expected).expect("interned semantic expected type"),
         types.get(actual).expect("interned semantic actual type"),
     )
@@ -327,8 +344,10 @@ fn direct_semantic_type_is_assignable(
         } else {
             let enum_match =
                 semantic_enum_member_owner_name(&actual).is_some_and(|owner| owner == expected_rendered);
-            let protocol = protocol_assignable(node, nodes, &expected_rendered, &actual_rendered);
-            let nominal = nominal_subclass_assignable(node, nodes, &expected_rendered, &actual_rendered);
+            let protocol =
+                protocol_assignable(node, nodes, &expected_rendered, &actual_rendered, options);
+            let nominal =
+                nominal_subclass_assignable(node, nodes, &expected_rendered, &actual_rendered, options);
             if enum_match || protocol || nominal {
                 true
             } else if let Some(result) =
@@ -426,6 +445,7 @@ pub(super) fn nominal_subclass_assignable(
     nodes: &[typepython_graph::ModuleNode],
     expected: &str,
     actual: &str,
+    options: AssignabilityOptions,
 ) -> bool {
     if expected == actual {
         return true;
@@ -435,11 +455,12 @@ pub(super) fn nominal_subclass_assignable(
     };
     actual_decl.rendered_class_bases().iter().any(|base| {
         normalize_type_text(base) == expected
-            || semantic_type_is_assignable(
+            || semantic_type_is_assignable_with_options(
                 actual_node,
                 nodes,
                 &lower_type_text_or_name(expected),
                 &lower_type_text_or_name(base),
+                options,
             )
     })
 }
@@ -449,6 +470,7 @@ pub(super) fn protocol_assignable(
     nodes: &[typepython_graph::ModuleNode],
     expected: &str,
     actual: &str,
+    options: AssignabilityOptions,
 ) -> bool {
     let Some((interface_node, interface_decl)) = resolve_direct_base(nodes, node, expected) else {
         return false;
@@ -459,7 +481,14 @@ pub(super) fn protocol_assignable(
     let Some((actual_node, actual_decl)) = resolve_direct_base(nodes, node, actual) else {
         return false;
     };
-    type_satisfies_interface(nodes, actual_node, actual_decl, interface_node, interface_decl)
+    type_satisfies_interface(
+        nodes,
+        actual_node,
+        actual_decl,
+        interface_node,
+        interface_decl,
+        options,
+    )
 }
 
 pub(super) fn type_satisfies_interface(
@@ -468,9 +497,10 @@ pub(super) fn type_satisfies_interface(
     actual_decl: &Declaration,
     interface_node: &typepython_graph::ModuleNode,
     interface_decl: &Declaration,
+    options: AssignabilityOptions,
 ) -> bool {
     collect_interface_members(interface_node, interface_decl, nodes).into_iter().all(|required| {
-        actual_member_satisfies_requirement(nodes, actual_node, actual_decl, &required)
+        actual_member_satisfies_requirement(nodes, actual_node, actual_decl, &required, options)
     })
 }
 
@@ -539,6 +569,7 @@ pub(super) fn actual_member_satisfies_requirement(
     actual_node: &typepython_graph::ModuleNode,
     actual_decl: &Declaration,
     requirement: &InterfaceMemberRequirement,
+    options: AssignabilityOptions,
 ) -> bool {
     match requirement.declaration.kind {
         DeclarationKind::Function => {
@@ -551,6 +582,7 @@ pub(super) fn actual_member_satisfies_requirement(
                         nodes,
                         member,
                         &requirement.declaration,
+                        options,
                     );
                 }
                 return find_apparent_value_declaration(
@@ -564,11 +596,12 @@ pub(super) fn actual_member_satisfies_requirement(
                     let actual = declaration_effective_value_semantic_type(member);
                     expected.is_none()
                         || actual.is_none()
-                        || semantic_type_is_assignable(
+                        || semantic_type_is_assignable_with_options(
                             actual_node,
                             nodes,
                             expected.as_ref().expect("checked is_some"),
                             actual.as_ref().expect("checked is_some"),
+                            options,
                         )
                 });
             }
@@ -579,6 +612,7 @@ pub(super) fn actual_member_satisfies_requirement(
                         nodes,
                         member,
                         &requirement.declaration,
+                        options,
                     )
                 })
         }
@@ -589,11 +623,12 @@ pub(super) fn actual_member_satisfies_requirement(
                     let actual = declaration_effective_value_semantic_type(member);
                     expected.is_none()
                         || actual.is_none()
-                        || semantic_type_is_assignable(
+                        || semantic_type_is_assignable_with_options(
                             actual_node,
                             nodes,
                             expected.as_ref().expect("checked is_some"),
                             actual.as_ref().expect("checked is_some"),
+                            options,
                         )
                 })
         }

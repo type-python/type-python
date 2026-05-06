@@ -1037,7 +1037,14 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                     param_text
                 ),
             );
-            attach_type_mismatch_notes(diagnostic, node, nodes, &param_text, &arg_text)
+            attach_type_mismatch_notes_with_options(
+                diagnostic,
+                node,
+                nodes,
+                &param_text,
+                &arg_text,
+                assignability_options,
+            )
         })
         .collect::<Vec<_>>();
 
@@ -1067,8 +1074,14 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                     param_text
                 ),
             );
-            diagnostics
-                .push(attach_type_mismatch_notes(diagnostic, node, nodes, &param_text, &arg_text));
+            diagnostics.push(attach_type_mismatch_notes_with_options(
+                diagnostic,
+                node,
+                nodes,
+                &param_text,
+                &arg_text,
+                assignability_options,
+            ));
         }
     }
 
@@ -1098,8 +1111,14 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                     param_text
                 ),
             );
-            diagnostics
-                .push(attach_type_mismatch_notes(diagnostic, node, nodes, &param_text, &arg_text));
+            diagnostics.push(attach_type_mismatch_notes_with_options(
+                diagnostic,
+                node,
+                nodes,
+                &param_text,
+                &arg_text,
+                assignability_options,
+            ));
         }
     }
 
@@ -1131,12 +1150,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                             field.rendered_value_type()
                         ),
                     );
-                    diagnostics.push(attach_type_mismatch_notes(
+                    diagnostics.push(attach_type_mismatch_notes_with_options(
                         diagnostic,
                         node,
                         nodes,
                         &field.rendered_value_type(),
                         &arg_text,
+                        assignability_options,
                     ));
                 }
                 continue;
@@ -1167,12 +1187,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                         param_text
                     ),
                 );
-                diagnostics.push(attach_type_mismatch_notes(
+                diagnostics.push(attach_type_mismatch_notes_with_options(
                     diagnostic,
                     node,
                     nodes,
                     &param_text,
                     &arg_text,
+                    assignability_options,
                 ));
             }
             continue;
@@ -1203,8 +1224,14 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                     param_text
                 ),
             );
-            diagnostics
-                .push(attach_type_mismatch_notes(diagnostic, node, nodes, &param_text, &arg_text));
+            diagnostics.push(attach_type_mismatch_notes_with_options(
+                diagnostic,
+                node,
+                nodes,
+                &param_text,
+                &arg_text,
+                assignability_options,
+            ));
         }
     }
 

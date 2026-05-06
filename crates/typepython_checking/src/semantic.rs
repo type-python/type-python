@@ -1663,8 +1663,14 @@ pub(super) fn direct_return_type_diagnostics(
                 return_site.line,
                 1,
             ));
-            let diagnostic =
-                attach_type_mismatch_notes(diagnostic, node, nodes, &expected, &actual_text);
+            let diagnostic = attach_type_mismatch_notes_with_options(
+                diagnostic,
+                node,
+                nodes,
+                &expected,
+                &actual_text,
+                context.assignability_options(),
+            );
             let diagnostic = attach_return_inference_trace(
                 diagnostic,
                 node,

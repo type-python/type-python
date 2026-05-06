@@ -138,6 +138,39 @@ fn check_accepts_callable_none_return_when_strict_nulls_is_disabled() {
 }
 
 #[test]
+fn check_accepts_override_none_return_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "class Base:\n    def value(self) -> int:\n        return 1\n\nclass Child(Base):\n    def value(self) -> None:\n        return None\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_accepts_protocol_none_value_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "from typing import Protocol\n\nclass HasValue(Protocol):\n    value: int\n\nclass Model(HasValue):\n    value: None = None\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_accepts_structural_protocol_none_value_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "from typing import Protocol\n\nclass HasValue(Protocol):\n    value: int\n\nclass Model:\n    value: None = None\n\nmodel: HasValue = Model()\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_bounded_generic_none_argument_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "def first[T: int](value: T) -> T:\n    return value\n\nresult: int = first(None)\n",

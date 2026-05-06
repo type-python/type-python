@@ -7,10 +7,11 @@ fn assignment_type_mismatch_diagnostic(
     nodes: &[typepython_graph::ModuleNode],
     expected: &SemanticType,
     actual: &SemanticType,
+    options: AssignabilityOptions,
     message: String,
 ) -> Diagnostic {
     let diagnostic = Diagnostic::error("TPY4001", message);
-    semantic_type_assignability_failure(node, nodes, expected, actual)
+    semantic_type_assignability_failure_with_options(node, nodes, expected, actual, options)
         .map(|failure| failure.attach_notes(diagnostic.clone()))
         .unwrap_or(diagnostic)
 }
@@ -62,6 +63,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
                     nodes,
                     &expected_type,
                     &actual_type,
+                    context.assignability_options(),
                     match (&assignment.owner_type_name, &assignment.owner_name) {
                         (Some(owner_type_name), Some(owner_name)) => format!(
                             "type `{}` in module `{}` assigns `{}` where local `{}` in `{}` expects `{}`",
@@ -110,6 +112,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
                     nodes,
                     &expected_type,
                     &actual_type,
+                    context.assignability_options(),
                     match (&assignment.owner_type_name, &assignment.owner_name) {
                         (Some(owner_type_name), Some(owner_name)) => format!(
                             "type `{}` in module `{}` assigns `{}` where local `{}` in `{}` expects `{}`",
@@ -157,6 +160,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
                 nodes,
                 &expected_type,
                 &actual,
+                context.assignability_options(),
                 match (&assignment.owner_type_name, &assignment.owner_name) {
                     (Some(owner_type_name), Some(owner_name)) => format!(
                         "type `{}` in module `{}` assigns `{}` where local `{}` in `{}` expects `{}`",
@@ -267,6 +271,7 @@ pub(super) fn simple_name_augmented_assignment_diagnostics(
                     nodes,
                     &expected,
                     &actual,
+                    AssignabilityOptions::default(),
                     match (&assignment.owner_type_name, &assignment.owner_name) {
                         (Some(owner_type_name), Some(owner_name)) => format!(
                             "type `{}` in module `{}` augmented-assigns `{}` where local `{}` in `{}` expects `{}`",
