@@ -313,6 +313,7 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
     call: &typepython_binding::CallSite,
     owner_type: &SemanticType,
     callable: Option<&SemanticCallableDeclaration>,
+    options: AssignabilityOptions,
 ) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
     let owner_type_name = semantic_nominal_owner_name(owner_type).ok_or_else(|| {
         DirectCallResolutionFailure::SignatureInstantiationFailed {
@@ -355,7 +356,7 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
         ),
         callable_return_semantic_type_with_self_from_semantics(&callable, &owner_type_name)
             .map(|return_type| substitute_semantic_type_params(&return_type, &owner_substitutions)),
-        AssignabilityOptions::default(),
+        options,
     )
 }
 
@@ -365,6 +366,7 @@ pub(super) fn resolve_method_overload_selection<'a>(
     call: &typepython_binding::CallSite,
     owner_type: &SemanticType,
     overloads: &[(&'a Declaration, Option<SemanticCallableDeclaration>)],
+    options: AssignabilityOptions,
 ) -> ResolvedOverloadSelection<'a> {
     let attempts = overloads
         .iter()
@@ -378,6 +380,7 @@ pub(super) fn resolve_method_overload_selection<'a>(
                     call,
                     owner_type,
                     callable.as_ref(),
+                    options,
                 ),
             )
         })

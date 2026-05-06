@@ -182,6 +182,17 @@ fn check_accepts_bounded_generic_none_argument_when_strict_nulls_is_disabled() {
 }
 
 #[test]
+fn check_accepts_bounded_generic_method_none_argument_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "class Service:\n    def first[T: int](self, value: T) -> T:\n        return value\n\nresult: int = Service().first(None)\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_rejects_none_literal_assignment_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "from typing import Literal\n\nvalue: Literal[1] = None\n",
@@ -2221,6 +2232,7 @@ fn semantic_member_method_and_subscript_resolution_preserve_structured_types() {
             "Box",
             "get",
             false,
+            crate::AssignabilityOptions::default(),
         )
         .map(|ty| crate::render_semantic_type(&ty)),
         Some(String::from("tuple[int, str]"))

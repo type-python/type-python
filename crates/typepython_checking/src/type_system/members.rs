@@ -114,6 +114,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
     owner_name: &str,
     method_name: &str,
     through_instance: bool,
+    options: AssignabilityOptions,
 ) -> Option<SemanticType> {
     if !through_instance
         && let Some(return_type) = resolve_imported_module_method_return_semantic_type(
@@ -180,6 +181,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             &call,
             &owner_type,
             &overloads,
+            options,
         ) {
             ResolvedOverloadSelection::Selected(candidate) => candidate.return_type,
             _ => None,
@@ -209,6 +211,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
                 &call,
                 &owner_type,
                 declaration_callable_semantics(method).as_ref(),
+                options,
             )
             .ok()
             .and_then(|resolved| resolved.return_type)

@@ -492,6 +492,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                         owner_name,
                         method_name,
                         value_method_through_instance,
+                        options,
                     )
                 })
             })

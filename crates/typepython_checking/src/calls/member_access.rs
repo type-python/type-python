@@ -239,6 +239,7 @@ pub(super) fn direct_method_call_diagnostics(
                 &direct_call,
                 &owner_type,
                 &overloads,
+                context.assignability_options(),
             ) {
                 ResolvedOverloadSelection::Selected(candidate) => {
                     let signature = candidate.signature_sites;
@@ -303,6 +304,7 @@ pub(super) fn direct_method_call_diagnostics(
             &direct_call,
             &owner_type,
             target_callable.as_ref(),
+            context.assignability_options(),
         ) {
             Ok(resolved) => {
                 if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(

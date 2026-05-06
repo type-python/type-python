@@ -909,6 +909,7 @@ fn resolve_method_call_candidate_instantiates_owner_generic_arguments() {
         &direct_call,
         &crate::lower_type_text_or_name("Box[int]"),
         super::declaration_callable_semantics(method).as_ref(),
+        crate::AssignabilityOptions::default(),
     )
     .expect("generic method call should resolve");
 
