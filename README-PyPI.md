@@ -120,8 +120,9 @@ TypePython-aware consumer.
   `compat`, `api-diff`, `type-health`, `migrate`, `lsp`.
 - **Supported Beta LSP server** — hover, go to definition, references, rename,
   completions, signature help, real-time diagnostics, and code-action quick fixes.
-  Editor UX and extension packaging are still outside the Core v1 Beta compatibility
-  promise.
+  The repository includes a source-installable VS Code extension plus copy-paste
+  setup for Neovim, Helix, Sublime Text, and Emacs. Editor UX and extension
+  packaging are still outside the Core v1 Beta compatibility promise.
 - **Standard, portable output** — emitted `.py` + `.pyi` work with mypy,
   pyright, and ty out of the box. PEP 561 `py.typed` is written automatically.
 - **Mixed projects** — `.tpy`, `.py`, and `.pyi` live in the same source tree.

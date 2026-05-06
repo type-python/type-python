@@ -149,11 +149,12 @@ Full reference: [`docs/cli-reference.md`](docs/cli-reference.md).
 - code actions for migration and portability fixes
 - project commands (`migrate`, `compat`, `type-health`, emitted-output preview, `Any` / `Unknown` source lookup)
 
-There is **no official editor extension yet**. Any LSP-capable editor (VS Code,
-Neovim, Helix, Sublime Text, Emacs) can launch the server, but editor UX,
-command names, and extension packaging are not part of the Core v1 Beta
-compatibility promise. Setup snippets are in [`docs/lsp.md`](docs/lsp.md), and
-the promotion gate is tracked in [`docs/dx-stability.md`](docs/dx-stability.md).
+The repository includes a source-installable VS Code extension under
+[`editors/vscode`](editors/vscode). Neovim, Helix, Sublime Text, and Emacs can
+launch the server with copy-paste LSP snippets. Editor UX, command names, and
+extension packaging are not part of the Core v1 Beta compatibility promise yet.
+Setup snippets are in [`docs/lsp.md`](docs/lsp.md), and the promotion gate is
+tracked in [`docs/dx-stability.md`](docs/dx-stability.md).
 
 ## Standard, portable output — by design
 

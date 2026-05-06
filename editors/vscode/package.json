@@ -1,0 +1,77 @@
+{
+  "name": "typepython-vscode",
+  "displayName": "TypePython",
+  "description": "VS Code language client for the TypePython LSP server.",
+  "version": "0.4.0",
+  "publisher": "type-python",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:typepython",
+    "workspaceContains:typepython.toml",
+    "workspaceContains:pyproject.toml"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "typepython",
+        "aliases": [
+          "TypePython",
+          "typepython"
+        ],
+        "extensions": [
+          ".tpy"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "configuration": {
+      "title": "TypePython",
+      "properties": {
+        "typepython.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the typepython executable. Defaults to TYPEPYTHON_BIN or typepython on PATH."
+        },
+        "typepython.projectPath": {
+          "type": "string",
+          "default": "",
+          "description": "Project directory passed to typepython lsp --project. Defaults to the first workspace folder."
+        },
+        "typepython.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace TypePython LSP messages in the extension output channel."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "typepython.restartServer",
+        "title": "TypePython: Restart Language Server"
+      }
+    ]
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^2.15.0"
+  },
+  "scripts": {
+    "package": "vsce package",
+    "vscode:prepublish": "npm install"
+  }
+}

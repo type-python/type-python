@@ -343,7 +343,7 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("Supported Beta LSP server", pypi_readme)
         for text in (readme, pypi_readme):
             normalized = " ".join(text.split())
-            self.assertIn("extension packaging", text)
+            self.assertIn("extension packaging", normalized)
             self.assertIn("Core v1 Beta compatibility promise", normalized)
 
     def test_conformance_beta_scope_classification_is_precise(self) -> None:

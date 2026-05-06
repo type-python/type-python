@@ -99,29 +99,24 @@ Diagnostics that have known migration fixes include `data.fixPortability` metada
 
 ## Editor Setup
 
-The snippets below are generic LSP client configurations. TypePython does not currently ship an official VS Code, Neovim, Helix, Sublime, or Emacs plugin.
+The repository ships a source-installable VS Code extension under
+[`editors/vscode`](../editors/vscode/). Other editor snippets below use generic
+LSP client configuration and can be copied directly.
 
 ### VS Code
 
-Configure a generic LSP client extension (for example one built on `vscode-languageclient`) to launch `typepython lsp`:
+Install the official TypePython extension from the repository:
 
-```json
-{
-  "languageServerExample.trace.server": "verbose",
-  "languageServerExample.serverPath": "typepython",
-  "languageServerExample.serverArgs": ["lsp", "--project", "${workspaceFolder}"]
-}
+```sh
+cd editors/vscode
+npm install
+npm run package
+code --install-extension typepython-vscode-0.4.0.vsix
 ```
 
-**File association** -- add `.tpy` files to Python language mode or create a custom language:
-
-```json
-{
-  "files.associations": {
-    "*.tpy": "python"
-  }
-}
-```
+The extension launches `typepython lsp --project <workspace>` and registers
+`.tpy` as the `typepython` language. Configure `typepython.binaryPath` when the
+CLI is not on `PATH`, or set `TYPEPYTHON_BIN`.
 
 ### Neovim (nvim-lspconfig)
 
