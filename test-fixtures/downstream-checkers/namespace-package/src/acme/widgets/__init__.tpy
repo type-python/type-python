@@ -1,0 +1,5 @@
+from acme.widgets.registry import Widget, register_widget
+
+
+def default_widget() -> Widget:
+    return register_widget("default")

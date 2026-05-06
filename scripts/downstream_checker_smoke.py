@@ -17,6 +17,7 @@ FIXTURE_ROOT = ROOT / "test-fixtures" / "downstream-checkers"
 MATRIX_PATH = FIXTURE_ROOT / "matrix.json"
 DEFAULT_CHECKERS = ("mypy", "pyright", "basedpyright", "ty")
 DEFAULT_PROFILES = ("strict",)
+DEFAULT_STUB_FRAGMENT_PATH = "app/__init__.pyi"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -29,7 +30,7 @@ class FixtureCase:
     expected_failure_patterns: dict[str, tuple[str, ...]] | None = None
     allowlist_reason: str | None = None
     allowlist_expires: dt.date | None = None
-    expected_stub_fragments: dict[str, tuple[str, ...]] | None = None
+    expected_stub_fragments: dict[str, dict[str, tuple[str, ...]]] | None = None
 
 
 def parse_allowlist_expiry(name: str, raw_value: object) -> dt.date | None:
@@ -109,12 +110,7 @@ def load_fixture_matrix(path: pathlib.Path = MATRIX_PATH) -> dict[str, FixtureCa
             allowlist_reason=allowlist_reason,
             allowlist_expires=allowlist_expires,
             expected_stub_fragments=(
-                None
-                if expected_stub_fragments is None
-                else {
-                    target: tuple(fragments)
-                    for target, fragments in expected_stub_fragments.items()
-                }
+                normalize_expected_stub_fragments(name, expected_stub_fragments)
             ),
         )
     if not fixtures:
@@ -122,10 +118,36 @@ def load_fixture_matrix(path: pathlib.Path = MATRIX_PATH) -> dict[str, FixtureCa
     return fixtures
 
 
+def normalize_expected_stub_fragments(
+    name: str,
+    raw_fragments: object,
+) -> dict[str, dict[str, tuple[str, ...]]] | None:
+    if raw_fragments is None:
+        return None
+    if not isinstance(raw_fragments, dict):
+        raise SystemExit(f"fixture `{name}` expected_stub_fragments must be an object")
+    normalized: dict[str, dict[str, tuple[str, ...]]] = {}
+    for target, target_fragments in raw_fragments.items():
+        if not isinstance(target, str):
+            raise SystemExit(f"fixture `{name}` expected_stub_fragments target must be a string")
+        if isinstance(target_fragments, list):
+            normalized[target] = {DEFAULT_STUB_FRAGMENT_PATH: tuple(target_fragments)}
+            continue
+        if not isinstance(target_fragments, dict):
+            raise SystemExit(
+                f"fixture `{name}` expected_stub_fragments for {target} must be a list or object"
+            )
+        normalized[target] = {
+            path: tuple(fragments)
+            for path, fragments in target_fragments.items()
+        }
+    return normalized
+
+
 def run(command: list[str], cwd: pathlib.Path | None = None) -> None:
     location = f" (cwd={cwd})" if cwd is not None else ""
     print(f"+ {' '.join(command)}{location}")
-    subprocess.run(command, cwd=cwd, check=True)
+    subprocess.run(command, cwd=cwd, check=True, env=command_env(command, cwd))
 
 
 def run_expect_failure(
@@ -135,7 +157,14 @@ def run_expect_failure(
 ) -> None:
     location = f" (cwd={cwd})" if cwd is not None else ""
     print(f"+ {' '.join(command)} # expected failure{location}")
-    completed = subprocess.run(command, cwd=cwd, check=False, capture_output=True, text=True)
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=command_env(command, cwd),
+    )
     if completed.stdout:
         print(completed.stdout, end="")
     if completed.stderr:
@@ -157,6 +186,22 @@ def require_command(name: str) -> str:
     if resolved is None:
         raise SystemExit(f"required command `{name}` was not found in PATH")
     return resolved
+
+
+def command_env(
+    command: list[str],
+    cwd: pathlib.Path | None = None,
+) -> dict[str, str] | None:
+    if not command or pathlib.Path(command[0]).name != "mypy":
+        return None
+    env = os.environ.copy()
+    search_paths = [command[-1]]
+    if cwd is not None:
+        search_paths.extend(str(cwd / path) for path in checker_support_paths(cwd))
+    existing = env.get("MYPYPATH")
+    rendered = os.pathsep.join(search_paths)
+    env["MYPYPATH"] = rendered if not existing else f"{rendered}{os.pathsep}{existing}"
+    return env
 
 
 def env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
@@ -185,16 +230,17 @@ def rewrite_target_python(config_path: pathlib.Path, target: str) -> None:
 def assert_expected_stub_fragments(
     build_dir: pathlib.Path,
     target: str,
-    expected_stub_fragments: dict[str, tuple[str, ...]],
+    expected_stub_fragments: dict[str, dict[str, tuple[str, ...]]],
 ) -> None:
-    stub_path = build_dir / "app" / "__init__.pyi"
-    rendered = stub_path.read_text(encoding="utf-8")
-    missing = [fragment for fragment in expected_stub_fragments[target] if fragment not in rendered]
-    if missing:
-        joined = "; ".join(missing)
-        raise SystemExit(
-            f"compat stub check failed for target {target} in {stub_path}: missing {joined}"
-        )
+    for relative_stub_path, fragments in expected_stub_fragments[target].items():
+        stub_path = build_dir / relative_stub_path
+        rendered = stub_path.read_text(encoding="utf-8")
+        missing = [fragment for fragment in fragments if fragment not in rendered]
+        if missing:
+            joined = "; ".join(missing)
+            raise SystemExit(
+                f"compat stub check failed for target {target} in {stub_path}: missing {joined}"
+            )
 
 
 def prepare_checker_build_dir(build_dir: pathlib.Path, project_dir: pathlib.Path) -> pathlib.Path:
@@ -205,6 +251,21 @@ def prepare_checker_build_dir(build_dir: pathlib.Path, project_dir: pathlib.Path
     return checker_build_dir
 
 
+def checker_support_paths(project_dir: pathlib.Path) -> tuple[pathlib.Path, ...]:
+    support_dir = project_dir / "checker-support"
+    if not support_dir.exists():
+        return ()
+    if not support_dir.is_dir():
+        raise SystemExit(f"checker support path is not a directory: {support_dir}")
+    support_paths = [
+        path.relative_to(project_dir)
+        for path in sorted(support_dir.iterdir())
+        if path.is_dir() and (path.name == "typings" or path.name.endswith("-stubs"))
+    ]
+    support_paths.append(support_dir.relative_to(project_dir))
+    return tuple(support_paths)
+
+
 def checker_command(
     checker: str,
     profile: str,
@@ -212,7 +273,13 @@ def checker_command(
     build_dir: pathlib.Path,
 ) -> list[str]:
     if checker == "mypy":
-        command = ["mypy", "--python-version", target]
+        command = [
+            "mypy",
+            "--python-version",
+            target,
+            "--namespace-packages",
+            "--explicit-package-bases",
+        ]
         if profile == "strict":
             command.append("--strict")
         elif profile != "standard":
@@ -240,7 +307,14 @@ def checker_command(
 
 def write_pyright_config(project_dir: pathlib.Path, build_dir: pathlib.Path, profile: str) -> None:
     type_checking_mode = "strict" if profile == "strict" else "standard"
+    extra_paths = [build_dir.name]
+    extra_paths.extend(
+        str(path)
+        for path in checker_support_paths(project_dir)
+        if not path.name.endswith("-stubs")
+    )
     config = {
+        "extraPaths": extra_paths,
         "include": [build_dir.name],
         "typeCheckingMode": type_checking_mode,
         "reportMissingTypeStubs": "none",
@@ -248,8 +322,12 @@ def write_pyright_config(project_dir: pathlib.Path, build_dir: pathlib.Path, pro
         "reportUnknownMemberType": "none",
         "reportUnknownArgumentType": "none",
         "reportUnknownParameterType": "none",
+        "reportUnnecessaryCast": "none",
         "reportUnusedImport": "none",
     }
+    stub_path = project_dir / "checker-support" / "typings"
+    if stub_path.is_dir():
+        config["stubPath"] = str(stub_path.relative_to(project_dir))
     (project_dir / "pyrightconfig.json").write_text(
         json.dumps(config, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -327,7 +405,9 @@ def check_fixture(case: FixtureCase, checkers: tuple[str, ...]) -> None:
                             expected_patterns=expected_failure_patterns_for(case, checker, profile),
                         )
                     else:
-                        if build_consumer_path.exists():
+                        if not has_expected_failure and consumer_path.exists():
+                            shutil.copy2(consumer_path, build_consumer_path)
+                        elif build_consumer_path.exists():
                             build_consumer_path.unlink()
                         run(command, cwd=project_dir)
 

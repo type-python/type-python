@@ -1,0 +1,72 @@
+import collections.abc
+import typing
+from typing import Callable, dataclass_transform, cast
+
+
+def field[T](*, default: T) -> T:
+    return default
+
+
+@dataclass_transform(field_specifiers=(field,))
+def define(cls: type[object]) -> type[object]:
+    return cls
+
+
+@define
+class InventoryItem:
+    sku: str
+    quantity: int = field(default=0)
+
+
+class Mapped[T]:
+    def __init__(self, value: T) -> None:
+        self.value = value
+
+
+def mapped_int_column(default: int) -> Mapped[int]:
+    return cast(Mapped[int], Mapped(default))
+
+
+def mapped_str_column(default: str) -> Mapped[str]:
+    return cast(Mapped[str], Mapped(default))
+
+
+class DeclarativeBase:
+    pass
+
+
+class UserRow(DeclarativeBase):
+    id: Mapped[int] = mapped_int_column(0)
+    name: Mapped[str] = mapped_str_column("")
+
+
+class QuerySet:
+    def __init__(self, items: list[InventoryItem]) -> None:
+        self._items = items
+
+    def __iter__(self) -> collections.abc.Iterator[InventoryItem]:
+        return iter(self._items)
+
+    def filter(self, **lookups: object) -> typing.Self:
+        return self
+
+
+class Manager:
+    def __init__(self, items: list[InventoryItem]) -> None:
+        self._items = items
+
+    def all(self) -> QuerySet:
+        return QuerySet(self._items)
+
+    def items(self) -> list[InventoryItem]:
+        return self._items
+
+
+def route[**P, R](path: str, fn: Callable[P, R]) -> Callable[P, R]:
+    return fn
+
+
+def load_item(sku: str, manager: Manager) -> InventoryItem:
+    for item in manager.items():
+        return item
+    return cast(InventoryItem, object())

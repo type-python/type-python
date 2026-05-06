@@ -1,0 +1,6 @@
+class RuntimeUser:
+    name: str
+
+    def __init__(self, name: str) -> None: ...
+
+def runtime_label(name: str) -> str: ...

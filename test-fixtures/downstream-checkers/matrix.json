@@ -135,6 +135,60 @@
       }
     },
     {
+      "name": "typeshed-heavy-package",
+      "targets": ["3.12"],
+      "expected_stub_fragments": {
+        "3.12": [
+          "import collections.abc",
+          "from contextlib import AbstractContextManager",
+          "from pathlib import Path",
+          "class FileRecord(TypedDict):",
+          "class SupportsRead(Protocol):",
+          "def managed_reader(reader: IO[str]) -> AbstractContextManager[IO[str]]: ..."
+        ]
+      }
+    },
+    {
+      "name": "namespace-package",
+      "targets": ["3.12"],
+      "expected_stub_fragments": {
+        "3.12": {
+          "acme/widgets/__init__.pyi": [
+            "from acme.widgets.registry import Widget",
+            "def default_widget() -> Widget: ..."
+          ],
+          "acme/widgets/registry.pyi": [
+            "class Widget:",
+            "def register_widget(name: str) -> Widget: ..."
+          ]
+        }
+      }
+    },
+    {
+      "name": "pep561-partial-stub-package",
+      "targets": ["3.12"],
+      "expected_stub_fragments": {
+        "3.12": [
+          "from vendorlib import User",
+          "def fetch_user_name() -> str: ..."
+        ]
+      }
+    },
+    {
+      "name": "ecosystem-patterns-package",
+      "targets": ["3.12"],
+      "expected_stub_fragments": {
+        "3.12": [
+          "class InventoryItem:",
+          "class Mapped(Generic[",
+          "class UserRow(DeclarativeBase):",
+          "class QuerySet:",
+          "class Manager:",
+          "def load_item(sku: str, manager: Manager) -> InventoryItem: ..."
+        ]
+      }
+    },
+    {
       "name": "research-roadmap-slice",
       "targets": ["3.12"],
       "expected_stub_fragments": {

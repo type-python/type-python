@@ -1,0 +1,6 @@
+from vendorlib import User, lookup_user
+
+
+def fetch_user_name() -> str:
+    user: User = lookup_user(1)
+    return user.name

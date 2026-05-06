@@ -1,0 +1,35 @@
+import collections.abc
+from contextlib import AbstractContextManager, nullcontext
+from pathlib import Path
+from typing import IO, Literal, Protocol, TypedDict, cast
+
+
+class FileRecord(TypedDict):
+    path: str
+    size: int
+    kind: Literal["file", "directory"]
+
+
+class SupportsRead(Protocol):
+    def read(self, size: int = -1) -> str: ...
+
+
+def normalize_paths(paths: collections.abc.Sequence[Path | str]) -> list[Path]:
+    return [Path(path) for path in paths]
+
+
+def summarize_records(records: collections.abc.Mapping[str, FileRecord]) -> list[str]:
+    return [f"{name}:{record['size']}" for name, record in records.items()]
+
+
+def stream_lines(lines: collections.abc.Iterable[str]) -> collections.abc.Iterator[str]:
+    for line in lines:
+        yield line.rstrip()
+
+
+def managed_reader(reader: IO[str]) -> AbstractContextManager[IO[str]]:
+    return cast(AbstractContextManager[IO[str]], nullcontext(reader))
+
+
+def read_prefix(reader: SupportsRead, size: int) -> str:
+    return reader.read(size)

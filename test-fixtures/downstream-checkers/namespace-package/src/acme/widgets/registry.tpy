@@ -1,0 +1,6 @@
+data class Widget:
+    name: str
+
+
+def register_widget(name: str) -> Widget:
+    return Widget(name=name)
