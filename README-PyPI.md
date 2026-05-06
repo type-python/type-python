@@ -11,11 +11,15 @@
 ---
 
 TypePython is a typed dialect of Python that compiles to standard `.py` + `.pyi`.
-It brings TypeScript-class ergonomics — `sealed` classes, exhaustive `match`,
+It brings author-time TypeScript-class ergonomics — `sealed` classes, exhaustive `match`,
 strict null checks, `unknown`, `interface`, `data class` — to a language whose
 output runs anywhere CPython runs.
 
-**No custom runtime. No per-checker plugin. No vendor lock-in.**
+Those stronger checks are enforced while authoring `.tpy`; emitted artifacts
+remain standard Python and do not transfer every TypePython-only constraint to
+downstream checkers.
+
+**No custom runtime. No required per-checker plugin for emitted output. No vendor lock-in.**
 
 > Status: **Core v1 Beta** (v0.4.0). Core syntax, config, `init`/`check`/`build`/
 > `clean`/`verify`, Core checker semantics, diagnostic code identity, and emitted
@@ -62,7 +66,9 @@ def evaluate(expr: Expr) -> int:
 ```
 
 `typepython build` lowers that to ordinary Python and writes a matching `.pyi`
-that any modern type checker can consume — no TypePython runtime required.
+that any modern type checker can consume — no TypePython runtime required. The
+exhaustiveness proof happens before emit; downstream tools see a normal Python
+class hierarchy.
 
 ## What you write vs. what ships
 
@@ -80,8 +86,13 @@ that any modern type checker can consume — no TypePython runtime required.
 
 ## Why not just mypy / pyright / PEP 695?
 
-| Capability                                              | mypy strict | pyright strict | PEP 695 `.py` | **TypePython `.tpy`** |
-| ------------------------------------------------------- | :---------: | :------------: | :-----------: | :-------------------: |
+The comparison below is about `.tpy` authoring inside the package checked by
+TypePython. Emitted `.py` / `.pyi` remain standard Python typing, so external
+consumers do not automatically inherit TypePython-only constraints such as
+sealed exhaustiveness or `unknown` strictness.
+
+| Capability                                              | mypy strict | pyright strict | PEP 695 `.py` | **TypePython `.tpy` authoring** |
+| ------------------------------------------------------- | :---------: | :------------: | :-----------: | :--------------------------------: |
 | `sealed class` + compiler-proved exhaustiveness         |      —      |       —        |       —       |          ✅           |
 | `unknown` — safe dynamic boundary, must narrow          |      —      |       —        |       —       |          ✅           |
 | `unsafe:` audit fence for `eval` / `exec` / `setattr`   |      —      |       —        |       —       |          ✅           |
@@ -97,7 +108,9 @@ then consume normally.
 The strongest TypePython guarantees are author-time checks. Emitted artifacts
 remain standard Python: sealed exhaustiveness, `unknown` strictness, and
 `unsafe:` fences are enforced by TypePython during authoring, but external
-checkers see the portable `.py` / `.pyi` boundary.
+checkers see the portable `.py` / `.pyi` boundary. Carrying TypePython-only
+semantics across that boundary requires an opt-in sidecar, checker plugin, or
+TypePython-aware consumer.
 
 ## What you also get
 
@@ -128,6 +141,8 @@ typepython type-health --project . --fail-under 85
 These catch missing/stale `py.typed`, wheel ↔ build-tree drift, multi-checker
 portability gaps, public-API drift between releases, and runtime-annotation
 hazards for frameworks that introspect annotations.
+They validate the standard published surface; they do not make ordinary
+downstream `.py` checkers enforce TypePython-only facts.
 
 ## Documentation
 
