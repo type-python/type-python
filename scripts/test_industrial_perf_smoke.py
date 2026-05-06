@@ -42,6 +42,38 @@ class IndustrialPerfSmokeTests(unittest.TestCase):
                 "partial\n",
             )
 
+    def test_explicit_workspace_preserves_parent_contents(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="typepython-industrial-perf-test-") as tmp:
+            root = pathlib.Path(tmp) / "scratch"
+            root.mkdir()
+            marker = root / "keep.txt"
+            marker.write_text("keep\n", encoding="utf-8")
+            stale_project = root / "industrial-workspace"
+            stale_project.mkdir()
+            stale_project.joinpath("old.txt").write_text("old\n", encoding="utf-8")
+
+            industrial_perf_smoke.prepare_explicit_workspace_root(root)
+            project = industrial_perf_smoke.create_workspace(
+                root,
+                industrial_perf_smoke.WorkspaceOptions(
+                    modules=1,
+                    external_stubs=0,
+                    target_python="3.12",
+                ),
+            )
+
+            self.assertEqual(project, root / "industrial-workspace")
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep\n")
+            self.assertFalse(project.joinpath("old.txt").exists())
+
+    def test_explicit_workspace_rejects_file_path(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="typepython-industrial-perf-test-") as tmp:
+            path = pathlib.Path(tmp) / "scratch"
+            path.write_text("not a directory\n", encoding="utf-8")
+
+            with self.assertRaises(SystemExit):
+                industrial_perf_smoke.prepare_explicit_workspace_root(path)
+
     def test_payload_serializes_steps_and_fixture_metadata(self) -> None:
         step = industrial_perf_smoke.TimedStep(
             label="warm_check",

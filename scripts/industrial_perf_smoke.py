@@ -59,6 +59,18 @@ def create_workspace(root: pathlib.Path, options: WorkspaceOptions) -> pathlib.P
     return project
 
 
+def prepare_explicit_workspace_root(root: pathlib.Path) -> None:
+    if root.exists() and not root.is_dir():
+        raise SystemExit(f"--workspace must be a directory path: {root}")
+    root.mkdir(parents=True, exist_ok=True)
+
+    project = root / "industrial-workspace"
+    if project.exists():
+        if not project.is_dir():
+            raise SystemExit(f"industrial perf workspace path is not a directory: {project}")
+        shutil.rmtree(project)
+
+
 def write_probe(path: pathlib.Path, target_python: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -431,9 +443,7 @@ def main() -> None:
         root = temp_root
     else:
         root = args.workspace
-        if root.exists():
-            shutil.rmtree(root)
-        root.mkdir(parents=True)
+        prepare_explicit_workspace_root(root)
 
     try:
         project = create_workspace(root, options)
