@@ -12,7 +12,21 @@ use typepython_lsp::serve_with_io;
 use url::Url;
 
 fn bench_incremental_implementation_edit_session(c: &mut Criterion) {
-    let fixture = chain_fixture("incremental_implementation_edit_session", 48);
+    bench_incremental_implementation_edit_session_with_modules(c, 48);
+}
+
+fn bench_incremental_implementation_edit_session_large(c: &mut Criterion) {
+    bench_incremental_implementation_edit_session_with_modules(c, 512);
+}
+
+fn bench_incremental_implementation_edit_session_with_modules(
+    c: &mut Criterion,
+    module_count: usize,
+) {
+    let fixture = chain_fixture(
+        &format!("incremental_implementation_edit_session_{module_count}"),
+        module_count,
+    );
     let session = build_session(
         &fixture.open_uri,
         &fixture.hover_uri,
@@ -20,7 +34,7 @@ fn bench_incremental_implementation_edit_session(c: &mut Criterion) {
         "def produce() -> int:\n    value = 1\n    return value\n",
     );
 
-    c.bench_function("lsp_incremental_impl_edit_session_48_modules", |b| {
+    c.bench_function(&format!("lsp_incremental_impl_edit_session_{module_count}_modules"), |b| {
         b.iter(|| {
             let mut output = Vec::new();
             serve_with_io(&fixture.config, Cursor::new(session.clone()), &mut output)
@@ -31,7 +45,16 @@ fn bench_incremental_implementation_edit_session(c: &mut Criterion) {
 }
 
 fn bench_incremental_public_edit_session(c: &mut Criterion) {
-    let fixture = chain_fixture("incremental_public_edit_session", 48);
+    bench_incremental_public_edit_session_with_modules(c, 48);
+}
+
+fn bench_incremental_public_edit_session_large(c: &mut Criterion) {
+    bench_incremental_public_edit_session_with_modules(c, 512);
+}
+
+fn bench_incremental_public_edit_session_with_modules(c: &mut Criterion, module_count: usize) {
+    let fixture =
+        chain_fixture(&format!("incremental_public_edit_session_{module_count}"), module_count);
     let session = build_session(
         &fixture.open_uri,
         &fixture.hover_uri,
@@ -39,7 +62,7 @@ fn bench_incremental_public_edit_session(c: &mut Criterion) {
         "def produce() -> str:\n    return \"value\"\n",
     );
 
-    c.bench_function("lsp_incremental_public_edit_session_48_modules", |b| {
+    c.bench_function(&format!("lsp_incremental_public_edit_session_{module_count}_modules"), |b| {
         b.iter(|| {
             let mut output = Vec::new();
             serve_with_io(&fixture.config, Cursor::new(session.clone()), &mut output)
@@ -68,14 +91,15 @@ fn chain_fixture(test_name: &str, module_count: usize) -> ChainFixture {
     fs::write(root.join("src/app/__init__.tpy"), "pass\n").expect("package marker should exist");
 
     for index in 0..module_count {
-        let name = format!("mod_{index:02}");
+        let name = format!("mod_{index:04}");
         let contents = if index == 0 {
             String::from("def produce() -> int:\n    return 1\n")
         } else {
-            let previous = format!("mod_{:02}", index - 1);
+            let previous = format!("mod_{:04}", index - 1);
             format!(
-                "from app.{previous} import produce\n\n\
-                 def run_{index:02}() -> int:\n    return produce()\n"
+                "from app.{previous} import produce as previous_produce\n\n\
+                 def produce() -> int:\n    return previous_produce()\n\n\
+                 def run_{index:04}() -> int:\n    return produce()\n"
             )
         };
         fs::write(root.join(format!("src/app/{name}.tpy")), contents)
@@ -83,8 +107,8 @@ fn chain_fixture(test_name: &str, module_count: usize) -> ChainFixture {
     }
 
     let config = typepython_config::load(&root).expect("workspace config should load");
-    let open_path = root.join("src/app/mod_00.tpy");
-    let hover_path = root.join(format!("src/app/mod_{:02}.tpy", module_count - 1));
+    let open_path = root.join("src/app/mod_0000.tpy");
+    let hover_path = root.join(format!("src/app/mod_{:04}.tpy", module_count - 1));
     let initial_text = fs::read_to_string(&open_path).expect("initial source should be readable");
 
     ChainFixture {
@@ -154,6 +178,8 @@ fn path_to_uri(path: &Path) -> String {
 criterion_group!(
     benches,
     bench_incremental_implementation_edit_session,
-    bench_incremental_public_edit_session
+    bench_incremental_implementation_edit_session_large,
+    bench_incremental_public_edit_session,
+    bench_incremental_public_edit_session_large
 );
 criterion_main!(benches);

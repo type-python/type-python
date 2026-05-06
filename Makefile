@@ -7,7 +7,7 @@ FUZZ_SMOKE_SECONDS ?= 30
 FUZZ_LONG_SECONDS ?= 300
 COVERAGE_MIN_LINES ?= 20
 
-.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers roadmap-demo-smoke coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare package-check beta-release-gate snapshot-review docs ci bump-version
+.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers roadmap-demo-smoke coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare perf-smoke package-check beta-release-gate snapshot-review docs ci bump-version
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -91,6 +91,9 @@ bench-baseline:
 
 bench-compare:
 	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker -- --baseline v0.1.0
+
+perf-smoke:
+	$(PYTHON) scripts/industrial_perf_smoke.py
 
 snapshot-review:
 	$(CARGO) insta review
