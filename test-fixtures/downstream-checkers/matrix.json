@@ -80,7 +80,7 @@
       "targets": ["3.12"],
       "expected_stub_fragments": {
         "3.12": [
-          "def framework_transform(*args, **kwargs): ...",
+          "def framework_transform(*args: object, **kwargs: object) -> Callable[[",
           "def delay(self, *args: P.args, **kwargs: P.kwargs) -> R: ...",
           "build: Task[[str], int]"
         ]

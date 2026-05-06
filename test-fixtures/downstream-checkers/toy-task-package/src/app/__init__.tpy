@@ -9,10 +9,12 @@ class Task[**P, R]:
         return self._fn(*args, **kwargs)
 
 
-def framework_transform(*args, **kwargs):
-    def wrap(fn):
-        return fn
-    return wrap
+def identity_transform[T](fn: T) -> T:
+    return fn
+
+
+def framework_transform[T](*args: object, **kwargs: object) -> Callable[[T], T]:
+    return identity_transform
 
 
 @framework_transform(

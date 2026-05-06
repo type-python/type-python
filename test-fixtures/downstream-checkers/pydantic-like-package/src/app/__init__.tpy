@@ -1,13 +1,20 @@
-from typing import Any
+from typing import Any, Callable
 
 
-def framework_transform(*args, **kwargs):
-    def wrap(obj):
-        return obj
-    return wrap
+def identity_transform[T](obj: T) -> T:
+    return obj
 
 
-def Field(default=None, default_factory=None, alias=None, frozen=False) -> Any:
+def framework_transform[T](*args: object, **kwargs: object) -> Callable[[T], T]:
+    return identity_transform
+
+
+def Field(
+    default: object = None,
+    default_factory: object = None,
+    alias: str | None = None,
+    frozen: bool = False,
+) -> Any:
     return default
 
 

@@ -1,21 +1,25 @@
 from typing import Callable, cast
 
 
+def route_decorator(fn: Callable[..., object]) -> Callable[..., object]:
+    return fn
+
+
+def identity_transform[T](obj: T) -> T:
+    return obj
+
+
 class FastAPI:
     def post(self, path: str, *, response_model: object | None = None) -> Callable[[Callable[..., object]], Callable[..., object]]:
-        def decorate(fn: Callable[..., object]) -> Callable[..., object]:
-            return fn
-        return decorate
+        return route_decorator
 
 
 def Depends[T](dependency: Callable[[], T]) -> T:
     return dependency()
 
 
-def framework_transform(*args, **kwargs):
-    def wrap(obj):
-        return obj
-    return wrap
+def framework_transform[T](*args: object, **kwargs: object) -> Callable[[T], T]:
+    return identity_transform
 
 
 @framework_transform(kind="base_class", capabilities=("field_collection", "constructor_generation", "method_synthesis"))

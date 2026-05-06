@@ -24,11 +24,11 @@ class Mapped[T]:
 
 
 def mapped_int_column(default: int) -> Mapped[int]:
-    return cast(Mapped[int], Mapped(default))
+    return Mapped[int](default)
 
 
 def mapped_str_column(default: str) -> Mapped[str]:
-    return cast(Mapped[str], Mapped(default))
+    return Mapped[str](default)
 
 
 class DeclarativeBase:
