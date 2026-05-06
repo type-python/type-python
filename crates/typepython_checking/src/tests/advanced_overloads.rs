@@ -357,6 +357,111 @@ fn check_accepts_direct_overloaded_call_assignment_type_match() {
 }
 
 #[test]
+fn check_accepts_direct_overloaded_none_argument_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        concat!(
+            "overload def parse(value: int) -> str: ...\n",
+            "def parse(value):\n",
+            "    return 1\n\n",
+            "result: str = parse(None)\n",
+        ),
+        ParseOptions::default(),
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn method_overload_selection_honors_strict_nulls_option() {
+    let mut node = type_relation_node_with_base_child();
+    node.declarations.push(declaration! {
+        name: String::from("parse"),
+        kind: DeclarationKind::Overload,
+        metadata: callable_metadata("(self,value:int)->str"),
+        value_type_expr: None,
+        method_kind: Some(typepython_syntax::MethodKind::Instance),
+        class_kind: None,
+        owner: Some(DeclarationOwner {
+            kind: DeclarationOwnerKind::Class,
+            name: String::from("Base"),
+        }),
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    });
+    let graph = normalize_test_graph(&ModuleGraph { nodes: vec![node] });
+    let node = &graph.nodes[0];
+    let overloads = node
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Overload)
+        .map(|declaration| (declaration, None))
+        .collect::<Vec<_>>();
+    let call = typepython_binding::CallSite {
+        callee: String::from("Base.parse"),
+        arg_count: 1,
+        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
+            String::from("None"),
+        ]),
+        starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+        keyword_names: Vec::new(),
+        keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+            Vec::new(),
+        ),
+        line: 1,
+    };
+    let selection = crate::resolve_method_overload_selection(
+        node,
+        &graph.nodes,
+        &call,
+        &crate::SemanticType::Name(String::from("Base")),
+        &overloads,
+        crate::AssignabilityOptions {
+            strict_nulls: false,
+            ..crate::AssignabilityOptions::default()
+        },
+    );
+
+    match selection {
+        crate::ResolvedOverloadSelection::Selected(candidate) => {
+            assert_eq!(
+                candidate.return_type.as_ref().map(crate::diagnostic_type_text),
+                Some(String::from("str"))
+            );
+        }
+        other => panic!("expected strict-null-disabled method overload selection: {other:?}"),
+    }
+}
+
+#[test]
+fn check_rejects_tainted_overloaded_call_argument_when_taint_is_enabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        concat!(
+            "overload def render(value: str) -> int: ...\n",
+            "def render(value) -> str:\n",
+            "    return \"unsafe\"\n\n",
+            "raw: Tainted[str, \"html\"]\n",
+            "result: int = render(raw)\n",
+        ),
+        ParseOptions::default(),
+        crate::CheckerOptions { experimental_taint: true, ..crate::CheckerOptions::default() },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("assigns `str` where `result` expects `int`"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_direct_overloaded_call_return_type_match() {
     let result = check(&ModuleGraph {
         nodes: vec![ModuleNode {
@@ -1313,7 +1418,13 @@ fn overload_specificity_uses_instantiated_generic_candidate() {
     };
     let overloads = vec![&generic_overload, &object_overload];
 
-    let selected = match crate::resolve_direct_overload_selection(&node, &[], &call, &overloads) {
+    let selected = match crate::resolve_direct_overload_selection(
+        &node,
+        &[],
+        &call,
+        &overloads,
+        crate::AssignabilityOptions::default(),
+    ) {
         crate::ResolvedOverloadSelection::Selected(candidate) => candidate,
         _ => panic!("selected overload"),
     };

@@ -697,6 +697,7 @@ fn framework_transform_provider_has_supported_semantics(
 }
 
 pub(super) fn ambiguous_overload_call_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -708,7 +709,13 @@ pub(super) fn ambiguous_overload_call_diagnostics(
                 return None;
             }
 
-            match resolve_direct_overload_selection(node, nodes, call, &overloads) {
+            match resolve_direct_overload_selection(
+                node,
+                nodes,
+                call,
+                &overloads,
+                context.assignability_options(),
+            ) {
                 ResolvedOverloadSelection::Ambiguous { applicable_count }
                     if applicable_count >= 2 =>
                 {
@@ -764,11 +771,12 @@ pub(super) fn resolve_direct_overloads<'a>(
         .collect()
 }
 
-pub(super) fn overload_is_more_specific(
+fn overload_is_more_specific_with_options(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     candidate: &ResolvedDirectCallCandidate<'_>,
     baseline: &ResolvedDirectCallCandidate<'_>,
+    options: AssignabilityOptions,
 ) -> bool {
     let candidate_params = &candidate.signature_params;
     let baseline_params = &baseline.signature_params;
@@ -805,7 +813,13 @@ pub(super) fn overload_is_more_specific(
         let Some(baseline_param_type) = baseline_semantic_params.get(index) else {
             return false;
         };
-        if !semantic_type_is_assignable(node, nodes, baseline_param_type, candidate_param_type) {
+        if !semantic_type_is_assignable_with_options(
+            node,
+            nodes,
+            baseline_param_type,
+            candidate_param_type,
+            options,
+        ) {
             return false;
         }
         if candidate_param_type != baseline_param_type {
@@ -820,6 +834,7 @@ fn select_most_specific_overload_index(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     applicable: &[ResolvedDirectCallCandidate<'_>],
+    options: AssignabilityOptions,
 ) -> Option<usize> {
     if applicable.len() == 1 {
         return Some(0);
@@ -831,7 +846,13 @@ fn select_most_specific_overload_index(
         .filter(|candidate| {
             applicable.iter().all(|other| {
                 std::ptr::eq::<Declaration>(candidate.1.declaration, other.declaration)
-                    || overload_is_more_specific(node, nodes, candidate.1, other)
+                    || overload_is_more_specific_with_options(
+                        node,
+                        nodes,
+                        candidate.1,
+                        other,
+                        options,
+                    )
             })
         })
         .collect::<Vec<_>>();
@@ -846,7 +867,7 @@ pub(super) enum ResolvedOverloadSelection<'a> {
     NotApplicable { runtime_generic_failures: Vec<(&'a Declaration, DirectCallResolutionFailure)> },
 }
 
-pub(super) fn resolve_overload_selection_from_attempts<'a>(
+pub(super) fn resolve_overload_selection_from_attempts_with_options<'a>(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
@@ -854,6 +875,7 @@ pub(super) fn resolve_overload_selection_from_attempts<'a>(
         &'a Declaration,
         Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure>,
     )>,
+    options: AssignabilityOptions,
 ) -> ResolvedOverloadSelection<'a> {
     let mut applicable = Vec::new();
     let mut runtime_generic_failures = Vec::new();
@@ -861,11 +883,12 @@ pub(super) fn resolve_overload_selection_from_attempts<'a>(
     for (declaration, attempt) in attempts {
         match attempt {
             Ok(candidate)
-                if call_signature_params_are_applicable(
+                if call_signature_params_are_applicable_with_options(
                     node,
                     nodes,
                     call,
                     &candidate.signature_params,
+                    options,
                 ) =>
             {
                 applicable.push(candidate);
@@ -881,10 +904,12 @@ pub(super) fn resolve_overload_selection_from_attempts<'a>(
     match applicable.len() {
         0 => ResolvedOverloadSelection::NotApplicable { runtime_generic_failures },
         1 => ResolvedOverloadSelection::Selected(applicable.swap_remove(0)),
-        applicable_count => match select_most_specific_overload_index(node, nodes, &applicable) {
-            Some(index) => ResolvedOverloadSelection::Selected(applicable.swap_remove(index)),
-            None => ResolvedOverloadSelection::Ambiguous { applicable_count },
-        },
+        applicable_count => {
+            match select_most_specific_overload_index(node, nodes, &applicable, options) {
+                Some(index) => ResolvedOverloadSelection::Selected(applicable.swap_remove(index)),
+                None => ResolvedOverloadSelection::Ambiguous { applicable_count },
+            }
+        }
     }
 }
 
@@ -935,7 +960,23 @@ pub(super) fn call_signature_params_are_applicable(
     call: &typepython_binding::CallSite,
     params: &[SemanticCallableParam],
 ) -> bool {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    call_signature_params_are_applicable_with_options(
+        node,
+        nodes,
+        call,
+        params,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn call_signature_params_are_applicable_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    params: &[SemanticCallableParam],
+    options: AssignabilityOptions,
+) -> bool {
+    let context = checker_context_for_assignability_options(nodes, options);
     let positional_params = params
         .iter()
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
@@ -1081,7 +1122,7 @@ pub(super) fn call_signature_params_are_applicable(
         positional_types.iter().take(positional_params.len()).zip(param_types.iter()).all(
             |(arg_ty, param_ty)| match (arg_ty, param_ty) {
                 (Some(arg_ty), Some(param_ty)) => {
-                    semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
+                    semantic_type_is_assignable_with_options(node, nodes, param_ty, arg_ty, options)
                 }
                 _ => true,
             },
@@ -1089,14 +1130,14 @@ pub(super) fn call_signature_params_are_applicable(
             let Some(param_ty) = variadic_type.as_ref() else {
                 return false;
             };
-            arg_ty
-                .as_ref()
-                .is_none_or(|arg_ty| semantic_type_is_assignable(node, nodes, param_ty, arg_ty))
+            arg_ty.as_ref().is_none_or(|arg_ty| {
+                semantic_type_is_assignable_with_options(node, nodes, param_ty, arg_ty, options)
+            })
         }) && variadic_starred_types.iter().all(|arg_ty| {
             let Some(param_ty) = variadic_type.as_ref() else {
                 return false;
             };
-            semantic_type_matches(node, nodes, param_ty, arg_ty)
+            semantic_type_matches_with_options(node, nodes, param_ty, arg_ty, options)
         });
     let keyword_ok =
         call.keyword_names.iter().zip(&resolved_keyword_arg_types).all(|(keyword, arg_ty)| {
@@ -1105,13 +1146,13 @@ pub(super) fn call_signature_params_are_applicable(
                     return false;
                 };
                 return arg_ty.as_ref().is_none_or(|arg_ty| {
-                    semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
+                    semantic_type_is_assignable_with_options(node, nodes, param_ty, arg_ty, options)
                 });
             };
             let param_ty = param_types[index].as_ref();
             match (arg_ty.as_ref(), param_ty) {
                 (Some(arg_ty), Some(param_ty)) => {
-                    semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
+                    semantic_type_is_assignable_with_options(node, nodes, param_ty, arg_ty, options)
                 }
                 _ => true,
             }
@@ -1128,9 +1169,9 @@ pub(super) fn call_signature_params_are_applicable(
                     let param_ty = param_types[index].as_ref();
                     let field_ty = field.semantic_value_type();
                     return match (param_ty, field_ty.as_ref()) {
-                        (Some(param_ty), Some(field_ty)) => {
-                            semantic_type_matches(node, nodes, param_ty, field_ty)
-                        }
+                        (Some(param_ty), Some(field_ty)) => semantic_type_matches_with_options(
+                            node, nodes, param_ty, field_ty, options,
+                        ),
                         _ => true,
                     };
                 }
@@ -1138,19 +1179,36 @@ pub(super) fn call_signature_params_are_applicable(
                     return false;
                 };
                 let field_ty = field.semantic_value_type();
-                field_ty
-                    .as_ref()
-                    .is_none_or(|field_ty| semantic_type_matches(node, nodes, param_ty, field_ty))
+                field_ty.as_ref().is_none_or(|field_ty| {
+                    semantic_type_matches_with_options(node, nodes, param_ty, field_ty, options)
+                })
             }),
             KeywordExpansion::Mapping(value_ty) => {
                 let Some(param_ty) = keyword_variadic_type.as_ref() else {
                     return false;
                 };
-                semantic_type_matches(node, nodes, param_ty, value_ty)
+                semantic_type_matches_with_options(node, nodes, param_ty, value_ty, options)
             }
         });
 
     positional_ok && keyword_ok
+}
+
+fn checker_context_for_assignability_options<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    options: AssignabilityOptions,
+) -> CheckerContext<'a> {
+    CheckerContext::new_with_bound_surface_facts_and_options(
+        nodes,
+        None,
+        None,
+        CheckerOptions {
+            strict_nulls: options.strict_nulls,
+            experimental_taint: options.taint,
+            experimental_framework_adapters: options.framework_adapters,
+            ..CheckerOptions::default()
+        },
+    )
 }
 
 fn expected_positional_arg_semantic_types_from_params(

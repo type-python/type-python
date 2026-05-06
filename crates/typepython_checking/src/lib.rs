@@ -1513,7 +1513,10 @@ fn collect_node_semantic_diagnostics(
     node: &typepython_graph::ModuleNode,
     options: CheckerPassOptions,
 ) {
-    push_diagnostics(diagnostics, ambiguous_overload_call_diagnostics(node, context.nodes));
+    push_diagnostics(
+        diagnostics,
+        ambiguous_overload_call_diagnostics(context, node, context.nodes),
+    );
     push_diagnostics(
         diagnostics,
         direct_unknown_operation_diagnostics(context, node, context.nodes),

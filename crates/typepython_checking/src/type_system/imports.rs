@@ -177,7 +177,13 @@ pub(super) fn resolve_imported_module_method_return_semantic_type(
                 .copied()
                 .filter(|declaration| declaration.kind == DeclarationKind::Overload)
                 .collect::<Vec<_>>();
-            match resolve_direct_overload_selection(node, nodes, &call, &overloads) {
+            match resolve_direct_overload_selection(
+                node,
+                nodes,
+                &call,
+                &overloads,
+                AssignabilityOptions::default(),
+            ) {
                 ResolvedOverloadSelection::Selected(candidate) => candidate.return_type,
                 _ => None,
             }
@@ -253,7 +259,13 @@ pub(super) fn imported_module_method_call_diagnostics(
         .filter(|declaration| declaration.kind == DeclarationKind::Overload)
         .collect::<Vec<_>>();
     if !overloads.is_empty() {
-        match resolve_direct_overload_selection(node, nodes, &direct_call, &overloads) {
+        match resolve_direct_overload_selection(
+            node,
+            nodes,
+            &direct_call,
+            &overloads,
+            AssignabilityOptions::default(),
+        ) {
             ResolvedOverloadSelection::Selected(candidate) => {
                 let signature = candidate.signature_sites;
                 if let Some(diagnostic) =

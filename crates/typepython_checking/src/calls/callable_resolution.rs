@@ -302,12 +302,13 @@ pub(super) fn resolve_direct_overload_selection<'a>(
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     overloads: &[&'a Declaration],
+    options: AssignabilityOptions,
 ) -> ResolvedOverloadSelection<'a> {
     let attempts = overloads
         .iter()
         .map(|declaration| (*declaration, resolve_direct_call_candidate_detailed(node, nodes, declaration, call)))
         .collect::<Vec<_>>();
-    resolve_overload_selection_from_attempts(node, nodes, call, attempts)
+    resolve_overload_selection_from_attempts_with_options(node, nodes, call, attempts, options)
 }
 
 pub(super) fn resolve_method_call_candidate_detailed<'a>(
@@ -389,7 +390,7 @@ pub(super) fn resolve_method_overload_selection<'a>(
             )
         })
         .collect::<Vec<_>>();
-    resolve_overload_selection_from_attempts(node, nodes, call, attempts)
+    resolve_overload_selection_from_attempts_with_options(node, nodes, call, attempts, options)
 }
 
 #[allow(dead_code)]
@@ -1210,7 +1211,13 @@ fn decorator_candidate_accepts_semantic_callable(
     options: AssignabilityOptions,
 ) -> bool {
     let synthetic_call = synthetic_single_positional_call(&candidate.declaration.name);
-    if !call_signature_params_are_applicable(node, nodes, &synthetic_call, &candidate.signature_params)
+    if !call_signature_params_are_applicable_with_options(
+        node,
+        nodes,
+        &synthetic_call,
+        &candidate.signature_params,
+        options,
+    )
     {
         return false;
     }
@@ -1581,7 +1588,13 @@ pub(super) fn resolve_direct_callable_return_semantic_type_for_line_with_options
                 )
             })
             .collect::<Vec<_>>();
-        return match resolve_overload_selection_from_attempts(node, nodes, call, attempts) {
+        return match resolve_overload_selection_from_attempts_with_options(
+            node,
+            nodes,
+            call,
+            attempts,
+            options,
+        ) {
             ResolvedOverloadSelection::Selected(candidate) => candidate.return_type,
             _ => None,
         };
