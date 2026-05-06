@@ -667,6 +667,7 @@ pub(super) fn callable_assignment_result(
     nodes: &[typepython_graph::ModuleNode],
     assignment: &typepython_binding::AssignmentSite,
     expected: &str,
+    assignability_options: AssignabilityOptions,
 ) -> Option<Option<Diagnostic>> {
     let (expected_params, expected_return) = parse_callable_annotation(expected)?;
     let expected_params = expected_params.map(|params| {
@@ -680,13 +681,25 @@ pub(super) fn callable_assignment_result(
         expected_params.len() == actual_params.len()
             && expected_params.iter().zip(actual_params.iter()).all(
                 |(expected_param, actual_param)| {
-                    semantic_type_is_assignable(node, nodes, expected_param, actual_param)
+                    semantic_type_is_assignable_with_options(
+                        node,
+                        nodes,
+                        expected_param,
+                        actual_param,
+                        assignability_options,
+                    )
                 },
             )
     });
 
     let matches = params_match
-        && semantic_type_is_assignable(node, nodes, &expected_return, &actual_return);
+        && semantic_type_is_assignable_with_options(
+            node,
+            nodes,
+            &expected_return,
+            &actual_return,
+            assignability_options,
+        );
 
     Some((!matches).then(|| {
         let actual_signature = format_semantic_assignment_signature(&actual_params, &actual_return);

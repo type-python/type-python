@@ -100,6 +100,17 @@ fn check_accepts_none_return_when_strict_nulls_is_disabled() {
 }
 
 #[test]
+fn check_accepts_callable_none_return_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "from typing import Callable\n\nhandler: Callable[[int], int] = lambda value: None\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_rejects_none_literal_assignment_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "from typing import Literal\n\nvalue: Literal[1] = None\n",

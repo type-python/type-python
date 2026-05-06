@@ -31,9 +31,13 @@ pub(super) fn annotated_assignment_type_diagnostics(
             continue;
         };
 
-        if let Some(callable_result) =
-            callable_assignment_result(node, nodes, assignment, &expected)
-        {
+        if let Some(callable_result) = callable_assignment_result(
+            node,
+            nodes,
+            assignment,
+            &expected,
+            context.assignability_options(),
+        ) {
             if let Some(diagnostic) = callable_result {
                 diagnostics.push(diagnostic);
             }
