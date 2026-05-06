@@ -15,7 +15,7 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIXTURE_ROOT = ROOT / "test-fixtures" / "downstream-checkers"
 MATRIX_PATH = FIXTURE_ROOT / "matrix.json"
-DEFAULT_CHECKERS = ("mypy", "pyright", "ty")
+DEFAULT_CHECKERS = ("mypy", "pyright", "basedpyright", "ty")
 DEFAULT_PROFILES = ("strict",)
 
 

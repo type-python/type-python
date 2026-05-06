@@ -83,6 +83,7 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
     def test_checker_commands_include_strict_profiles(self) -> None:
         build_dir = pathlib.Path("checker-build")
 
+        self.assertIn("basedpyright", downstream_checker_smoke.DEFAULT_CHECKERS)
         self.assertIn(
             "--strict",
             downstream_checker_smoke.checker_command("mypy", "strict", "3.12", build_dir),

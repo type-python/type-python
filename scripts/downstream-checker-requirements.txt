@@ -1,4 +1,5 @@
 mypy==1.19.1
 pyright==1.1.409
+basedpyright==1.39.3
 # ty 0.0.33 regressed the Ubuntu downstream smoke job after its 2026-04-28 release.
 ty==0.0.32
