@@ -809,10 +809,6 @@ pub fn check_modules_with_checker_options_and_source_overrides(
 }
 
 #[must_use]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors the public checker option surface while threading binding metadata and subset recheck inputs"
-)]
 pub fn check_modules_with_binding_metadata(
     graph: &ModuleGraph,
     bindings: &[BindingTable],

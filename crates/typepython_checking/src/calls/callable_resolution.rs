@@ -159,6 +159,10 @@ impl DirectCallResolutionFailure {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "call candidate resolution threads semantic call context and assignability policy"
+)]
 fn resolve_callable_candidate_from_semantics<'a>(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],

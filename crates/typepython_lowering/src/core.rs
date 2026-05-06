@@ -1458,6 +1458,10 @@ fn has_compat_generic_class_like_declarations(
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "generic type parameter detection spans all lowerable declaration categories"
+)]
 fn has_any_generic_type_params(
     type_aliases: &std::collections::BTreeMap<usize, &typepython_syntax::TypeAliasStatement>,
     interfaces: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,

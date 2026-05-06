@@ -1110,6 +1110,10 @@ pub(crate) fn callable_param_expr_mentions_param_spec_semantic(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "callable generic inference threads graph context, param sets, existing bindings, and assignability policy"
+)]
 pub(crate) fn infer_callable_param_expr_bindings(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -1362,6 +1366,10 @@ pub(crate) fn generic_type_param_accepts_actual_with_options(
     true
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "generic inference threads graph context, substitution state, type-pack names, and assignability policy"
+)]
 pub(crate) fn infer_generic_type_param_bindings(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -1384,6 +1392,10 @@ pub(crate) fn infer_generic_type_param_bindings(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "generic inference threads graph context, substitution state, type-pack names, and assignability policy"
+)]
 fn infer_generic_type_param_bindings_full(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -1491,6 +1503,10 @@ fn infer_generic_type_param_bindings_full(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "semantic generic inference threads graph context, substitution state, type-pack names, and assignability policy"
+)]
 pub(crate) fn infer_generic_type_param_bindings_semantic(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -1803,6 +1819,10 @@ pub(crate) fn generic_binding_count(solution: &GenericTypeParamSubstitutions) ->
     solution.types.len() + solution.param_lists.len() + solution.type_packs.len()
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "generic argument inference threads argument slices, substitution state, type-pack names, and assignability policy"
+)]
 pub(crate) fn infer_generic_type_arg_bindings(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],

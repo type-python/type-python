@@ -19,6 +19,10 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "contextual expression resolution threads owner context, source location, metadata, and assignability policy"
+)]
 pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_options(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
