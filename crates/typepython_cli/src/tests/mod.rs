@@ -487,7 +487,7 @@ fn run_pipeline_accepts_json_from_bundled_stdlib() {
         .expect("test setup should succeed");
         fs::write(
             project_dir.join("src/app/__init__.tpy"),
-            "import json\n\ndef encode(value: str) -> str:\n    return json.dumps(value)\n",
+            "import json\n\ndef encode() -> str:\n    return json.dumps(\"value\")\n",
         )
         .expect("test setup should succeed");
 
