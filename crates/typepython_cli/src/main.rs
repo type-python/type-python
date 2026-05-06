@@ -47,6 +47,7 @@ const INIT_SOURCE_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/src/app/__init__.tpy"));
 const RUNTIME_IMPORTABILITY_SCRIPT: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/runtime_importability.py"));
+pub(crate) const CLI_JSON_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Serialize)]
 struct CommandSummary {
@@ -351,6 +352,7 @@ fn print_summary(
         }
         OutputFormat::Json => {
             let payload = serde_json::json!({
+                "schema_version": CLI_JSON_SCHEMA_VERSION,
                 "summary": summary,
                 "diagnostics": diagnostics,
             });

@@ -4,7 +4,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 
-use crate::cli::{AdapterArgs, AdapterCommand, AdapterValidateArgs, OutputFormat};
+use crate::{
+    CLI_JSON_SCHEMA_VERSION,
+    cli::{AdapterArgs, AdapterCommand, AdapterValidateArgs, OutputFormat},
+};
 
 #[derive(Debug, Deserialize)]
 struct AdapterManifest {
@@ -332,6 +335,7 @@ fn print_adapter_validation_report(
         }
         OutputFormat::Json => {
             let payload = serde_json::json!({
+                "schema_version": CLI_JSON_SCHEMA_VERSION,
                 "summary": summary,
                 "diagnostics": diagnostics,
             });

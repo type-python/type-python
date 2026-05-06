@@ -17,6 +17,10 @@ Project-oriented commands use these shared options:
 - `lsp` accepts `--project PATH` and speaks JSON-RPC over stdio instead of CLI JSON output
 - `init` has its own command-specific flags
 
+Structured output uses the versioned envelope documented in
+[CLI JSON Output Schema](json-output-schema.md). Consumers should check the
+top-level `schema_version` before depending on command-specific fields.
+
 ## Commands
 
 ### `typepython init`
@@ -84,6 +88,7 @@ check:
 
 ```json
 {
+  "schema_version": 1,
   "diagnostics": {
     "diagnostics": []
   },

@@ -2,6 +2,10 @@
 
 TypePython emits structured diagnostics with unique error codes organized by category. Each diagnostic includes a severity level, source location, and optionally machine-readable suggestions for fixes.
 
+CLI JSON output wraps diagnostics in a versioned envelope with top-level
+`schema_version`; see [CLI JSON Output Schema](json-output-schema.md) for the
+stable machine-readable contract.
+
 ## Severity Levels
 
 | Severity  | Meaning              | Effect                                                                                                      |

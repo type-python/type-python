@@ -6,7 +6,7 @@ use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_target::PythonTarget;
 
 use crate::{
-    CommandSummary,
+    CLI_JSON_SCHEMA_VERSION, CommandSummary,
     cli::{OutputFormat, TypeHealthArgs},
     exit_code, load_project, print_summary,
 };
@@ -79,7 +79,11 @@ pub(crate) fn run_type_health(args: TypeHealthArgs) -> Result<ExitCode> {
     }
 
     if args.run.format == OutputFormat::Json {
-        let payload = serde_json::json!({ "summary": report, "diagnostics": diagnostics });
+        let payload = serde_json::json!({
+            "schema_version": CLI_JSON_SCHEMA_VERSION,
+            "summary": report,
+            "diagnostics": diagnostics,
+        });
         println!(
             "{}",
             serde_json::to_string_pretty(&payload)

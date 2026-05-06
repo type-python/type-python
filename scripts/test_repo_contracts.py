@@ -346,6 +346,30 @@ class RepoContractsTests(unittest.TestCase):
             self.assertIn("extension packaging", normalized)
             self.assertIn("Core v1 Beta compatibility promise", normalized)
 
+    def test_cli_json_schema_is_versioned_and_documented(self) -> None:
+        main = read_text("crates/typepython_cli/src/main.rs")
+        api_diff = read_text("crates/typepython_cli/src/api_diff.rs")
+        adapter = read_text("crates/typepython_cli/src/adapter.rs")
+        verification = read_text("crates/typepython_cli/src/verification.rs")
+        migration = read_text("crates/typepython_cli/src/migration.rs")
+        type_health = read_text("crates/typepython_cli/src/type_health.rs")
+        cli_reference = read_text("docs/cli-reference.md")
+        diagnostics = read_text("docs/diagnostics.md")
+        json_schema = read_text("docs/json-output-schema.md")
+
+        self.assertIn("pub(crate) const CLI_JSON_SCHEMA_VERSION: u32 = 1", main)
+        for source in (main, api_diff, adapter, verification, migration, type_health):
+            self.assertIn('"schema_version": CLI_JSON_SCHEMA_VERSION', source)
+
+        self.assertIn("CLI JSON Output Schema", cli_reference)
+        self.assertIn('"schema_version": 1', cli_reference)
+        self.assertIn("CLI JSON Output Schema", diagnostics)
+        self.assertIn("Current schema version: `1`", json_schema)
+        self.assertIn("typepython check --format json", json_schema)
+        self.assertIn("typepython adapter validate --format json", json_schema)
+        self.assertIn("must not remove or change the meaning", json_schema)
+        self.assertIn("1-based span coordinates", json_schema)
+
     def test_conformance_beta_scope_classification_is_precise(self) -> None:
         conformance_report = load_script_module(
             "scripts/conformance_report.py",

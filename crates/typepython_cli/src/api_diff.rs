@@ -13,7 +13,7 @@ use tar::Archive as TarArchive;
 use zip::ZipArchive;
 
 use crate::{
-    CommandSummary,
+    CLI_JSON_SCHEMA_VERSION, CommandSummary,
     cli::{ApiDiffArgs, OutputFormat},
     exit_code, print_summary,
 };
@@ -55,6 +55,7 @@ pub(crate) fn run_api_diff(args: ApiDiffArgs) -> Result<ExitCode> {
 
     if args.format == OutputFormat::Json {
         let payload = serde_json::json!({
+            "schema_version": CLI_JSON_SCHEMA_VERSION,
             "summary": report,
             "diagnostics": diagnostics,
         });

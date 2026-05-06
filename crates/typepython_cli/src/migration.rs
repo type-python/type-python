@@ -17,7 +17,7 @@ use crate::discovery::{
     DiscoveredSource, bundled_stdlib_sources, collect_source_paths, normalize_glob_path,
 };
 use crate::pipeline::{collect_parse_diagnostics, load_syntax_trees};
-use crate::{CommandSummary, exit_code, load_project, print_summary};
+use crate::{CLI_JSON_SCHEMA_VERSION, CommandSummary, exit_code, load_project, print_summary};
 
 #[derive(Debug, Serialize)]
 pub(crate) struct MigrationReport {
@@ -1686,6 +1686,7 @@ fn print_migration_report(
         }
         OutputFormat::Json => {
             let payload = serde_json::json!({
+                "schema_version": CLI_JSON_SCHEMA_VERSION,
                 "summary": summary,
                 "report": report,
                 "diagnostics": diagnostics,

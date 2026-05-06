@@ -32,8 +32,9 @@ use crate::pipeline::{
 };
 use crate::type_health::{TypeHealthReport, build_type_health_report_for_target};
 use crate::{
-    CommandSummary, RUNTIME_IMPORTABILITY_SCRIPT, bytecode_path_for, exit_code, load_project,
-    load_project_without_python_executable_validation, print_summary, resolve_python_executable,
+    CLI_JSON_SCHEMA_VERSION, CommandSummary, RUNTIME_IMPORTABILITY_SCRIPT, bytecode_path_for,
+    exit_code, load_project, load_project_without_python_executable_validation, print_summary,
+    resolve_python_executable,
 };
 
 #[derive(Debug, serde::Deserialize)]
@@ -375,6 +376,7 @@ fn print_verify_summary(
         }
         OutputFormat::Json => {
             let payload = serde_json::json!({
+                "schema_version": CLI_JSON_SCHEMA_VERSION,
                 "summary": summary,
                 "diagnostics": diagnostics,
                 "portability": portability,
