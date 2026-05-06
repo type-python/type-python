@@ -38,7 +38,8 @@ impl JsonValue {
     fn render(&self) -> String {
         match self {
             Self::Null => String::from("None"),
-            Self::Bool(value) => value.to_string(),
+            Self::Bool(true) => String::from("True"),
+            Self::Bool(false) => String::from("False"),
             Self::Int(value) => value.to_string(),
             Self::Str(value) => format!("\"{value}\""),
             Self::Array(items) => {
