@@ -21,6 +21,10 @@ Structured output uses the versioned envelope documented in
 [CLI JSON Output Schema](json-output-schema.md). Consumers should check the
 top-level `schema_version` before depending on command-specific fields.
 
+Tracing is controlled by `RUST_LOG` or `TYPEPYTHON_LOG`; `RUST_LOG` takes
+precedence. Set `TYPEPYTHON_LOG_FILE=/path/to/typepython.log` to append logs to
+a file, which is useful for `watch` and editor-launched `lsp` sessions.
+
 ## Commands
 
 ### `typepython init`

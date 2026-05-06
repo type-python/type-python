@@ -15,7 +15,10 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::ExitCode,
-    sync::mpsc::{self, RecvTimeoutError},
+    sync::{
+        Mutex,
+        mpsc::{self, RecvTimeoutError},
+    },
     time::Duration,
 };
 
@@ -93,15 +96,36 @@ fn exit_code_for_error(error: &anyhow::Error) -> ExitCode {
 }
 
 fn init_tracing() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("typepython_cli=info,typepython_config=info")),
-        )
-        .with_target(false)
-        .without_time()
-        .try_init()
-        .map_err(|error| anyhow::anyhow!("unable to install tracing subscriber: {error}"))
+    let filter = tracing_filter();
+    let builder =
+        tracing_subscriber::fmt().with_env_filter(filter).with_target(false).without_time();
+
+    if let Some(log_file) = env::var_os("TYPEPYTHON_LOG_FILE") {
+        let file = fs::OpenOptions::new().create(true).append(true).open(&log_file).with_context(
+            || {
+                format!(
+                    "unable to open TYPEPYTHON_LOG_FILE at {}",
+                    PathBuf::from(&log_file).display()
+                )
+            },
+        )?;
+        builder
+            .with_writer(Mutex::new(file))
+            .try_init()
+            .map_err(|error| anyhow::anyhow!("unable to install tracing subscriber: {error}"))
+    } else {
+        builder
+            .try_init()
+            .map_err(|error| anyhow::anyhow!("unable to install tracing subscriber: {error}"))
+    }
+}
+
+fn tracing_filter() -> EnvFilter {
+    env::var("RUST_LOG")
+        .or_else(|_| env::var("TYPEPYTHON_LOG"))
+        .ok()
+        .and_then(|value| EnvFilter::try_new(value).ok())
+        .unwrap_or_else(|| EnvFilter::new("typepython_cli=info,typepython_config=info"))
 }
 
 fn run() -> Result<ExitCode> {

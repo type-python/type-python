@@ -370,6 +370,30 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("must not remove or change the meaning", json_schema)
         self.assertIn("1-based span coordinates", json_schema)
 
+    def test_lsp_capabilities_and_logging_controls_are_stable(self) -> None:
+        main = read_text("crates/typepython_cli/src/main.rs")
+        lsp_tests = read_text("crates/typepython_lsp/src/tests.rs")
+        lsp_docs = read_text("docs/lsp.md")
+        cli_reference = read_text("docs/cli-reference.md")
+        dx = read_text("docs/dx-stability.md")
+
+        self.assertIn("fn tracing_filter() -> EnvFilter", main)
+        self.assertIn('env::var("TYPEPYTHON_LOG")', main)
+        self.assertIn('env::var_os("TYPEPYTHON_LOG_FILE")', main)
+        self.assertIn("RUST_LOG", main)
+
+        self.assertIn("handle_initialize_returns_required_capabilities", lsp_tests)
+        self.assertIn('"completionProvider"', lsp_tests)
+        self.assertIn('"executeCommandProvider"', lsp_tests)
+        self.assertIn('"textDocumentSync"', lsp_tests)
+
+        for text in (lsp_docs, cli_reference):
+            self.assertIn("TYPEPYTHON_LOG", text)
+            self.assertIn("TYPEPYTHON_LOG_FILE", text)
+            self.assertIn("RUST_LOG", text)
+
+        self.assertIn("capability drift", dx)
+
     def test_conformance_beta_scope_classification_is_precise(self) -> None:
         conformance_report = load_script_module(
             "scripts/conformance_report.py",

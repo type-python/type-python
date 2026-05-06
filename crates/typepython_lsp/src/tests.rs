@@ -19,27 +19,38 @@ fn handle_initialize_returns_required_capabilities() {
     let responses = server
         .handle_message(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}))
         .expect("initialize should succeed");
-    let capabilities = &responses[0]["result"]["capabilities"];
-    assert_eq!(capabilities["textDocumentSync"]["openClose"], json!(true));
-    assert_eq!(capabilities["textDocumentSync"]["change"], json!(2));
-    assert_eq!(capabilities["hoverProvider"], json!(true));
-    assert_eq!(capabilities["definitionProvider"], json!(true));
-    assert_eq!(capabilities["referencesProvider"], json!(true));
-    assert_eq!(capabilities["documentFormattingProvider"], json!(true));
-    assert_eq!(capabilities["signatureHelpProvider"]["triggerCharacters"], json!(["(", ","]));
-    assert_eq!(capabilities["documentSymbolProvider"], json!(true));
-    assert_eq!(capabilities["workspaceSymbolProvider"], json!(true));
-    assert_eq!(capabilities["renameProvider"], json!(true));
-    assert_eq!(capabilities["codeActionProvider"], json!(true));
     assert_eq!(
-        capabilities["executeCommandProvider"]["commands"],
-        json!([
-            "typepython.migrateReport",
-            "typepython.compat",
-            "typepython.typeHealth",
-            "typepython.previewEmit",
-            "typepython.findTypeSource"
-        ])
+        responses[0]["result"]["capabilities"],
+        json!({
+            "textDocumentSync": {
+                "openClose": true,
+                "change": 2
+            },
+            "hoverProvider": true,
+            "definitionProvider": true,
+            "referencesProvider": true,
+            "documentFormattingProvider": true,
+            "signatureHelpProvider": {
+                "triggerCharacters": ["(", ","]
+            },
+            "documentSymbolProvider": true,
+            "workspaceSymbolProvider": true,
+            "renameProvider": true,
+            "codeActionProvider": true,
+            "executeCommandProvider": {
+                "commands": [
+                    "typepython.migrateReport",
+                    "typepython.compat",
+                    "typepython.typeHealth",
+                    "typepython.previewEmit",
+                    "typepython.findTypeSource"
+                ]
+            },
+            "completionProvider": {
+                "resolveProvider": false,
+                "triggerCharacters": ["."]
+            }
+        })
     );
 }
 

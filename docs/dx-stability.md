@@ -25,7 +25,8 @@ A v1.0 release candidate must include evidence for:
 
 - an installable VS Code extension or packaged VSIX artifact;
 - copy-paste configuration for Neovim, Helix, Sublime Text, and Emacs;
-- an exact LSP `initialize` capability snapshot test;
+- an exact LSP `initialize` capability snapshot test that fails on accidental
+  capability drift;
 - stable `--format json` schema versioning for project-oriented commands;
 - watch-mode tests for initial build, debounced rebuild, rebuild failure recovery, and file deletion;
 - formatting and code-action golden tests for representative `.tpy` edits;

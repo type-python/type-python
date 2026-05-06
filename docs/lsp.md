@@ -237,6 +237,8 @@ On each document change:
 - Ensure the `typepython` binary is on your `PATH` or set `TYPEPYTHON_BIN`
 - Check that a `typepython.toml` or `pyproject.toml` with `[tool.typepython]` exists in the project
 - Run `typepython lsp --project .` manually to see error output
+- Capture server logs with `TYPEPYTHON_LOG=debug` and, for editor-launched
+  sessions, `TYPEPYTHON_LOG_FILE=/tmp/typepython-lsp.log`.
 
 ### No diagnostics appearing
 
@@ -255,3 +257,19 @@ On each document change:
 - Ensure either `ruff` or `black` is installed, or configure `[format].command`
 - If you use a relative path inside `[format].command`, it is resolved from the workspace root
 - `TPY6003` indicates formatter startup, availability, or execution failure
+
+### Capturing logs
+
+The CLI, watch mode, and LSP all honor the same tracing controls:
+
+| Variable | Meaning |
+| -------- | ------- |
+| `TYPEPYTHON_LOG` | Tracing filter used when `RUST_LOG` is not set, for example `typepython_lsp=debug,typepython_cli=debug`. |
+| `TYPEPYTHON_LOG_FILE` | Append logs to a file instead of stderr. This is useful when an editor owns the LSP process. |
+| `RUST_LOG` | Standard Rust tracing filter. Takes precedence over `TYPEPYTHON_LOG`. |
+
+Example:
+
+```sh
+TYPEPYTHON_LOG=debug TYPEPYTHON_LOG_FILE=/tmp/typepython-lsp.log typepython lsp --project .
+```
