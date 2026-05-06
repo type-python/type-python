@@ -92,6 +92,19 @@ fn check_rejects_tainted_module_member_call_argument_when_taint_is_enabled() {
 }
 
 #[test]
+fn check_rejects_tainted_simple_name_augmented_assignment_when_taint_is_enabled() {
+    let result = check_temp_typepython_source_with_taint(concat!(
+        "raw: Tainted[str, \"html\"]\n",
+        "safe: str = \"\"\n",
+        "safe += raw\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("augmented-assigns `Tainted[str, \"html\"]`"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_tainted_source_after_sanitizer_before_sink() {
     let result = check_temp_typepython_source_with_taint(concat!(
         "def request_body() -> Tainted[str, \"html\"]:\n",

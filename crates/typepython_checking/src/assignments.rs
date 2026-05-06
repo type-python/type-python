@@ -267,13 +267,13 @@ pub(super) fn simple_name_augmented_assignment_diagnostics(
                 &diagnostic_type_text(&expected),
                 assignment.value_binop_right.as_deref()?,
             )?;
-            (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {
+            (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
                 assignment_type_mismatch_diagnostic(
                     node,
                     nodes,
                     &expected,
                     &actual,
-                    AssignabilityOptions::default(),
+                    context.assignability_options(),
                     match (&assignment.owner_type_name, &assignment.owner_name) {
                         (Some(owner_type_name), Some(owner_name)) => format!(
                             "type `{}` in module `{}` augmented-assigns `{}` where local `{}` in `{}` expects `{}`",
