@@ -144,7 +144,7 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
             downstream_checker_smoke.checker_command("basedpyright", "strict", "3.12", build_dir),
         )
 
-    def test_pyright_config_focuses_on_type_portability(self) -> None:
+    def test_pyright_strict_config_preserves_strict_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = pathlib.Path(tmp)
             build_dir = project_dir / "checker-build"
@@ -155,8 +155,28 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
 
             self.assertEqual(config["typeCheckingMode"], "strict")
             self.assertEqual(config["extraPaths"], ["checker-build"])
+            for strict_setting in (
+                "reportMissingTypeStubs",
+                "reportUnknownVariableType",
+                "reportUnknownMemberType",
+                "reportUnknownArgumentType",
+                "reportUnknownParameterType",
+            ):
+                self.assertNotIn(strict_setting, config)
+
+    def test_pyright_standard_config_focuses_on_type_portability(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = pathlib.Path(tmp)
+            build_dir = project_dir / "checker-build"
+            build_dir.mkdir()
+
+            downstream_checker_smoke.write_pyright_config(project_dir, build_dir, "standard")
+            config = json.loads((project_dir / "pyrightconfig.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(config["typeCheckingMode"], "standard")
+            self.assertEqual(config["extraPaths"], ["checker-build"])
+            self.assertEqual(config["reportUnknownVariableType"], "none")
             self.assertEqual(config["reportUnnecessaryCast"], "none")
-            self.assertEqual(config["reportUnusedImport"], "none")
 
     def test_pyright_config_uses_checker_stub_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

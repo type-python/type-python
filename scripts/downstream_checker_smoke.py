@@ -317,14 +317,19 @@ def write_pyright_config(project_dir: pathlib.Path, build_dir: pathlib.Path, pro
         "extraPaths": extra_paths,
         "include": [build_dir.name],
         "typeCheckingMode": type_checking_mode,
-        "reportMissingTypeStubs": "none",
-        "reportUnknownVariableType": "none",
-        "reportUnknownMemberType": "none",
-        "reportUnknownArgumentType": "none",
-        "reportUnknownParameterType": "none",
-        "reportUnnecessaryCast": "none",
-        "reportUnusedImport": "none",
     }
+    if profile == "standard":
+        config.update(
+            {
+                "reportMissingTypeStubs": "none",
+                "reportUnknownVariableType": "none",
+                "reportUnknownMemberType": "none",
+                "reportUnknownArgumentType": "none",
+                "reportUnknownParameterType": "none",
+                "reportUnnecessaryCast": "none",
+                "reportUnusedImport": "none",
+            }
+        )
     stub_path = project_dir / "checker-support" / "typings"
     if stub_path.is_dir():
         config["stubPath"] = str(stub_path.relative_to(project_dir))
