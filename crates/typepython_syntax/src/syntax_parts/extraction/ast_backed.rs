@@ -485,7 +485,7 @@ pub(in super::super) fn extract_ast_backed_statement(
                 is_final_decorator: stmt.decorator_list.iter().any(is_final_decorator),
                 is_deprecated: deprecation_message.is_some(),
                 deprecation_message,
-                members: extract_class_members(normalized, &stmt.body),
+                members: extract_class_members(path, normalized, &stmt.body, diagnostics),
                 is_abstract_class: false,
                 line,
             };

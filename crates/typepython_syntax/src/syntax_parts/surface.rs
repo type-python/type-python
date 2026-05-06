@@ -687,6 +687,7 @@ pub struct ClassMember {
     pub name: String,
     pub kind: ClassMemberKind,
     pub method_kind: Option<MethodKind>,
+    pub type_params: Vec<TypeParam>,
     /// Source-authored text mirror retained for emit/display compatibility.
     /// Semantic consumers should prefer `annotation_expr` or `rendered_*` accessors.
     pub annotation: Option<String>,

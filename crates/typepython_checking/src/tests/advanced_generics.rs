@@ -10,6 +10,15 @@ fn check_accepts_direct_generic_function_call_inference() {
 }
 
 #[test]
+fn check_accepts_generic_method_call_inference() {
+    let result = check_temp_typepython_source(
+        "class Service:\n    def first[T](self, value: T) -> T:\n        return value\n\nresult: int = Service().first(1)\n",
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_generic_function_call_inference_through_optional_annotation() {
     let result = check_temp_typepython_source(
         "def maybe[T](x: T | None) -> T | None:\n    return x\n\nvalue: int | None = maybe(1)\n",

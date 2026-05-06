@@ -636,6 +636,7 @@ mod tests {
         ClassMember {
             name: name.to_owned(),
             kind: ClassMemberKind::Field,
+            type_params: Vec::new(),
             method_kind: None,
             annotation: Some(annotation.to_owned()),
             annotation_expr: None,

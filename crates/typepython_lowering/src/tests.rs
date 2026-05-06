@@ -971,6 +971,31 @@ fn lower_rewrites_generic_ordinary_class_and_function_headers() {
 }
 
 #[test]
+fn lower_rewrites_generic_method_headers() {
+    let source = concat!(
+        "class Service:\n",
+        "    def first[T](self, value: T) -> T:\n",
+        "        return value\n",
+    );
+    let lowered = lower_with_options(
+        &parse(SourceFile {
+            path: PathBuf::from("generic-method.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: source.to_owned(),
+        }),
+        &compat_options("3.10"),
+    );
+
+    assert!(lowered.diagnostics.is_empty(), "{:?}", lowered.diagnostics);
+    assert!(lowered.module.metadata.has_generic_type_params);
+    assert!(lowered.module.python_source.contains("from typing import TypeVar"));
+    assert!(lowered.module.python_source.contains("T = TypeVar(\"T\")"));
+    assert!(lowered.module.python_source.contains("def first(self, value: T) -> T:"));
+    assert!(!lowered.module.python_source.contains("def first[T]"));
+}
+
+#[test]
 fn lower_native_mode_preserves_pep_695_syntax() {
     let lowered = lower_with_options(
         &parse(SourceFile {
@@ -1403,6 +1428,7 @@ fn lower_expands_partial_typeddict_transform() {
                     ClassMember {
                         name: String::from("id"),
                         kind: ClassMemberKind::Field,
+                        type_params: Vec::new(),
                         method_kind: None,
                         annotation: Some(String::from("int")),
                         annotation_expr: None,
@@ -1423,6 +1449,7 @@ fn lower_expands_partial_typeddict_transform() {
                     ClassMember {
                         name: String::from("name"),
                         kind: ClassMemberKind::Field,
+                        type_params: Vec::new(),
                         method_kind: None,
                         annotation: Some(String::from("str")),
                         annotation_expr: None,
@@ -1497,6 +1524,7 @@ fn lower_prefers_typing_notrequired_for_target_python_311() {
                         ClassMember {
                             name: String::from("id"),
                             kind: ClassMemberKind::Field,
+                            type_params: Vec::new(),
                             method_kind: None,
                             annotation: Some(String::from("int")),
                             annotation_expr: None,
@@ -1517,6 +1545,7 @@ fn lower_prefers_typing_notrequired_for_target_python_311() {
                         ClassMember {
                             name: String::from("name"),
                             kind: ClassMemberKind::Field,
+                            type_params: Vec::new(),
                             method_kind: None,
                             annotation: Some(String::from("str")),
                             annotation_expr: None,
@@ -1692,6 +1721,7 @@ fn lower_expands_partial_typeddict_transform_for_qualified_bases() {
                         ClassMember {
                             name: String::from("id"),
                             kind: ClassMemberKind::Field,
+                            type_params: Vec::new(),
                             method_kind: None,
                             annotation: Some(String::from("int")),
                             annotation_expr: None,
@@ -1712,6 +1742,7 @@ fn lower_expands_partial_typeddict_transform_for_qualified_bases() {
                         ClassMember {
                             name: String::from("name"),
                             kind: ClassMemberKind::Field,
+                            type_params: Vec::new(),
                             method_kind: None,
                             annotation: Some(String::from("str")),
                             annotation_expr: None,
@@ -1776,6 +1807,7 @@ fn lower_expands_pick_typeddict_transform() {
                     ClassMember {
                         name: String::from("id"),
                         kind: ClassMemberKind::Field,
+                        type_params: Vec::new(),
                         method_kind: None,
                         annotation: Some(String::from("int")),
                         annotation_expr: None,
@@ -1796,6 +1828,7 @@ fn lower_expands_pick_typeddict_transform() {
                     ClassMember {
                         name: String::from("name"),
                         kind: ClassMemberKind::Field,
+                        type_params: Vec::new(),
                         method_kind: None,
                         annotation: Some(String::from("str")),
                         annotation_expr: None,
@@ -1816,6 +1849,7 @@ fn lower_expands_pick_typeddict_transform() {
                     ClassMember {
                         name: String::from("email"),
                         kind: ClassMemberKind::Field,
+                        type_params: Vec::new(),
                         method_kind: None,
                         annotation: Some(String::from("str")),
                         annotation_expr: None,
@@ -1973,6 +2007,7 @@ fn lower_expands_omit_typeddict_transform() {
                     ClassMember {
                         name: String::from("id"),
                         kind: ClassMemberKind::Field,
+                        type_params: Vec::new(),
                         method_kind: None,
                         annotation: Some(String::from("int")),
                         annotation_expr: None,
@@ -1993,6 +2028,7 @@ fn lower_expands_omit_typeddict_transform() {
                     ClassMember {
                         name: String::from("name"),
                         kind: ClassMemberKind::Field,
+                        type_params: Vec::new(),
                         method_kind: None,
                         annotation: Some(String::from("str")),
                         annotation_expr: None,
@@ -2069,6 +2105,7 @@ fn lower_expands_readonly_typeddict_transform() {
                 members: vec![ClassMember {
                     name: String::from("debug"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("bool")),
                     annotation_expr: None,
@@ -2130,6 +2167,7 @@ fn lower_expands_required_typeddict_transform() {
                 members: vec![ClassMember {
                     name: String::from("name"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("NotRequired[str]")),
                     annotation_expr: None,
@@ -2190,6 +2228,7 @@ fn lower_expands_required_typeddict_transform_with_nested_annotation() {
                 members: vec![ClassMember {
                     name: String::from("value"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("NotRequired[list[int]]")),
                     annotation_expr: None,
@@ -2252,6 +2291,7 @@ fn lower_expands_composed_typeddict_transform() {
                     ClassMember {
                         name: String::from("id"),
                         kind: ClassMemberKind::Field,
+                        type_params: Vec::new(),
                         method_kind: None,
                         annotation: Some(String::from("int")),
                         annotation_expr: None,
@@ -2272,6 +2312,7 @@ fn lower_expands_composed_typeddict_transform() {
                     ClassMember {
                         name: String::from("name"),
                         kind: ClassMemberKind::Field,
+                        type_params: Vec::new(),
                         method_kind: None,
                         annotation: Some(String::from("str")),
                         annotation_expr: None,
@@ -2349,6 +2390,7 @@ fn lower_expands_mutable_typeddict_transform() {
                 members: vec![ClassMember {
                     name: String::from("debug"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("ReadOnly[bool]")),
                     annotation_expr: None,
@@ -2408,6 +2450,7 @@ fn lower_keeps_decorated_class_header_singleton() {
                 ClassMember {
                     name: String::from("name"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("str")),
                     annotation_expr: None,
@@ -2428,6 +2471,7 @@ fn lower_keeps_decorated_class_header_singleton() {
                 ClassMember {
                     name: String::from("age"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("int")),
                     annotation_expr: None,
@@ -2494,6 +2538,7 @@ fn lower_reports_unknown_pick_key_as_tpy4017() {
                 members: vec![ClassMember {
                     name: String::from("id"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("int")),
                     annotation_expr: None,

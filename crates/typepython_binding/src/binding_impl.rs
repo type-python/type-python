@@ -663,7 +663,7 @@ fn bind_named_block(
             is_final: member.is_final,
             is_class_var: member.is_class_var,
             bases: Vec::new(),
-            type_params: Vec::new(),
+            type_params: bind_type_params(&member.type_params),
         }
     }));
     declarations

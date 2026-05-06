@@ -157,6 +157,7 @@ impl ShapeProjection {
             .iter()
             .map(|field| ClassMember {
                 kind: ClassMemberKind::Field,
+                type_params: Vec::new(),
                 name: field.name.clone(),
                 annotation: field.annotation.clone(),
                 annotation_expr: None,
@@ -973,6 +974,7 @@ mod type_expr_tests {
             members: vec![
                 ClassMember {
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     name: String::from("id"),
                     annotation: Some(String::from("int")),
                     annotation_expr: None,
@@ -993,6 +995,7 @@ mod type_expr_tests {
                 },
                 ClassMember {
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     name: String::from("name"),
                     annotation: Some(String::from("ReadOnly[str]")),
                     annotation_expr: None,

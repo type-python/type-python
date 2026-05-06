@@ -1735,6 +1735,7 @@ fn bind_collects_class_like_member_declarations_with_owner() {
                 ClassMember {
                     name: String::from("value"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: None,
                     annotation_expr: None,
@@ -1755,6 +1756,7 @@ fn bind_collects_class_like_member_declarations_with_owner() {
                 ClassMember {
                     name: String::from("close"),
                     kind: ClassMemberKind::Method,
+                    type_params: Vec::new(),
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
@@ -1775,6 +1777,7 @@ fn bind_collects_class_like_member_declarations_with_owner() {
                 ClassMember {
                     name: String::from("close"),
                     kind: ClassMemberKind::Overload,
+                    type_params: Vec::new(),
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
@@ -1951,6 +1954,7 @@ fn bind_marks_final_values_and_fields() {
                 members: vec![ClassMember {
                     name: String::from("limit"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: None,
                     annotation_expr: None,
@@ -2102,6 +2106,7 @@ fn bind_marks_classvar_values_and_fields() {
                 members: vec![ClassMember {
                     name: String::from("cache"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: None,
                     annotation_expr: None,
@@ -2227,6 +2232,7 @@ fn bind_marks_override_functions_and_members() {
                 members: vec![ClassMember {
                     name: String::from("run"),
                     kind: ClassMemberKind::Method,
+                    type_params: Vec::new(),
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
@@ -2340,6 +2346,7 @@ fn bind_collects_data_class_declarations_with_owner() {
                 ClassMember {
                     name: String::from("x"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("float")),
                     annotation_expr: None,
@@ -2360,6 +2367,7 @@ fn bind_collects_data_class_declarations_with_owner() {
                 ClassMember {
                     name: String::from("y"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("float")),
                     annotation_expr: None,
@@ -2380,6 +2388,7 @@ fn bind_collects_data_class_declarations_with_owner() {
                 ClassMember {
                     name: String::from("distance"),
                     kind: ClassMemberKind::Method,
+                    type_params: Vec::new(),
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
@@ -2456,6 +2465,7 @@ fn bind_collects_sealed_class_declarations_with_owner() {
                 ClassMember {
                     name: String::from("sides"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("int")),
                     annotation_expr: None,
@@ -2476,6 +2486,7 @@ fn bind_collects_sealed_class_declarations_with_owner() {
                 ClassMember {
                     name: String::from("area"),
                     kind: ClassMemberKind::Method,
+                    type_params: Vec::new(),
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
@@ -2533,6 +2544,7 @@ fn bind_marks_abstract_methods() {
             members: vec![ClassMember {
                 name: String::from("read"),
                 kind: ClassMemberKind::Method,
+                type_params: Vec::new(),
                 method_kind: Some(MethodKind::Instance),
                 annotation: None,
                 annotation_expr: None,
@@ -2715,6 +2727,77 @@ fn bind_collects_generic_type_params_with_bounds_and_constraints() {
                 default_expr: Some(BoundTypeExpr::new("str")),
             },
         ]
+    );
+}
+
+#[test]
+fn bind_collects_method_type_params() {
+    let table = bind(&SyntaxTree {
+        source: SourceFile {
+            path: PathBuf::from("src/app/__init__.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::new(),
+        },
+        statements: vec![SyntaxStatement::ClassDef(NamedBlockStatement {
+            name: String::from("Service"),
+            type_params: Vec::new(),
+            header_suffix: String::new(),
+            bases: Vec::new(),
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_abstract_class: false,
+            members: vec![ClassMember {
+                name: String::from("first"),
+                kind: ClassMemberKind::Method,
+                type_params: vec![TypeParam {
+                    name: String::from("T"),
+                    kind: TypeParamKind::TypeVar,
+                    bound: Some(String::from("int")),
+                    constraints: Vec::new(),
+                    default: None,
+                    bound_expr: None,
+                    constraint_exprs: Vec::new(),
+                    default_expr: None,
+                }],
+                method_kind: Some(MethodKind::Instance),
+                annotation: None,
+                annotation_expr: None,
+                value_type_expr: None,
+                params: Vec::new(),
+                returns: None,
+                returns_expr: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                line: 2,
+            }],
+            line: 1,
+        })],
+        type_ignore_directives: Vec::new(),
+        diagnostics: DiagnosticReport::default(),
+    });
+
+    let method = table
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "first")
+        .expect("method declaration should be bound");
+    assert_eq!(
+        method.type_params,
+        vec![GenericTypeParam {
+            name: String::from("T"),
+            kind: GenericTypeParamKind::TypeVar,
+            bound_expr: Some(BoundTypeExpr::new("int")),
+            constraint_exprs: Vec::new(),
+            default_expr: None,
+        }]
     );
 }
 
@@ -3026,6 +3109,7 @@ fn bind_collects_method_kinds_static_and_class() {
                 ClassMember {
                     name: String::from("create"),
                     kind: ClassMemberKind::Method,
+                    type_params: Vec::new(),
                     method_kind: Some(MethodKind::Static),
                     annotation: None,
                     annotation_expr: None,
@@ -3046,6 +3130,7 @@ fn bind_collects_method_kinds_static_and_class() {
                 ClassMember {
                     name: String::from("from_json"),
                     kind: ClassMemberKind::Method,
+                    type_params: Vec::new(),
                     method_kind: Some(MethodKind::Class),
                     annotation: None,
                     annotation_expr: None,

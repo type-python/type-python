@@ -281,6 +281,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             _ => None,
         })
         .collect();
+    let class_member_function_defs = class_member_functions_by_line(&tree.source.text, tree);
     let compat_type_param_bindings = collect_runtime_type_param_bindings(
         tree,
         options,
@@ -307,6 +308,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         &class_defs,
         &function_defs,
         &overloads,
+        &class_member_function_defs,
     );
     let has_typed_dict_transforms = type_aliases.values().any(|statement| {
         parse_transform_expr(statement.value.trim())
@@ -583,6 +585,20 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
                 )],
                 can_use_native_type_params(&statement.type_params, options),
             )
+        } else if let Some(member) = class_member_function_defs.get(&line_number) {
+            let type_param_rewrites = merged_type_param_rewrites(
+                declaration_type_param_rewrites.get(&line_number),
+                class_member_type_param_rewrites.get(&line_number),
+            );
+            (
+                vec![rewrite_class_member_function_line(
+                    line,
+                    member,
+                    options,
+                    type_param_rewrites.as_ref(),
+                )],
+                can_use_native_type_params(&member.type_params, options),
+            )
         } else if let Some(type_param_rewrites) = class_member_type_param_rewrites.get(&line_number)
         {
             (vec![rewrite_type_param_tokens(line, type_param_rewrites)], false)
@@ -638,6 +654,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         &class_defs,
         &function_defs,
         &overloads,
+        &class_member_function_defs,
         &lowered,
         options,
     );
@@ -1042,6 +1059,37 @@ fn header_line_for_statement(source: &str, start_line: usize) -> usize {
     start_line
 }
 
+fn class_member_functions_by_line<'a>(
+    source: &str,
+    tree: &'a SyntaxTree,
+) -> std::collections::BTreeMap<usize, &'a typepython_syntax::ClassMember> {
+    tree.statements
+        .iter()
+        .filter_map(named_block_statement)
+        .flat_map(|statement| statement.members.iter())
+        .filter(|member| {
+            matches!(
+                member.kind,
+                typepython_syntax::ClassMemberKind::Method
+                    | typepython_syntax::ClassMemberKind::Overload
+            ) && !member.type_params.is_empty()
+        })
+        .map(|member| (header_line_for_statement(source, member.line), member))
+        .collect()
+}
+
+fn named_block_statement(
+    statement: &SyntaxStatement,
+) -> Option<&typepython_syntax::NamedBlockStatement> {
+    match statement {
+        SyntaxStatement::Interface(statement)
+        | SyntaxStatement::DataClass(statement)
+        | SyntaxStatement::SealedClass(statement)
+        | SyntaxStatement::ClassDef(statement) => Some(statement),
+        _ => None,
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum SplitCompatFunctionTypeParams {
@@ -1058,6 +1106,8 @@ enum CompatTypeParamOwnerKind {
     ClassDef,
     Function,
     Overload,
+    Method,
+    MethodOverload,
 }
 
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
@@ -1069,14 +1119,20 @@ struct CompatTypeParamOwnerKey {
 
 impl CompatTypeParamOwnerKey {
     fn shares_function_binding(&self, other: &Self) -> bool {
-        matches!(
-            (&self.kind, &other.kind),
-            (
-                CompatTypeParamOwnerKind::Function | CompatTypeParamOwnerKind::Overload,
-                CompatTypeParamOwnerKind::Function | CompatTypeParamOwnerKind::Overload
-            )
-        ) && self.name == other.name
+        compat_owner_kind_is_function_like(&self.kind)
+            && compat_owner_kind_is_function_like(&other.kind)
+            && self.name == other.name
     }
+}
+
+fn compat_owner_kind_is_function_like(kind: &CompatTypeParamOwnerKind) -> bool {
+    matches!(
+        kind,
+        CompatTypeParamOwnerKind::Function
+            | CompatTypeParamOwnerKind::Overload
+            | CompatTypeParamOwnerKind::Method
+            | CompatTypeParamOwnerKind::MethodOverload
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -1189,103 +1245,106 @@ fn collect_compat_type_param_owners(
     tree: &SyntaxTree,
     options: &LoweringOptions,
 ) -> Vec<CompatTypeParamOwner> {
-    tree.statements
-        .iter()
-        .filter_map(|statement| match statement {
+    let mut owners = Vec::new();
+    for statement in &tree.statements {
+        match statement {
             SyntaxStatement::TypeAlias(statement)
                 if !statement.type_params.is_empty()
                     && !can_use_native_typealias(statement, options) =>
             {
-                Some(CompatTypeParamOwner {
+                owners.push(CompatTypeParamOwner {
                     key: CompatTypeParamOwnerKey {
                         kind: CompatTypeParamOwnerKind::TypeAlias,
                         name: statement.name.clone(),
                         line: statement.line,
                     },
                     type_params: statement.type_params.clone(),
-                })
-            }
-            SyntaxStatement::Interface(statement)
-                if !statement.type_params.is_empty()
-                    && !can_use_native_type_params(&statement.type_params, options) =>
-            {
-                Some(CompatTypeParamOwner {
-                    key: CompatTypeParamOwnerKey {
-                        kind: CompatTypeParamOwnerKind::Interface,
-                        name: statement.name.clone(),
-                        line: header_line_for_statement(&tree.source.text, statement.line),
-                    },
-                    type_params: statement.type_params.clone(),
-                })
-            }
-            SyntaxStatement::DataClass(statement)
-                if !statement.type_params.is_empty()
-                    && !can_use_native_type_params(&statement.type_params, options) =>
-            {
-                Some(CompatTypeParamOwner {
-                    key: CompatTypeParamOwnerKey {
-                        kind: CompatTypeParamOwnerKind::DataClass,
-                        name: statement.name.clone(),
-                        line: header_line_for_statement(&tree.source.text, statement.line),
-                    },
-                    type_params: statement.type_params.clone(),
-                })
-            }
-            SyntaxStatement::SealedClass(statement)
-                if !statement.type_params.is_empty()
-                    && !can_use_native_type_params(&statement.type_params, options) =>
-            {
-                Some(CompatTypeParamOwner {
-                    key: CompatTypeParamOwnerKey {
-                        kind: CompatTypeParamOwnerKind::SealedClass,
-                        name: statement.name.clone(),
-                        line: header_line_for_statement(&tree.source.text, statement.line),
-                    },
-                    type_params: statement.type_params.clone(),
-                })
-            }
-            SyntaxStatement::ClassDef(statement)
-                if !statement.type_params.is_empty()
-                    && !can_use_native_type_params(&statement.type_params, options) =>
-            {
-                Some(CompatTypeParamOwner {
-                    key: CompatTypeParamOwnerKey {
-                        kind: CompatTypeParamOwnerKind::ClassDef,
-                        name: statement.name.clone(),
-                        line: header_line_for_statement(&tree.source.text, statement.line),
-                    },
-                    type_params: statement.type_params.clone(),
-                })
+                });
             }
             SyntaxStatement::FunctionDef(statement)
                 if !statement.type_params.is_empty()
                     && !can_use_native_type_params(&statement.type_params, options) =>
             {
-                Some(CompatTypeParamOwner {
+                owners.push(CompatTypeParamOwner {
                     key: CompatTypeParamOwnerKey {
                         kind: CompatTypeParamOwnerKind::Function,
                         name: statement.name.clone(),
                         line: statement.line,
                     },
                     type_params: statement.type_params.clone(),
-                })
+                });
             }
             SyntaxStatement::OverloadDef(statement)
                 if !statement.type_params.is_empty()
                     && !can_use_native_type_params(&statement.type_params, options) =>
             {
-                Some(CompatTypeParamOwner {
+                owners.push(CompatTypeParamOwner {
                     key: CompatTypeParamOwnerKey {
                         kind: CompatTypeParamOwnerKind::Overload,
                         name: statement.name.clone(),
                         line: statement.line,
                     },
                     type_params: statement.type_params.clone(),
-                })
+                });
             }
-            _ => None,
-        })
-        .collect()
+            _ => {}
+        }
+
+        let Some(block) = named_block_statement(statement) else {
+            continue;
+        };
+        if let Some(kind) = compat_type_param_owner_kind_for_named_block(statement)
+            && !block.type_params.is_empty()
+            && !can_use_native_type_params(&block.type_params, options)
+        {
+            owners.push(CompatTypeParamOwner {
+                key: CompatTypeParamOwnerKey {
+                    kind,
+                    name: block.name.clone(),
+                    line: header_line_for_statement(&tree.source.text, block.line),
+                },
+                type_params: block.type_params.clone(),
+            });
+        }
+        for member in &block.members {
+            if member.type_params.is_empty()
+                || can_use_native_type_params(&member.type_params, options)
+                || !matches!(
+                    member.kind,
+                    typepython_syntax::ClassMemberKind::Method
+                        | typepython_syntax::ClassMemberKind::Overload
+                )
+            {
+                continue;
+            }
+            let kind = if member.kind == typepython_syntax::ClassMemberKind::Overload {
+                CompatTypeParamOwnerKind::MethodOverload
+            } else {
+                CompatTypeParamOwnerKind::Method
+            };
+            owners.push(CompatTypeParamOwner {
+                key: CompatTypeParamOwnerKey {
+                    kind,
+                    name: format!("{}.{}", block.name, member.name),
+                    line: header_line_for_statement(&tree.source.text, member.line),
+                },
+                type_params: member.type_params.clone(),
+            });
+        }
+    }
+    owners
+}
+
+fn compat_type_param_owner_kind_for_named_block(
+    statement: &SyntaxStatement,
+) -> Option<CompatTypeParamOwnerKind> {
+    match statement {
+        SyntaxStatement::Interface(_) => Some(CompatTypeParamOwnerKind::Interface),
+        SyntaxStatement::DataClass(_) => Some(CompatTypeParamOwnerKind::DataClass),
+        SyntaxStatement::SealedClass(_) => Some(CompatTypeParamOwnerKind::SealedClass),
+        SyntaxStatement::ClassDef(_) => Some(CompatTypeParamOwnerKind::ClassDef),
+        _ => None,
+    }
 }
 
 fn compat_type_param_rewrites_by_declaration_line(
@@ -1401,6 +1460,7 @@ fn has_any_generic_type_params(
     class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     function_defs: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
     overloads: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
+    class_member_functions: &std::collections::BTreeMap<usize, &typepython_syntax::ClassMember>,
 ) -> bool {
     type_aliases.values().any(|statement| !statement.type_params.is_empty())
         || interfaces.values().any(|statement| !statement.type_params.is_empty())
@@ -1409,6 +1469,7 @@ fn has_any_generic_type_params(
         || class_defs.values().any(|statement| !statement.type_params.is_empty())
         || function_defs.values().any(|statement| !statement.type_params.is_empty())
         || overloads.values().any(|statement| !statement.type_params.is_empty())
+        || class_member_functions.values().any(|member| !member.type_params.is_empty())
 }
 
 #[expect(
@@ -1423,6 +1484,7 @@ fn collect_required_runtime_features(
     class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     function_defs: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
     overloads: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
+    class_member_functions: &std::collections::BTreeMap<usize, &typepython_syntax::ClassMember>,
     lowered: &str,
     options: &LoweringOptions,
 ) -> BTreeSet<RuntimeFeature> {
@@ -1449,6 +1511,9 @@ fn collect_required_runtime_features(
         || overloads
             .values()
             .any(|statement| can_use_native_type_params(&statement.type_params, options))
+        || class_member_functions
+            .values()
+            .any(|member| can_use_native_type_params(&member.type_params, options))
         || type_aliases.values().any(|statement| {
             can_use_native_typealias(statement, options) && !statement.type_params.is_empty()
         })
@@ -1476,6 +1541,9 @@ fn collect_required_runtime_features(
     }) || overloads.values().any(|statement| {
         can_use_native_type_params(&statement.type_params, options)
             && type_params_have_defaults(&statement.type_params)
+    }) || class_member_functions.values().any(|member| {
+        can_use_native_type_params(&member.type_params, options)
+            && type_params_have_defaults(&member.type_params)
     }) {
         features.insert(RuntimeFeature::GenericDefaults);
     }
@@ -2035,6 +2103,37 @@ fn rewrite_function_def_line(
     let rewritten = strip_generic_type_params(trimmed);
     let rewritten = apply_type_param_rewrites(&rewritten, type_param_rewrites).unwrap_or(rewritten);
     format!("{indentation}{rewritten}")
+}
+
+fn rewrite_class_member_function_line(
+    line: &str,
+    member: &typepython_syntax::ClassMember,
+    options: &LoweringOptions,
+    type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
+) -> String {
+    let rewritten = if can_use_native_type_params(&member.type_params, options) {
+        line.to_owned()
+    } else {
+        let indentation_width = line.len() - line.trim_start().len();
+        let indentation = &line[..indentation_width];
+        let trimmed = line.trim_start();
+        format!("{indentation}{}", strip_generic_type_params(trimmed))
+    };
+    apply_type_param_rewrites(&rewritten, type_param_rewrites).unwrap_or(rewritten)
+}
+
+fn merged_type_param_rewrites(
+    first: Option<&std::collections::BTreeMap<String, String>>,
+    second: Option<&std::collections::BTreeMap<String, String>>,
+) -> Option<std::collections::BTreeMap<String, String>> {
+    let mut merged = std::collections::BTreeMap::new();
+    if let Some(first) = first {
+        merged.extend(first.iter().map(|(key, value)| (key.clone(), value.clone())));
+    }
+    if let Some(second) = second {
+        merged.extend(second.iter().map(|(key, value)| (key.clone(), value.clone())));
+    }
+    (!merged.is_empty()).then_some(merged)
 }
 
 fn strip_generic_type_params(source: &str) -> String {

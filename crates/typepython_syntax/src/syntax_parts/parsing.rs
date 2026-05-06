@@ -515,7 +515,12 @@ pub(super) fn refresh_custom_statements_from_ast(
                             .as_ref()
                             .map(|arguments| extract_class_bases(normalized, arguments))
                             .unwrap_or_default();
-                        existing.members = extract_class_members(normalized, &ast_statement.body);
+                        existing.members = extract_class_members(
+                            path,
+                            normalized,
+                            &ast_statement.body,
+                            diagnostics,
+                        );
                         existing.is_abstract_class = is_abstract_class(existing);
                     }
                 }
@@ -550,7 +555,8 @@ pub(super) fn refresh_custom_statements_from_ast(
                         .as_ref()
                         .map(|arguments| extract_class_bases(normalized, arguments))
                         .unwrap_or_default();
-                    existing.members = extract_class_members(normalized, &ast_statement.body);
+                    existing.members =
+                        extract_class_members(path, normalized, &ast_statement.body, diagnostics);
                     existing.is_abstract_class = is_abstract_class(existing);
                 }
             }
@@ -584,7 +590,8 @@ pub(super) fn refresh_custom_statements_from_ast(
                         .as_ref()
                         .map(|arguments| extract_class_bases(normalized, arguments))
                         .unwrap_or_default();
-                    existing.members = extract_class_members(normalized, &ast_statement.body);
+                    existing.members =
+                        extract_class_members(path, normalized, &ast_statement.body, diagnostics);
                     existing.is_abstract_class = is_abstract_class(existing);
                 }
             }
@@ -667,43 +674,70 @@ pub(super) fn is_stub_like_function_body(body: &[Stmt]) -> bool {
     })
 }
 
-pub(super) fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
+pub(super) fn extract_class_members(
+    path: &Path,
+    normalized: &str,
+    body: &[Stmt],
+    diagnostics: &mut DiagnosticReport,
+) -> Vec<ClassMember> {
     let mut members = Vec::new();
 
     for statement in body {
         match statement {
-            Stmt::FunctionDef(function) => members.push(ClassMember {
-                name: function.name.as_str().to_owned(),
-                kind: if function.decorator_list.iter().any(is_overload_decorator) {
+            Stmt::FunctionDef(function) => {
+                let line = offset_to_line_column(normalized, function.range.start().to_usize()).0;
+                let kind = if function.decorator_list.iter().any(is_overload_decorator) {
                     ClassMemberKind::Overload
                 } else {
                     ClassMemberKind::Method
-                },
-                method_kind: Some(method_kind_from_decorators(&function.decorator_list)),
-                annotation: None,
-                annotation_expr: None,
-                value_type_expr: None,
-                params: extract_function_params(normalized, &function.parameters),
-                returns: function
-                    .returns
-                    .as_ref()
-                    .and_then(|returns| slice_range(normalized, returns.range()))
-                    .map(str::to_owned),
-                returns_expr: function
-                    .returns
-                    .as_ref()
-                    .and_then(|returns| slice_range(normalized, returns.range()))
-                    .and_then(TypeExpr::parse),
-                is_async: function.is_async,
-                is_override: function.decorator_list.iter().any(is_override_decorator),
-                is_abstract_method: function.decorator_list.iter().any(is_abstractmethod_decorator),
-                is_final_decorator: function.decorator_list.iter().any(is_final_decorator),
-                deprecation_message: deprecated_decorator_message(&function.decorator_list),
-                is_deprecated: deprecated_decorator_message(&function.decorator_list).is_some(),
-                is_final: false,
-                is_class_var: false,
-                line: offset_to_line_column(normalized, function.range.start().to_usize()).0,
-            }),
+                };
+                let Some(type_params) = extract_ast_type_params(
+                    path,
+                    normalized,
+                    function.type_params.as_deref(),
+                    line,
+                    if kind == ClassMemberKind::Overload {
+                        "method overload declaration"
+                    } else {
+                        "method declaration"
+                    },
+                    diagnostics,
+                ) else {
+                    continue;
+                };
+                members.push(ClassMember {
+                    name: function.name.as_str().to_owned(),
+                    kind,
+                    method_kind: Some(method_kind_from_decorators(&function.decorator_list)),
+                    type_params,
+                    annotation: None,
+                    annotation_expr: None,
+                    value_type_expr: None,
+                    params: extract_function_params(normalized, &function.parameters),
+                    returns: function
+                        .returns
+                        .as_ref()
+                        .and_then(|returns| slice_range(normalized, returns.range()))
+                        .map(str::to_owned),
+                    returns_expr: function
+                        .returns
+                        .as_ref()
+                        .and_then(|returns| slice_range(normalized, returns.range()))
+                        .and_then(TypeExpr::parse),
+                    is_async: function.is_async,
+                    is_override: function.decorator_list.iter().any(is_override_decorator),
+                    is_abstract_method: function
+                        .decorator_list
+                        .iter()
+                        .any(is_abstractmethod_decorator),
+                    is_final_decorator: function.decorator_list.iter().any(is_final_decorator),
+                    deprecation_message: deprecated_decorator_message(&function.decorator_list),
+                    is_deprecated: deprecated_decorator_message(&function.decorator_list).is_some(),
+                    is_final: false,
+                    is_class_var: false,
+                    line,
+                });
+            }
             Stmt::AnnAssign(assign) => {
                 let is_final = is_final_annotation(&assign.annotation);
                 let is_class_var = is_classvar_annotation(&assign.annotation);
@@ -712,6 +746,7 @@ pub(super) fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<Clas
                         name,
                         kind: ClassMemberKind::Field,
                         method_kind: None,
+                        type_params: Vec::new(),
                         annotation: slice_range(normalized, assign.annotation.range())
                             .map(str::to_owned),
                         annotation_expr: slice_range(normalized, assign.annotation.range())
@@ -743,6 +778,7 @@ pub(super) fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<Clas
                         name,
                         kind: ClassMemberKind::Field,
                         method_kind: None,
+                        type_params: Vec::new(),
                         annotation: None,
                         annotation_expr: None,
                         value_type_expr: None,

@@ -528,6 +528,38 @@ fn parse_captures_type_params_and_bounds() {
 }
 
 #[test]
+fn parse_captures_method_type_params() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("generic-method.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: "class Service:\n    def first[T: int](self, value: T) -> T:\n        return value\n"
+            .to_owned(),
+    });
+
+    assert!(tree.diagnostics.is_empty(), "{}", tree.diagnostics.as_text());
+    let SyntaxStatement::ClassDef(class_def) = &tree.statements[0] else {
+        panic!("expected class definition");
+    };
+    let method = &class_def.members[0];
+    assert_eq!(method.name, "first");
+    assert_eq!(method.kind, ClassMemberKind::Method);
+    assert_eq!(
+        method.type_params,
+        vec![TypeParam {
+            name: String::from("T"),
+            kind: TypeParamKind::TypeVar,
+            bound_expr: Some(TypeExpr::Name(String::from("int"))),
+            bound: Some(String::from("int")),
+            constraint_exprs: Vec::new(),
+            constraints: Vec::new(),
+            default_expr: None,
+            default: None,
+        }]
+    );
+}
+
+#[test]
 fn parse_reports_malformed_extension_headers() {
     let tree = parse(SourceFile {
         path: PathBuf::from("broken.tpy"),
@@ -3058,6 +3090,7 @@ fn parse_extracts_class_like_members_from_ast_body() {
                 ClassMember {
                     name: String::from("value"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("int")),
                     annotation_expr: None,
@@ -3078,6 +3111,7 @@ fn parse_extracts_class_like_members_from_ast_body() {
                 ClassMember {
                     name: String::from("total"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: None,
                     annotation_expr: None,
@@ -3098,6 +3132,7 @@ fn parse_extracts_class_like_members_from_ast_body() {
                 ClassMember {
                     name: String::from("get"),
                     kind: ClassMemberKind::Method,
+                    type_params: Vec::new(),
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
@@ -3165,6 +3200,7 @@ fn parse_marks_decorated_class_methods_as_overload_members() {
                     ClassMember {
                         name: String::from("parse"),
                         kind: ClassMemberKind::Overload,
+                        type_params: Vec::new(),
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
                         annotation_expr: None,
@@ -3206,6 +3242,7 @@ fn parse_marks_decorated_class_methods_as_overload_members() {
                     ClassMember {
                         name: String::from("parse"),
                         kind: ClassMemberKind::Method,
+                        type_params: Vec::new(),
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
                         annotation_expr: None,
@@ -3353,6 +3390,7 @@ fn parse_marks_final_value_declarations() {
                 members: vec![ClassMember {
                     name: String::from("limit"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("Final[int]")),
                     annotation_expr: None,
@@ -3624,6 +3662,7 @@ fn parse_marks_final_decorated_classes_and_methods() {
                 members: vec![ClassMember {
                     name: String::from("run"),
                     kind: ClassMemberKind::Method,
+                    type_params: Vec::new(),
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
@@ -3728,6 +3767,7 @@ fn parse_marks_classvar_value_declarations() {
                 members: vec![ClassMember {
                     name: String::from("cache"),
                     kind: ClassMemberKind::Field,
+                    type_params: Vec::new(),
                     method_kind: None,
                     annotation: Some(String::from("ClassVar[int]")),
                     annotation_expr: None,
@@ -4839,6 +4879,7 @@ fn parse_marks_override_decorated_functions_and_members() {
                 members: vec![ClassMember {
                     name: String::from("run"),
                     kind: ClassMemberKind::Method,
+                    type_params: Vec::new(),
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
@@ -4905,6 +4946,7 @@ fn parse_marks_abstract_class_methods() {
                 members: vec![ClassMember {
                     name: String::from("run"),
                     kind: ClassMemberKind::Method,
+                    type_params: Vec::new(),
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
@@ -4965,6 +5007,7 @@ fn parse_marks_method_kinds_from_decorators() {
                     ClassMember {
                         name: String::from("make"),
                         kind: ClassMemberKind::Method,
+                        type_params: Vec::new(),
                         method_kind: Some(MethodKind::Class),
                         annotation: None,
                         annotation_expr: None,
@@ -4994,6 +5037,7 @@ fn parse_marks_method_kinds_from_decorators() {
                     ClassMember {
                         name: String::from("build"),
                         kind: ClassMemberKind::Method,
+                        type_params: Vec::new(),
                         method_kind: Some(MethodKind::Static),
                         annotation: None,
                         annotation_expr: None,
@@ -5014,6 +5058,7 @@ fn parse_marks_method_kinds_from_decorators() {
                     ClassMember {
                         name: String::from("name"),
                         kind: ClassMemberKind::Method,
+                        type_params: Vec::new(),
                         method_kind: Some(MethodKind::Property),
                         annotation: None,
                         annotation_expr: None,
@@ -5043,6 +5088,7 @@ fn parse_marks_method_kinds_from_decorators() {
                     ClassMember {
                         name: String::from("name"),
                         kind: ClassMemberKind::Method,
+                        type_params: Vec::new(),
                         method_kind: Some(MethodKind::PropertySetter),
                         annotation: None,
                         annotation_expr: None,
