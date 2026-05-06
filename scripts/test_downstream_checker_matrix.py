@@ -72,6 +72,34 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
                 self.assertIsNotNone(case.allowlist_reason)
                 self.assertIsNotNone(case.allowlist_expires)
 
+    def test_partial_expected_failures_still_run_consumer_for_other_checkers(self) -> None:
+        case = downstream_checker_smoke.load_fixture_matrix()["negative-pydantic-strictness-package"]
+        self.assertFalse(
+            downstream_checker_smoke.checker_failure_expected(
+                case,
+                "pyright",
+                "strict",
+                downstream_checker_smoke.DEFAULT_CHECKERS,
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            consumer_path = root / "checker-consumer.py"
+            build_consumer_path = root / "checker-build" / "checker_consumer.py"
+            build_consumer_path.parent.mkdir()
+            consumer_path.write_text("from app import StrictUser\n", encoding="utf-8")
+
+            downstream_checker_smoke.sync_checker_consumer(
+                consumer_path,
+                build_consumer_path,
+            )
+
+            self.assertEqual(
+                build_consumer_path.read_text(encoding="utf-8"),
+                "from app import StrictUser\n",
+            )
+
     def test_expired_expected_checker_disagreements_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             matrix_path = pathlib.Path(tmp) / "matrix.json"

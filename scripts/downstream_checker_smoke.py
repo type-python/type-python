@@ -363,6 +363,16 @@ def checker_failure_expected(
     return checker in expected or f"{checker}:{profile}" in expected
 
 
+def sync_checker_consumer(
+    consumer_path: pathlib.Path,
+    build_consumer_path: pathlib.Path,
+) -> None:
+    if consumer_path.exists():
+        shutil.copy2(consumer_path, build_consumer_path)
+    elif build_consumer_path.exists():
+        build_consumer_path.unlink()
+
+
 def check_fixture(case: FixtureCase, checkers: tuple[str, ...]) -> None:
     source_dir = FIXTURE_ROOT / case.name
     if not source_dir.is_dir():
@@ -397,18 +407,14 @@ def check_fixture(case: FixtureCase, checkers: tuple[str, ...]) -> None:
                     if checker in {"pyright", "basedpyright"}:
                         write_pyright_config(project_dir, checker_build_dir, profile)
                     command = checker_command(checker, profile, target, checker_build_dir)
+                    sync_checker_consumer(consumer_path, build_consumer_path)
                     if checker_failure_expected(case, checker, profile, checkers):
-                        shutil.copy2(consumer_path, build_consumer_path)
                         run_expect_failure(
                             command,
                             cwd=project_dir,
                             expected_patterns=expected_failure_patterns_for(case, checker, profile),
                         )
                     else:
-                        if not has_expected_failure and consumer_path.exists():
-                            shutil.copy2(consumer_path, build_consumer_path)
-                        elif build_consumer_path.exists():
-                            build_consumer_path.unlink()
                         run(command, cwd=project_dir)
 
 
