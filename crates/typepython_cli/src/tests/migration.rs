@@ -38,6 +38,52 @@ fn format_watch_rebuild_note_summarizes_changed_paths() {
 }
 
 #[test]
+fn run_watch_rebuild_reloads_project_and_recovers_after_checker_failure() {
+    let project_dir =
+        temp_project_dir("run_watch_rebuild_reloads_project_and_recovers_after_checker_failure");
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        let source_path = project_dir.join("src/app.tpy");
+        fs::write(&source_path, "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+
+        let first = run_watch_rebuild(
+            Some(&project_dir),
+            OutputFormat::Json,
+            vec![String::from("initial watch check")],
+        )
+        .expect("initial rebuild should run");
+
+        fs::write(&source_path, "def build() -> int:\n    return \"oops\"\n")
+            .expect("test setup should succeed");
+        let failed = run_watch_rebuild(
+            Some(&project_dir),
+            OutputFormat::Json,
+            vec![String::from("failing watch check")],
+        )
+        .expect("type errors should return a failing exit code, not abort watch");
+
+        fs::write(&source_path, "def build() -> int:\n    return 2\n")
+            .expect("test setup should succeed");
+        let recovered = run_watch_rebuild(
+            Some(&project_dir),
+            OutputFormat::Json,
+            vec![String::from("recovered watch check")],
+        )
+        .expect("subsequent rebuild should recover");
+
+        (first, failed, recovered)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(result.0, ExitCode::SUCCESS);
+    assert_eq!(result.1, ExitCode::FAILURE);
+    assert_eq!(result.2, ExitCode::SUCCESS);
+}
+
+#[test]
 fn build_migration_report_counts_file_coverage_and_boundaries() {
     let project_dir =
         temp_project_dir("build_migration_report_counts_file_coverage_and_boundaries");

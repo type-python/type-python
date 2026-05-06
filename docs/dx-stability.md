@@ -15,7 +15,7 @@ a stable v1.0 product promise.
 | `textDocument/hover`, definition, references, completion, rename | Supported DX, non-stable | Stable request/response behavior for documented methods |
 | Formatting | Supported DX, non-stable | Golden tests for `.tpy`, `.py`, `.pyi`, configured formatter errors, and no-op formatting |
 | Code actions | Supported DX, non-stable | Golden tests for diagnostic quick fixes and command IDs |
-| `typepython watch` | Supported DX, non-stable | Stable debounce, rebuild failure recovery, delete/rename handling, and JSON output schema |
+| `typepython watch` | Supported DX, non-stable | Stable debounce, configuration reload, rebuild failure recovery, delete/rename handling, and JSON output schema |
 | Editor extensions and snippets | Supported DX, non-stable | Installable VS Code extension plus copy-paste Neovim, Helix, Sublime, and Emacs setup |
 | Logs and crash diagnostics | Supported DX, non-stable | Documented environment variables, file logging, and non-silent LSP request failures |
 

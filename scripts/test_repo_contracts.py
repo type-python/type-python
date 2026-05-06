@@ -394,6 +394,20 @@ class RepoContractsTests(unittest.TestCase):
 
         self.assertIn("capability drift", dx)
 
+    def test_watch_rebuild_recovery_is_documented_and_tested(self) -> None:
+        main = read_text("crates/typepython_cli/src/main.rs")
+        migration_tests = read_text("crates/typepython_cli/src/tests/migration.rs")
+        cli_reference = read_text("docs/cli-reference.md")
+        dx = read_text("docs/dx-stability.md")
+
+        self.assertIn("fn run_watch_rebuild(", main)
+        self.assertIn("watch rebuild failed", main)
+        self.assertIn("run_watch_rebuild_reloads_project_and_recovers_after_checker_failure", migration_tests)
+        self.assertIn("Reloads project configuration", cli_reference)
+        self.assertIn("Keeps watching after type-checking", cli_reference)
+        self.assertIn("configuration reload", dx)
+        self.assertIn("rebuild failure recovery", dx)
+
     def test_conformance_beta_scope_classification_is_precise(self) -> None:
         conformance_report = load_script_module(
             "scripts/conformance_report.py",

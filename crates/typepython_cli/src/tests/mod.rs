@@ -31,7 +31,7 @@ pub(super) use super::verification::{
 };
 pub(super) use super::{
     Cli, Command, InitArgs, OutputFormat, RunArgs, bytecode_path_for, embedded_config_template,
-    exit_code_for_error, init_project,
+    exit_code_for_error, init_project, run_watch_rebuild,
 };
 pub(super) use crate::cli::{
     AdapterValidateArgs, ApiDiffArgs, CleanArgs, CompatArgs, MigrateArgs, TypeHealthArgs,

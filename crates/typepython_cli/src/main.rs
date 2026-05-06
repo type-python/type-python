@@ -237,10 +237,9 @@ fn run_build(args: RunArgs) -> Result<ExitCode> {
 fn run_watch(args: RunArgs) -> Result<ExitCode> {
     let config = load_project(args.project.as_ref())?;
     let watch_targets = watch_targets(&config);
-    let mut last_exit = run_build_like_command(
-        &config,
+    let mut last_exit = run_watch_rebuild(
+        args.project.as_ref(),
         args.format,
-        "watch",
         vec![format!(
             "watching {} path(s) with {}ms debounce",
             watch_targets.len(),
@@ -284,13 +283,27 @@ fn run_watch(args: RunArgs) -> Result<ExitCode> {
             }
         }
 
-        last_exit = run_build_like_command(
-            &config,
+        last_exit = match run_watch_rebuild(
+            args.project.as_ref(),
             args.format,
-            "watch",
             vec![format_watch_rebuild_note(&changed_paths)],
-        )?;
+        ) {
+            Ok(exit) => exit,
+            Err(error) => {
+                eprintln!("watch rebuild failed: {error:#}");
+                ExitCode::from(2)
+            }
+        };
     }
+}
+
+fn run_watch_rebuild(
+    project: Option<&PathBuf>,
+    format: OutputFormat,
+    notes: Vec<String>,
+) -> Result<ExitCode> {
+    let config = load_project(project)?;
+    run_build_like_command(&config, format, "watch", notes)
 }
 
 fn bytecode_path_for(runtime_path: &Path) -> Result<PathBuf> {

@@ -189,7 +189,8 @@ typepython watch [OPTIONS]
 - Performs an initial full build
 - Watches all `src` directories for changes
 - Debounces filesystem events (configurable via `watch.debounce_ms`, default: 80ms)
-- Rebuilds the full pipeline on each change
+- Reloads project configuration and rebuilds the full pipeline on each change
+- Keeps watching after type-checking or emit-blocking diagnostics; the next successful save can recover
 - Reports diagnostics after each rebuild
 
 **Example:**
