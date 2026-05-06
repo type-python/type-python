@@ -728,7 +728,7 @@ class UserInput:
 **Validator rules:**
 
 - The generated validator MUST check each field's runtime type using `isinstance` or equivalent checks for the supported type forms.
-- Boundary metadata MAY also be declared in project configuration with `[[boundaries]]` entries containing `name`, `kind`, `schema`, `validator = "delegate" | "generate"`, and optional provider/failure metadata; this manifest records ownership for framework adapters and review tooling.
+- Boundary metadata MAY also be declared in project configuration with `[[boundaries]]` entries containing `name`, `kind`, `schema`, `validator = "delegate" | "generate"`, and optional provider/failure metadata; this manifest records ownership for framework adapters and review tooling, and requires `"runtime_validators"` in `[experimental].accepted_features`.
 - Supported runtime-checkable types in Experimental v1: `int`, `float`, `str`, `bytes`, `bool`, `None`, `list`, `dict`, `set`, `tuple`, and nominal class types. For generic types (`list[int]`), the container type is checked but element types MAY be checked only shallowly (first element) or skipped with a documented limitation.
 - Union types are checked by attempting each branch.
 - `TypedDict` fields are checked key-by-key.

@@ -228,6 +228,8 @@ class RepoContractsTests(unittest.TestCase):
         diagnostics = read_text("docs/diagnostics.md")
         experimental = read_text("docs/experimental-features.md")
         author_time = read_text("docs/author-time-semantics.md")
+        configuration = read_text("docs/configuration.md")
+        artifact_spec = read_text("docs/spec/artifact-and-tooling-spec-v1.md")
         config = read_text("crates/typepython_config/src/lib.rs")
 
         for text in (readme, pypi_readme):
@@ -250,6 +252,12 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("validate_experimental_features", config)
         self.assertIn("accepted_features", config)
         self.assertIn("EXPERIMENTAL_RUNTIME_VALIDATORS", config)
+        self.assertNotIn("\n[[boundaries]]\n", configuration)
+        self.assertIn("# [[boundaries]]", configuration)
+        self.assertIn(
+            'requires `"runtime_validators"` in `[experimental].accepted_features`',
+            artifact_spec,
+        )
 
         self.assertIn("Experimental opt-in features share the same release contract", experimental)
         self.assertIn("Roadmap / prototype rows are tracked here", experimental)

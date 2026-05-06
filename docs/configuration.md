@@ -145,16 +145,18 @@ no_emit_on_error = true
 runtime_validators = false
 
 # Optional boundary manifest entries let adapters and review tooling record who
-# owns validation for framework edges. Supported kind values are http_request,
-# http_response, cli_param, config_file, message_payload, plugin_entrypoint, and
-# serialized_payload. Supported validator values are delegate and generate.
-[[boundaries]]
-name = "create_user_request"
-kind = "http_request"
-provider = "toy.fastapi.Body"
-schema = "app.UserCreate"
-validator = "delegate"
-failure = "diagnostic"
+# owns validation for framework edges. They require accepting "runtime_validators"
+# in [experimental].accepted_features before uncommenting. Supported kind values
+# are http_request, http_response, cli_param, config_file, message_payload,
+# plugin_entrypoint, and serialized_payload. Supported validator values are
+# delegate and generate.
+# [[boundaries]]
+# name = "create_user_request"
+# kind = "http_request"
+# provider = "toy.fastapi.Body"
+# schema = "app.UserCreate"
+# validator = "delegate"
+# failure = "diagnostic"
 
 # Lowering strategy for typing syntax.
 # "compat" preserves broad checker/runtime compatibility for older targets.
