@@ -153,8 +153,18 @@ pub(super) fn effect_capability_diagnostics(
     if !strict || node.module_kind != SourceKind::TypePython {
         return Vec::new();
     }
+    if !context.effect_rows_enabled() && !context.taint_enabled() {
+        return Vec::new();
+    }
 
-    let mut diagnostics = taint_source_sink_diagnostics(context, node);
+    let mut diagnostics = if context.taint_enabled() {
+        taint_source_sink_diagnostics(context, node)
+    } else {
+        Vec::new()
+    };
+    if !context.effect_rows_enabled() {
+        return diagnostics;
+    }
     let summaries = collect_visible_effect_summaries(context, node);
     let capability_scopes = collect_capability_scopes(context, node);
     if summaries.is_empty() {
@@ -333,6 +343,9 @@ pub(super) fn collect_effect_summary_facts(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
 ) -> Vec<SummaryEffectFact> {
+    if !context.effect_rows_enabled() && !context.taint_enabled() {
+        return Vec::new();
+    }
     let local_summaries = collect_local_effect_summaries(context, node);
     let mut inference_seeds = local_summaries.clone();
     inference_seeds.extend(collect_stdlib_effect_summaries(node));
@@ -359,6 +372,13 @@ pub(super) fn collect_effect_summary_facts(
             line: summary.line,
         })
         .collect::<Vec<_>>();
+    for fact in &mut facts {
+        fact.effects.retain(|label| {
+            (context.effect_rows_enabled() && !is_taint_effect_label(label))
+                || (context.taint_enabled() && is_taint_effect_label(label))
+        });
+    }
+    facts.retain(|fact| (context.effect_rows_enabled() && fact.pure) || !fact.effects.is_empty());
     facts.sort_by(|left, right| {
         left.owner_type_name
             .cmp(&right.owner_type_name)
@@ -366,6 +386,10 @@ pub(super) fn collect_effect_summary_facts(
             .then_with(|| left.line.cmp(&right.line))
     });
     facts
+}
+
+fn is_taint_effect_label(label: &str) -> bool {
+    label.starts_with("taint.")
 }
 
 fn collect_visible_effect_summaries(

@@ -307,6 +307,9 @@ def parse() -> str:
 
 **Fix:** add an effect declaration to the caller, remove `@effect_pure`, or isolate the call behind an explicit capability boundary.
 
+`TPY4026` is emitted only when the project accepts the Roadmap / prototype
+`"effect_rows"` feature in `[experimental].accepted_features`.
+
 #### TPY4027 -- Restricted type-level alias evaluation failure
 
 Raised when a type-level alias uses a restricted evaluator form that cannot be fully reduced to standard Python typing.
@@ -320,7 +323,8 @@ typealias Names = MapValues[User, Callable]  # TPY4027: unsupported wrapper in t
 #### TPY4028 -- Tainted source reaches sink
 
 Status: Roadmap / prototype diagnostic. The diagnostic code is documented for research builds, but
-taint analysis is not part of Stable Core v1.
+taint analysis is not part of Stable Core v1. It is emitted only when the project accepts
+`"taint"` in `[experimental].accepted_features`.
 
 Raised when the checker can see a direct source-to-sink taint flow that does not pass through an explicit sanitizer. Contextual decorators such as `@source("html")`, `@sink("html")`, and `@sanitizer("html")` are checked against matching taint contexts; bare decorators remain wildcard facts.
 

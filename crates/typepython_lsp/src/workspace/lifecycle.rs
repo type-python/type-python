@@ -322,35 +322,34 @@ impl IncrementalWorkspace {
         let current_module_keys =
             graph.nodes.iter().map(|node| node.module_key.clone()).collect::<BTreeSet<_>>();
         let source_overrides = Self::source_overrides_for_syntax_trees(&syntax_trees);
+        let checker_options = CheckerOptions::from_config(&self.config.config);
+        let snapshot_metadata = typepython_incremental::SnapshotMetadata {
+            target_python: Some(self.config.config.project.target_python.to_string()),
+            analysis_python: Some(self.config.analysis_python().to_string()),
+            emit_style: Some(self.config.config.emit.emit_style.to_string()),
+            support_snapshot: None,
+            experimental_effect_rows: checker_options.experimental_effect_rows,
+            experimental_taint: checker_options.experimental_taint,
+        };
         let current_incremental = if force_full_check || self.incremental.summaries.is_empty() {
-            semantic_incremental_state_with_binding_metadata(
+            semantic_incremental_state_with_binding_metadata_and_options(
                 &graph,
                 &bindings,
-                self.config.config.typing.imports,
+                checker_options,
                 Some(&source_overrides),
                 None,
-                typepython_incremental::SnapshotMetadata {
-                    target_python: Some(self.config.config.project.target_python.to_string()),
-                    analysis_python: Some(self.config.analysis_python().to_string()),
-                    emit_style: Some(self.config.config.emit.emit_style.to_string()),
-                    support_snapshot: None,
-                },
+                snapshot_metadata.clone(),
             )
         } else {
-            semantic_incremental_state_with_reused_summaries(
+            semantic_incremental_state_with_reused_summaries_and_options(
                 &graph,
                 &bindings,
-                self.config.config.typing.imports,
+                checker_options,
                 Some(&source_overrides),
                 &self.incremental.summaries,
                 &direct_changes,
                 None,
-                typepython_incremental::SnapshotMetadata {
-                    target_python: Some(self.config.config.project.target_python.to_string()),
-                    analysis_python: Some(self.config.analysis_python().to_string()),
-                    emit_style: Some(self.config.config.emit.emit_style.to_string()),
-                    support_snapshot: None,
-                },
+                snapshot_metadata,
             )
         };
         let current_dependency_index = dependency_index(&graph);
@@ -370,13 +369,13 @@ impl IncrementalWorkspace {
         if !has_precheck_errors {
             if force_full_check || self.parse_blocked {
                 self.check_diagnostics_by_module = check_modules_with_binding_metadata(
-                    &graph,
-                    &bindings,
-                    &current_module_keys,
-                    CheckerOptions::from_typing_config(&self.config.config.typing),
-                    Some(&source_overrides),
-                )
-                .diagnostics_by_module;
+                        &graph,
+                        &bindings,
+                        &current_module_keys,
+                        checker_options,
+                        Some(&source_overrides),
+                    )
+                    .diagnostics_by_module;
             } else {
                 let affected = affected_modules(
                     Some(&self.dependency_index),
@@ -393,7 +392,7 @@ impl IncrementalWorkspace {
                         &graph,
                         &bindings,
                         &rechecked_modules,
-                        CheckerOptions::from_typing_config(&self.config.config.typing),
+                        checker_options,
                         Some(&source_overrides),
                     );
                     for (module_key, diagnostics) in module_result.diagnostics_by_module {

@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use typepython_binding::bind;
 use typepython_checking::{
     CheckerOptions, check_modules_with_binding_metadata, collect_effective_callable_stub_overrides,
-    collect_synthetic_method_stubs, semantic_incremental_state_with_binding_metadata,
-    semantic_incremental_state_with_reused_summaries,
+    collect_synthetic_method_stubs, semantic_incremental_state_with_binding_metadata_and_options,
+    semantic_incremental_state_with_reused_summaries_and_options,
 };
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
@@ -80,7 +80,7 @@ struct AnalyzedPipelineState {
 }
 
 const MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION: u32 = 1;
-const ANALYSIS_CACHE_SCHEMA_VERSION: u32 = 1;
+const ANALYSIS_CACHE_SCHEMA_VERSION: u32 = 2;
 const EFFECT_METADATA_SIDECAR_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -112,6 +112,9 @@ struct AnalysisCacheMetadata {
     warn_unsafe: bool,
     imports: String,
     require_known_public_types: bool,
+    experimental_effect_rows: bool,
+    experimental_taint: bool,
+    experimental_validator_witnesses: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -510,11 +513,14 @@ fn analyze_pipeline_state(
     let target_python = config.config.project.target_python.to_string();
     let analysis_python = config.analysis_python().to_string();
     let stdlib_snapshot = Some(bundled_stdlib_snapshot_identity(&analysis_python)?);
+    let checker_options = CheckerOptions::from_config(&config.config);
     let snapshot_metadata = SnapshotMetadata {
         target_python: Some(target_python),
         analysis_python: Some(analysis_python.clone()),
         emit_style: Some(config.config.emit.emit_style.to_string()),
         support_snapshot: Some(support_source_snapshot_identity(config, &analysis_python)?),
+        experimental_effect_rows: checker_options.experimental_effect_rows,
+        experimental_taint: checker_options.experimental_taint,
     };
     let source_hashes = syntax_tree_source_hashes(&prepared.all_syntax_trees);
     let incremental = match previous {
@@ -526,10 +532,10 @@ fn analyze_pipeline_state(
                 .with_source_hashes(source_hashes.clone())
                 .with_metadata(snapshot_metadata.clone());
             let direct_changes = source_change_modules(previous, &current_sources);
-            semantic_incremental_state_with_reused_summaries(
+            semantic_incremental_state_with_reused_summaries_and_options(
                 &graph,
                 &bindings,
-                config.config.typing.imports,
+                checker_options,
                 None,
                 &previous.summaries,
                 &direct_changes,
@@ -537,10 +543,10 @@ fn analyze_pipeline_state(
                 snapshot_metadata.clone(),
             )
         }
-        Some(_) | None => semantic_incremental_state_with_binding_metadata(
+        Some(_) | None => semantic_incremental_state_with_binding_metadata_and_options(
             &graph,
             &bindings,
-            config.config.typing.imports,
+            checker_options,
             None,
             stdlib_snapshot.clone(),
             snapshot_metadata.clone(),
@@ -642,6 +648,18 @@ fn analysis_cache_metadata(
         warn_unsafe: config.config.typing.warn_unsafe,
         imports: format!("{:?}", config.config.typing.imports),
         require_known_public_types: config.config.typing.require_known_public_types,
+        experimental_effect_rows: config
+            .config
+            .experimental
+            .accepts_feature(typepython_config::EXPERIMENTAL_EFFECT_ROWS),
+        experimental_taint: config
+            .config
+            .experimental
+            .accepts_feature(typepython_config::EXPERIMENTAL_TAINT),
+        experimental_validator_witnesses: config
+            .config
+            .experimental
+            .accepts_feature(typepython_config::EXPERIMENTAL_VALIDATOR_WITNESSES),
     }
 }
 
@@ -873,7 +891,7 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
             &analyzed.graph,
             &analyzed.bindings,
             &rechecked_modules,
-            CheckerOptions::from_typing_config(&config.config.typing),
+            CheckerOptions::from_config(&config.config),
             None,
         );
         for (module_key, diagnostics) in module_result.diagnostics_by_module {

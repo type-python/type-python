@@ -68,11 +68,24 @@ mod flow_tests {
         }
     }
 
+    fn validator_context<'a>(
+        nodes: &'a [typepython_graph::ModuleNode],
+    ) -> CheckerContext<'a> {
+        CheckerContext::new_with_bound_surface_facts_and_options(
+            nodes,
+            None,
+            None,
+            CheckerOptions::default().with_experimental_features(false, false, true),
+        )
+    }
+
     #[test]
     fn validator_witness_requires_explicit_trust_to_narrow() {
         let node = validator_test_node("ValidatorWitness[User]");
         let nodes = vec![node.clone()];
-        let narrowed = apply_predicate_guard_semantic(
+        let context = validator_context(&nodes);
+        let narrowed = apply_predicate_guard_semantic_with_context(
+            &context,
             &node,
             &nodes,
             &SemanticType::Name(String::from("unknown")),
@@ -87,7 +100,9 @@ mod flow_tests {
     fn validator_witness_with_explicit_trust_narrows_unknown() {
         let node = validator_test_node("ValidatorWitness[User, Literal[\"trusted\"]]");
         let nodes = vec![node.clone()];
-        let narrowed = apply_predicate_guard_semantic(
+        let context = validator_context(&nodes);
+        let narrowed = apply_predicate_guard_semantic_with_context(
+            &context,
             &node,
             &nodes,
             &SemanticType::Name(String::from("unknown")),

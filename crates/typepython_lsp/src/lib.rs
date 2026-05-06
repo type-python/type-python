@@ -14,8 +14,8 @@ use thiserror::Error;
 use typepython_binding::bind;
 use typepython_checking::{
     CheckerOptions, check_modules_with_binding_metadata,
-    semantic_incremental_state_with_binding_metadata,
-    semantic_incremental_state_with_reused_summaries,
+    semantic_incremental_state_with_binding_metadata_and_options,
+    semantic_incremental_state_with_reused_summaries_and_options,
 };
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Severity, Span};

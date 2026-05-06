@@ -121,6 +121,38 @@ pub(super) fn check_with_binding_metadata(
     clippy::too_many_arguments,
     reason = "test wrapper mirrors the public checker option surface"
 )]
+pub(super) fn check_with_experimental_binding_metadata(
+    graph: &ModuleGraph,
+    bindings: &[BindingTable],
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+) -> crate::CheckResult {
+    super::check_with_binding_metadata_and_options(
+        &normalize_test_graph(graph),
+        bindings,
+        crate::CheckerOptions {
+            require_explicit_overrides,
+            enable_sealed_exhaustiveness,
+            report_deprecated,
+            strict,
+            warn_unsafe,
+            import_fallback,
+            ..crate::CheckerOptions::default()
+        }
+        .with_experimental_features(true, true, true),
+        source_overrides,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test wrapper mirrors the public checker option surface"
+)]
 pub(super) fn check_with_source_overrides(
     graph: &ModuleGraph,
     require_explicit_overrides: bool,
@@ -143,6 +175,36 @@ pub(super) fn check_with_source_overrides(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test wrapper mirrors the public checker option surface"
+)]
+pub(super) fn check_with_experimental_source_overrides(
+    graph: &ModuleGraph,
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+) -> crate::CheckResult {
+    super::check_with_checker_options_and_source_overrides(
+        &normalize_test_graph(graph),
+        crate::CheckerOptions {
+            require_explicit_overrides,
+            enable_sealed_exhaustiveness,
+            report_deprecated,
+            strict,
+            warn_unsafe,
+            import_fallback,
+            ..crate::CheckerOptions::default()
+        }
+        .with_experimental_features(true, true, true),
+        source_overrides,
+    )
+}
+
 pub(super) fn semantic_incremental_state_with_binding_metadata(
     graph: &ModuleGraph,
     bindings: &[BindingTable],
@@ -155,6 +217,26 @@ pub(super) fn semantic_incremental_state_with_binding_metadata(
         &normalize_test_graph(graph),
         bindings,
         import_fallback,
+        source_overrides,
+        stdlib_snapshot,
+        metadata,
+    )
+}
+
+pub(super) fn semantic_incremental_state_with_experimental_binding_metadata(
+    graph: &ModuleGraph,
+    bindings: &[BindingTable],
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+    stdlib_snapshot: Option<String>,
+    metadata: SnapshotMetadata,
+) -> IncrementalState {
+    super::semantic_incremental_state_with_binding_metadata_and_options(
+        &normalize_test_graph(graph),
+        bindings,
+        crate::CheckerOptions::default()
+            .with_import_fallback(import_fallback)
+            .with_experimental_features(true, true, true),
         source_overrides,
         stdlib_snapshot,
         metadata,
@@ -273,6 +355,46 @@ pub(super) fn check_temp_typepython_source_with_check_options(
         strict,
         warn_unsafe,
         ImportFallback::Unknown,
+    );
+
+    let _ = fs::remove_dir_all(&root);
+    result
+}
+
+pub(super) fn check_temp_typepython_source_with_experimental_check_options(
+    source_text: &str,
+    options: ParseOptions,
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+) -> crate::CheckResult {
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+
+    let source = SourceFile {
+        path: path.clone(),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("app"),
+        text: source_text.to_owned(),
+    };
+    let tree = parse_with_options(source, options);
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let result = super::check_with_checker_options(
+        &normalize_test_graph(&graph),
+        crate::CheckerOptions {
+            require_explicit_overrides,
+            enable_sealed_exhaustiveness,
+            report_deprecated,
+            strict,
+            warn_unsafe,
+            import_fallback: ImportFallback::Unknown,
+            ..crate::CheckerOptions::default()
+        }
+        .with_experimental_features(true, true, true),
     );
 
     let _ = fs::remove_dir_all(&root);
@@ -1063,6 +1185,36 @@ pub(super) fn check_virtual_source_with_overrides(
     let source_overrides = BTreeMap::from([(path.display().to_string(), source_text.to_owned())]);
 
     check_with_source_overrides(
+        &graph,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        strict,
+        warn_unsafe,
+        ImportFallback::Unknown,
+        Some(&source_overrides),
+    )
+}
+
+pub(super) fn check_virtual_source_with_experimental_overrides(
+    source_text: &str,
+    options: ParseOptions,
+    strict: bool,
+    warn_unsafe: bool,
+) -> crate::CheckResult {
+    let path = PathBuf::from("virtual/app.tpy");
+    let source = SourceFile {
+        path: path.clone(),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("app"),
+        text: source_text.to_owned(),
+    };
+    let tree = parse_with_options(source, options);
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let source_overrides = BTreeMap::from([(path.display().to_string(), source_text.to_owned())]);
+
+    check_with_experimental_source_overrides(
         &graph,
         false,
         true,

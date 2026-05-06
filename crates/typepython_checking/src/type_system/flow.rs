@@ -410,18 +410,6 @@ pub(super) fn apply_guard_condition_semantic_with_context(
     }
 }
 
-#[cfg(test)]
-pub(super) fn apply_predicate_guard_semantic(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    base_type: &SemanticType,
-    callee: &str,
-    branch_true: bool,
-) -> SemanticType {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
-    apply_predicate_guard_semantic_with_context(&context, node, nodes, base_type, callee, branch_true)
-}
-
 pub(super) fn apply_predicate_guard_semantic_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -440,7 +428,8 @@ pub(super) fn apply_predicate_guard_semantic_with_context(
             narrow_to_instance_semantic_types(node, nodes, base_type, &[guarded_type])
         }
         ("ValidatorWitness", true)
-            if trusted_witness
+            if context.validator_witnesses_enabled()
+                && trusted_witness
                 && matches!(base_type.strip_annotated(), SemanticType::Name(name) if name == "unknown") =>
         {
             guarded_type
@@ -459,6 +448,9 @@ pub(super) fn validator_witness_trust_boundary_note(
     current_line: usize,
     value_name: &str,
 ) -> Option<String> {
+    if !context.validator_witnesses_enabled() {
+        return None;
+    }
     node.if_guards
         .iter()
         .filter(|guard| {
@@ -510,7 +502,8 @@ pub(super) fn parse_guard_return_kind_semantic_with_context(
 ) -> Option<(String, SemanticType, bool)> {
     let (function_node, function) = resolve_direct_function_with_node(node, nodes, callee)?;
     let returns = declaration_signature_return_semantic_type(function)?;
-    if let Some(guarded_type) =
+    if context.validator_witnesses_enabled()
+        && let Some(guarded_type) =
         generated_validator_witness_type(context, function_node, function, &returns)
     {
         return Some((String::from("ValidatorWitness"), guarded_type, true));
@@ -521,7 +514,10 @@ pub(super) fn parse_guard_return_kind_semantic_with_context(
         if matches!(head.as_str(), "TypeGuard" | "TypeIs") && args.len() == 1 {
             return Some((head.clone(), args[0].clone(), true));
         }
-        if head == "ValidatorWitness" && matches!(args.len(), 1 | 2) {
+        if context.validator_witnesses_enabled()
+            && head == "ValidatorWitness"
+            && matches!(args.len(), 1 | 2)
+        {
             let trusted = validator_witness_return_is_trusted(args)
                 || validator_witness_trusted_by_boundary_metadata(context, function_node, function);
             return Some((head.clone(), args[0].clone(), trusted));

@@ -15,8 +15,9 @@ Experimental opt-in features share the same release contract:
   narrow slice
 
 Roadmap / prototype rows are tracked here so they stay out of Core v1 product claims. They may appear
-in research fixtures, RFCs, or explicitly labeled diagnostics, but promotion requires adding or
-tightening explicit gates before they can become a compatibility-stable feature.
+in research fixtures, RFCs, or explicitly labeled diagnostics, but they are disabled for ordinary
+Core projects unless `[experimental].accepted_features` names the feature id. Promotion still
+requires tightening those gates before the slice can become a compatibility-stable feature.
 
 ## Registry
 
@@ -28,9 +29,9 @@ tightening explicit gates before they can become a compatibility-stable feature.
 | `sync_async_dual_emit` | Experimental opt-in | Explicit sync/async mapping inputs and downstream-checker fixture coverage | Ordinary emit does not synthesize paired sync/async APIs. | Stabilize mapping schema, conflict diagnostics, incremental cache keys, and downstream checker compatibility. |
 | `shape_transforms` | Experimental opt-in | `[experimental].accepted_features = ["shape_transforms"]` plus `[experimental].shape_transforms = true` for non-`TypedDict` shape sources | `TypedDict` transforms remain available; non-`TypedDict` projections fail closed. | Stabilize internal `Shape` model, class/protocol/framework field provenance, and emitted checker-neutral stubs. |
 | `framework_adapters` | Roadmap / prototype | Prototype adapter manifests and fixture-only SDK details | No default emitted output depends on framework adapter manifests. | Publish a versioned SDK, registry format, validation rules, and cross-checker fixture matrix. |
-| `effect_rows` | Roadmap / prototype | Author-time decorators and metadata slices; stable Core remains `unsafe:` fences | Core v1 programs do not require effect rows beyond `unsafe:`. | Define row algebra, framework capability provenance, diagnostics, and sidecar or plugin story before marketing as stable. |
-| `taint` | Roadmap / prototype | Author-time source/sink/sanitizer slices | Core v1 acceptance does not depend on taint facts. | Define interprocedural scope, sanitizer soundness, context algebra, and promotion tests. |
-| `validator_witnesses` | Roadmap / prototype | RFC and research examples | No Core v1 narrowing depends on validator witnesses. | Define witness syntax, runtime/static trust model, diagnostics, and erasure rules. |
+| `effect_rows` | Roadmap / prototype | `[experimental].accepted_features = ["effect_rows"]` | No effect-row diagnostics, LSP effect hovers, or effect sidecar facts are produced. Core v1 programs rely only on `unsafe:` fences. | Define row algebra, framework capability provenance, diagnostics, and sidecar or plugin story before marketing as stable. |
+| `taint` | Roadmap / prototype | `[experimental].accepted_features = ["taint"]` | No taint source/sink/sanitizer diagnostics or taint effect facts are produced. | Define interprocedural scope, sanitizer soundness, context algebra, and promotion tests. |
+| `validator_witnesses` | Roadmap / prototype | `[experimental].accepted_features = ["validator_witnesses"]` | No Core v1 narrowing depends on validator witnesses. Trusted witnesses do not narrow `unknown` while disabled. | Define witness syntax, runtime/static trust model, diagnostics, and erasure rules. |
 | `notebook_ingestion` | Roadmap / prototype | Script and future workflow experiments | Core v1 CLI behavior is unchanged. | Stabilize notebook source mapping, diagnostics, cache invalidation, and output policy. |
 
 ## Promotion Checklist

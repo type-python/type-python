@@ -25,15 +25,17 @@ The default consumer model is conservative: downstream users of the emitted pack
 ## Implemented Slices
 
 These slices document current research behavior. P0 effect rows, P3 taint, and P4 validator
-witnesses remain Roadmap / prototype surfaces, not Stable Core v1 promises.
+witnesses remain Roadmap / prototype surfaces, not Stable Core v1 promises. A project must list the
+corresponding id in `[experimental].accepted_features` before these checker slices affect
+diagnostics, LSP metadata, or narrowing.
 
 | Slice | What users can try now | Output behavior |
 | --- | --- | --- |
-| P0 Effect / capability rows | Mark callables with `@effect("io.net")`, `@effect_pure`, lifecycle decorators, or framework effect capabilities; uncovered effect calls report `TPY4026` and LSP hover/code actions explain the row. | Effect facts are author-time diagnostics and `.typepython/cache/effects.json` metadata; emitted Python remains standard. |
+| P0 Effect / capability rows | Opt into `"effect_rows"`, then mark callables with `@effect("io.net")`, `@effect_pure`, lifecycle decorators, or framework effect capabilities; uncovered effect calls report `TPY4026` and LSP hover/code actions explain the row. | Effect facts are author-time diagnostics and `.typepython/cache/effects.json` metadata; emitted Python remains standard. |
 | P1 Shape substrate | Use `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and supported `MapValues` over `TypedDict`; opt into `[experimental].accepted_features = ["shape_transforms"]` plus `[experimental].shape_transforms = true` for TypePython `data class` projection materialization. | Shape aliases materialize as standard `TypedDict` output or fail closed. |
 | P2 Restricted evaluator | Use `TypeIf[IsSubtype[...], A, B]`, `KeyOf`, `RequiredKeys`, `OptionalKeys`, `Pick`, `Omit`, and supported `MapValues`. Unsupported forms report `TPY4027`. | Reducible aliases are emitted as standard types; unreduced TypePython-only forms are not emitted. |
-| P3 Taint qualifier | Use `Tainted[T, Context]`, `@source`, `@sink`, and `@sanitizer`; direct unsanitized source-to-sink flows report `TPY4028`. | `Tainted[...]` is checker-only and erased to the underlying runtime type during lowering. |
-| P4 Validator witness | Use `ValidatorWitness[T, Literal["trusted"]]`, `ValidatorWitness[T, Literal["generated"]]`, or trusted validator decorator metadata to narrow `unknown` in a true branch. Assignment, deletion, and detected mutation invalidate the witness. | Witness types are checker-only and erased before emit. |
+| P3 Taint qualifier | Opt into `"taint"`, then use `Tainted[T, Context]`, `@source`, `@sink`, and `@sanitizer`; direct unsanitized source-to-sink flows report `TPY4028`. | `Tainted[...]` is checker-only and erased to the underlying runtime type during lowering. |
+| P4 Validator witness | Opt into `"validator_witnesses"`, then use `ValidatorWitness[T, Literal["trusted"]]`, `ValidatorWitness[T, Literal["generated"]]`, or trusted validator decorator metadata to narrow `unknown` in a true branch. Assignment, deletion, and detected mutation invalidate the witness. | Witness types are checker-only and erased before emit. |
 
 ## Current Demo
 

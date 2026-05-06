@@ -15,7 +15,9 @@ imports = "unknown"
 warn_unsafe = true
 
 [experimental]
-accepted_features = ["shape_transforms"]
+# Taint syntax is present in the source, but the strict taint checker slice stays
+# in focused crate fixtures until this demo opts into `"taint"` as well.
+accepted_features = ["shape_transforms", "effect_rows", "validator_witnesses"]
 shape_transforms = true
 
 [emit]

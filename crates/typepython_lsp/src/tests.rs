@@ -256,7 +256,7 @@ fn hover_renders_projected_framework_shape_aliases() {
 
 #[test]
 fn hover_renders_effect_summary_for_decorated_callable() {
-    let config = temp_workspace(
+    let config = temp_effect_workspace(
         "hover_renders_effect_summary_for_decorated_callable",
         &[(
             "src/app/__init__.tpy",
@@ -280,7 +280,7 @@ fn hover_renders_effect_summary_for_decorated_callable() {
 
 #[test]
 fn hover_renders_contextual_taint_effect_summary() {
-    let config = temp_workspace(
+    let config = temp_effect_workspace(
         "hover_renders_contextual_taint_effect_summary",
         &[(
             "src/app/__init__.tpy",
@@ -330,7 +330,7 @@ fn hover_renders_contextual_taint_effect_summary() {
 
 #[test]
 fn hover_renders_effect_summary_for_adapter_declared_callable() {
-    let config = temp_workspace(
+    let config = temp_effect_workspace(
         "hover_renders_effect_summary_for_adapter_declared_callable",
         &[(
             "src/app/__init__.tpy",
@@ -366,7 +366,7 @@ fn hover_renders_effect_summary_for_adapter_declared_callable() {
 
 #[test]
 fn hover_renders_lifecycle_effect_summary() {
-    let config = temp_workspace(
+    let config = temp_effect_workspace(
         "hover_renders_lifecycle_effect_summary",
         &[(
             "src/app/__init__.tpy",
@@ -397,7 +397,7 @@ fn hover_renders_lifecycle_effect_summary() {
 
 #[test]
 fn hover_renders_inferred_effect_summary_for_local_callable() {
-    let config = temp_workspace(
+    let config = temp_effect_workspace(
         "hover_renders_inferred_effect_summary_for_local_callable",
         &[(
             "src/app/__init__.tpy",
@@ -432,7 +432,7 @@ fn hover_renders_inferred_effect_summary_for_local_callable() {
 
 #[test]
 fn hover_infers_effect_summary_from_nested_call_argument() {
-    let config = temp_workspace(
+    let config = temp_effect_workspace(
         "hover_infers_effect_summary_from_nested_call_argument",
         &[(
             "src/app/__init__.tpy",
@@ -469,7 +469,7 @@ fn hover_infers_effect_summary_from_nested_call_argument() {
 
 #[test]
 fn hover_infers_effect_summary_from_control_flow_expression() {
-    let config = temp_workspace(
+    let config = temp_effect_workspace(
         "hover_infers_effect_summary_from_control_flow_expression",
         &[(
             "src/app/__init__.tpy",
@@ -506,7 +506,7 @@ fn hover_infers_effect_summary_from_control_flow_expression() {
 
 #[test]
 fn hover_renders_inferred_stdlib_effect_summary_for_local_callable() {
-    let config = temp_workspace(
+    let config = temp_effect_workspace(
         "hover_renders_inferred_stdlib_effect_summary_for_local_callable",
         &[(
             "src/app/__init__.tpy",
@@ -530,7 +530,7 @@ fn hover_renders_inferred_stdlib_effect_summary_for_local_callable() {
 
 #[test]
 fn hover_renders_inferred_effect_summary_from_imported_callable() {
-    let config = temp_workspace(
+    let config = temp_effect_workspace(
         "hover_renders_inferred_effect_summary_from_imported_callable",
         &[
             (
@@ -3159,6 +3159,14 @@ fn temp_config(test_name: &str, source: &str) -> ConfigHandle {
 
 fn temp_workspace(test_name: &str, files: &[(&str, &str)]) -> ConfigHandle {
     temp_workspace_with_config(test_name, "[project]\nsrc = [\"src\"]\n", files)
+}
+
+fn temp_effect_workspace(test_name: &str, files: &[(&str, &str)]) -> ConfigHandle {
+    temp_workspace_with_config(
+        test_name,
+        "[project]\nsrc = [\"src\"]\n\n[experimental]\naccepted_features = [\"effect_rows\", \"taint\"]\n",
+        files,
+    )
 }
 
 fn temp_workspace_with_config(

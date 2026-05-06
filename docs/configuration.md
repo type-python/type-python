@@ -234,6 +234,8 @@ conditional_returns = false
 [experimental]
 
 # Accept unstable feature contracts before enabling their gates elsewhere.
+# Roadmap/prototype checker slices such as effect rows, taint, and validator
+# witnesses are disabled until their feature id appears here.
 # Known feature ids:
 #   runtime_validators, conditional_returns, infer_passthrough,
 #   sync_async_dual_emit, shape_transforms, framework_adapters, effect_rows,

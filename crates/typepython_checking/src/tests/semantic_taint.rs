@@ -81,7 +81,7 @@ fn check_uses_source_sink_and_sanitizer_decorators_for_taint_slice() {
 
 #[test]
 fn check_rejects_decorated_source_flowing_through_local_to_sink() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
@@ -112,7 +112,7 @@ fn check_rejects_decorated_source_flowing_through_local_to_sink() {
 
 #[test]
 fn check_does_not_leak_decorated_source_taint_between_functions() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
@@ -146,7 +146,7 @@ fn check_does_not_leak_decorated_source_taint_between_functions() {
 
 #[test]
 fn check_uses_framework_adapter_taint_source_and_sink_capabilities() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def framework_transform(**kwargs):\n",
@@ -183,7 +183,7 @@ fn check_uses_framework_adapter_taint_source_and_sink_capabilities() {
 
 #[test]
 fn check_uses_framework_adapter_taint_sanitizer_capability() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def framework_transform(**kwargs):\n",
@@ -230,7 +230,7 @@ fn check_uses_framework_adapter_taint_sanitizer_capability() {
 
 #[test]
 fn check_uses_explicit_taint_effect_labels_for_local_source_sink_flow() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "def effect(label: str):\n",
             "    def wrap(fn):\n",
@@ -267,7 +267,7 @@ fn check_uses_explicit_taint_effect_labels_for_local_source_sink_flow() {
 
 #[test]
 fn check_uses_contextual_taint_decorator_labels() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def source(label: str):\n",
@@ -321,7 +321,7 @@ fn check_uses_contextual_taint_decorator_labels() {
 
 #[test]
 fn check_uses_method_source_sink_and_sanitizer_for_local_taint_flow() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
@@ -422,7 +422,7 @@ fn check_uses_imported_taint_source_sink_and_sanitizer_facts() {
     ];
     let bindings = trees.iter().map(bind).collect::<Vec<_>>();
     let graph = build(&bindings);
-    let result = check_with_binding_metadata(
+    let result = check_with_experimental_binding_metadata(
         &graph,
         &bindings,
         false,
@@ -497,7 +497,7 @@ fn check_preserves_imported_contextual_taint_decorator_labels() {
     ];
     let bindings = trees.iter().map(bind).collect::<Vec<_>>();
     let graph = build(&bindings);
-    let result = check_with_binding_metadata(
+    let result = check_with_experimental_binding_metadata(
         &graph,
         &bindings,
         false,
@@ -578,7 +578,7 @@ fn check_uses_imported_method_taint_source_sink_and_sanitizer_facts() {
     ];
     let bindings = trees.iter().map(bind).collect::<Vec<_>>();
     let graph = build(&bindings);
-    let result = check_with_binding_metadata(
+    let result = check_with_experimental_binding_metadata(
         &graph,
         &bindings,
         false,
@@ -599,7 +599,7 @@ fn check_uses_imported_method_taint_source_sink_and_sanitizer_facts() {
 
 #[test]
 fn check_rejects_decorated_source_passed_directly_to_decorated_sink() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",

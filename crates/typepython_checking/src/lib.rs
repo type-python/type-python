@@ -21,7 +21,10 @@ use std::{
 };
 
 use typepython_binding::{BindingTable, Declaration, DeclarationKind, DeclarationOwnerKind};
-use typepython_config::{DiagnosticLevel, ImportFallback, TypingConfig};
+use typepython_config::{
+    Config, DiagnosticLevel, EXPERIMENTAL_EFFECT_ROWS, EXPERIMENTAL_TAINT,
+    EXPERIMENTAL_VALIDATOR_WITNESSES, ImportFallback, TypingConfig,
+};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionApplicability};
 use typepython_graph::ModuleGraph;
 use typepython_incremental::{
@@ -134,6 +137,9 @@ pub struct CheckerOptions {
     pub no_implicit_dynamic: bool,
     pub warn_unsafe: bool,
     pub import_fallback: ImportFallback,
+    pub experimental_effect_rows: bool,
+    pub experimental_taint: bool,
+    pub experimental_validator_witnesses: bool,
 }
 
 impl Default for CheckerOptions {
@@ -147,6 +153,9 @@ impl Default for CheckerOptions {
             no_implicit_dynamic: false,
             warn_unsafe: false,
             import_fallback: ImportFallback::Unknown,
+            experimental_effect_rows: false,
+            experimental_taint: false,
+            experimental_validator_witnesses: false,
         }
     }
 }
@@ -163,7 +172,40 @@ impl CheckerOptions {
             no_implicit_dynamic: config.no_implicit_dynamic,
             warn_unsafe: config.warn_unsafe,
             import_fallback: config.imports,
+            experimental_effect_rows: false,
+            experimental_taint: false,
+            experimental_validator_witnesses: false,
         }
+    }
+
+    #[must_use]
+    pub fn from_config(config: &Config) -> Self {
+        let mut options = Self::from_typing_config(&config.typing);
+        options.experimental_effect_rows =
+            config.experimental.accepts_feature(EXPERIMENTAL_EFFECT_ROWS);
+        options.experimental_taint = config.experimental.accepts_feature(EXPERIMENTAL_TAINT);
+        options.experimental_validator_witnesses =
+            config.experimental.accepts_feature(EXPERIMENTAL_VALIDATOR_WITNESSES);
+        options
+    }
+
+    #[must_use]
+    pub fn with_import_fallback(mut self, import_fallback: ImportFallback) -> Self {
+        self.import_fallback = import_fallback;
+        self
+    }
+
+    #[must_use]
+    pub fn with_experimental_features(
+        mut self,
+        effect_rows: bool,
+        taint: bool,
+        validator_witnesses: bool,
+    ) -> Self {
+        self.experimental_effect_rows = effect_rows;
+        self.experimental_taint = taint;
+        self.experimental_validator_witnesses = validator_witnesses;
+        self
     }
 }
 
@@ -215,6 +257,9 @@ struct CheckerContext<'a> {
     strict: bool,
     strict_nulls: bool,
     no_implicit_dynamic: bool,
+    experimental_effect_rows: bool,
+    experimental_taint: bool,
+    experimental_validator_witnesses: bool,
     source_facts: CheckerSourceFactsProvider<'a>,
 }
 
@@ -269,8 +314,23 @@ impl<'a> CheckerContext<'a> {
             strict: options.strict,
             strict_nulls: options.strict_nulls,
             no_implicit_dynamic: options.no_implicit_dynamic,
+            experimental_effect_rows: options.experimental_effect_rows,
+            experimental_taint: options.experimental_taint,
+            experimental_validator_witnesses: options.experimental_validator_witnesses,
             source_facts: CheckerSourceFactsProvider::new(source_overrides, bound_surface_facts),
         }
+    }
+
+    fn effect_rows_enabled(&self) -> bool {
+        self.experimental_effect_rows
+    }
+
+    fn taint_enabled(&self) -> bool {
+        self.experimental_taint
+    }
+
+    fn validator_witnesses_enabled(&self) -> bool {
+        self.experimental_validator_witnesses
     }
 
     fn import_fallback_type(&self) -> &'static str {
@@ -515,12 +575,31 @@ pub fn semantic_incremental_state_with_binding_metadata(
     stdlib_snapshot: Option<String>,
     metadata: SnapshotMetadata,
 ) -> IncrementalState {
+    semantic_incremental_state_with_binding_metadata_and_options(
+        graph,
+        bindings,
+        CheckerOptions::default().with_import_fallback(import_fallback),
+        source_overrides,
+        stdlib_snapshot,
+        metadata,
+    )
+}
+
+#[must_use]
+pub fn semantic_incremental_state_with_binding_metadata_and_options(
+    graph: &ModuleGraph,
+    bindings: &[BindingTable],
+    options: CheckerOptions,
+    source_overrides: Option<&BTreeMap<String, String>>,
+    stdlib_snapshot: Option<String>,
+    metadata: SnapshotMetadata,
+) -> IncrementalState {
     let bound_surface_facts = binding_surface_facts_by_module(bindings);
-    let context = CheckerContext::new_with_bound_surface_facts(
+    let context = CheckerContext::new_with_bound_surface_facts_and_options(
         &graph.nodes,
-        import_fallback,
         source_overrides,
         Some(&bound_surface_facts),
+        options,
     );
     let summaries =
         graph.nodes.iter().map(|node| semantic_public_summary(&context, node)).collect();
@@ -542,12 +621,39 @@ pub fn semantic_incremental_state_with_reused_summaries(
     stdlib_snapshot: Option<String>,
     metadata: SnapshotMetadata,
 ) -> IncrementalState {
+    semantic_incremental_state_with_reused_summaries_and_options(
+        graph,
+        bindings,
+        CheckerOptions::default().with_import_fallback(import_fallback),
+        source_overrides,
+        previous_summaries,
+        summary_rebuild_modules,
+        stdlib_snapshot,
+        metadata,
+    )
+}
+
+#[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "incremental summary reuse threads build context and summary state together"
+)]
+pub fn semantic_incremental_state_with_reused_summaries_and_options(
+    graph: &ModuleGraph,
+    bindings: &[BindingTable],
+    options: CheckerOptions,
+    source_overrides: Option<&BTreeMap<String, String>>,
+    previous_summaries: &[PublicSummary],
+    summary_rebuild_modules: &BTreeSet<String>,
+    stdlib_snapshot: Option<String>,
+    metadata: SnapshotMetadata,
+) -> IncrementalState {
     let bound_surface_facts = binding_surface_facts_by_module(bindings);
-    let context = CheckerContext::new_with_bound_surface_facts(
+    let context = CheckerContext::new_with_bound_surface_facts_and_options(
         &graph.nodes,
-        import_fallback,
         source_overrides,
         Some(&bound_surface_facts),
+        options,
     );
     let previous_by_module = previous_summaries
         .iter()

@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn check_warns_when_pure_function_uses_effectful_result() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def effect_io_net[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
@@ -33,7 +33,7 @@ fn check_warns_when_pure_function_uses_effectful_result() {
 
 #[test]
 fn check_warns_when_pure_function_uses_nested_effectful_argument() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def effect_io_net[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
@@ -64,7 +64,7 @@ fn check_warns_when_pure_function_uses_nested_effectful_argument() {
 
 #[test]
 fn check_warns_when_pure_function_uses_effectful_control_flow_expression() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def effect(label: str):\n",
@@ -106,7 +106,7 @@ fn check_warns_when_pure_function_uses_effectful_control_flow_expression() {
 
 #[test]
 fn check_warns_for_explicit_effect_decorator_surface() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def effect(label: str):\n",
@@ -137,7 +137,7 @@ fn check_warns_for_explicit_effect_decorator_surface() {
 
 #[test]
 fn check_allows_metadata_only_effect_decorators_without_transform_resolution() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "def effect(label: str):\n",
             "    def wrap(fn):\n",
@@ -170,7 +170,7 @@ fn check_allows_metadata_only_effect_decorators_without_transform_resolution() {
 
 #[test]
 fn check_allows_metadata_effect_decorator_mixed_with_callable_transform() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def effect(label: str):\n",
@@ -198,7 +198,7 @@ fn check_allows_metadata_effect_decorator_mixed_with_callable_transform() {
 
 #[test]
 fn check_warns_when_caller_effect_row_does_not_cover_callee() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def effect(label: str):\n",
@@ -228,7 +228,7 @@ fn check_warns_when_caller_effect_row_does_not_cover_callee() {
 
 #[test]
 fn check_accepts_when_caller_effect_row_covers_callee() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def effect(label: str):\n",
@@ -256,7 +256,7 @@ fn check_accepts_when_caller_effect_row_covers_callee() {
 
 #[test]
 fn check_warns_when_pure_function_uses_bare_effectful_call_statement() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def effect(label: str):\n",
@@ -288,7 +288,7 @@ fn check_warns_when_pure_function_uses_bare_effectful_call_statement() {
 
 #[test]
 fn check_warns_for_effectful_bare_call_statement_with_source_overrides_without_backing_file() {
-    let result = check_virtual_source_with_overrides(
+    let result = check_virtual_source_with_experimental_overrides(
         concat!(
             "from typing import Callable\n\n",
             "def effect(label: str):\n",
@@ -316,7 +316,7 @@ fn check_warns_for_effectful_bare_call_statement_with_source_overrides_without_b
 
 #[test]
 fn check_warns_for_qualified_explicit_effect_decorator_surface() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "class tpy:\n",
@@ -349,7 +349,7 @@ fn check_warns_for_qualified_explicit_effect_decorator_surface() {
 
 #[test]
 fn check_allows_unsafe_effect_inside_unsafe_capability_scope() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def effect_unsafe[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
@@ -410,7 +410,7 @@ fn semantic_incremental_summary_records_effect_rows() {
     );
     let bindings = vec![bind(&tree)];
     let graph = build(&bindings);
-    let summary = semantic_incremental_state_with_binding_metadata(
+    let summary = semantic_incremental_state_with_experimental_binding_metadata(
         &graph,
         &bindings,
         ImportFallback::Unknown,
@@ -473,7 +473,7 @@ fn semantic_incremental_summary_records_inferred_effect_rows() {
     );
     let bindings = vec![bind(&tree)];
     let graph = build(&bindings);
-    let summary = semantic_incremental_state_with_binding_metadata(
+    let summary = semantic_incremental_state_with_experimental_binding_metadata(
         &graph,
         &bindings,
         ImportFallback::Unknown,
@@ -550,7 +550,7 @@ fn check_warns_when_pure_function_calls_imported_inferred_effectful_function() {
     ];
     let bindings = trees.iter().map(bind).collect::<Vec<_>>();
     let graph = build(&bindings);
-    let result = check_with_binding_metadata(
+    let result = check_with_experimental_binding_metadata(
         &graph,
         &bindings,
         false,
@@ -574,7 +574,7 @@ fn check_warns_when_pure_function_calls_imported_inferred_effectful_function() {
 
 #[test]
 fn check_warns_when_pure_function_calls_stdlib_effect_function_import() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n",
             "from time import time\n\n",
@@ -602,7 +602,7 @@ fn check_warns_when_pure_function_calls_stdlib_effect_function_import() {
 
 #[test]
 fn check_warns_when_pure_function_calls_stdlib_effect_module_method() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n",
             "import random\n\n",
@@ -677,7 +677,7 @@ fn check_warns_when_pure_function_calls_imported_effectful_function() {
     ];
     let bindings = trees.iter().map(bind).collect::<Vec<_>>();
     let graph = build(&bindings);
-    let result = check_with_binding_metadata(
+    let result = check_with_experimental_binding_metadata(
         &graph,
         &bindings,
         false,
@@ -747,7 +747,7 @@ fn check_warns_when_pure_function_calls_imported_effectful_method() {
     ];
     let bindings = trees.iter().map(bind).collect::<Vec<_>>();
     let graph = build(&bindings);
-    let result = check_with_binding_metadata(
+    let result = check_with_experimental_binding_metadata(
         &graph,
         &bindings,
         false,
@@ -808,7 +808,7 @@ fn check_warns_for_imported_ignored_must_use_result() {
     ];
     let bindings = trees.iter().map(bind).collect::<Vec<_>>();
     let graph = build(&bindings);
-    let result = check_with_binding_metadata(
+    let result = check_with_experimental_binding_metadata(
         &graph,
         &bindings,
         false,
@@ -871,7 +871,7 @@ fn check_warns_for_imported_unclosed_lifecycle_resource() {
     ];
     let bindings = trees.iter().map(bind).collect::<Vec<_>>();
     let graph = build(&bindings);
-    let result = check_with_binding_metadata(
+    let result = check_with_experimental_binding_metadata(
         &graph,
         &bindings,
         false,
@@ -893,7 +893,7 @@ fn check_warns_for_imported_unclosed_lifecycle_resource() {
 
 #[test]
 fn check_uses_framework_adapter_effect_capabilities() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def framework_transform(**kwargs):\n",
@@ -928,7 +928,7 @@ fn check_uses_framework_adapter_effect_capabilities() {
 
 #[test]
 fn check_warns_when_pure_function_calls_effectful_method_result() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def effect(label: str):\n",
@@ -962,7 +962,7 @@ fn check_warns_when_pure_function_calls_effectful_method_result() {
 
 #[test]
 fn check_warns_when_pure_function_uses_bare_effectful_method_statement() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def effect(label: str):\n",
@@ -995,7 +995,7 @@ fn check_warns_when_pure_function_uses_bare_effectful_method_statement() {
 
 #[test]
 fn check_does_not_confuse_effectful_method_with_same_named_function() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "from typing import Callable\n\n",
             "def effect(label: str):\n",

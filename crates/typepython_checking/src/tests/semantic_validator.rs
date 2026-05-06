@@ -1,8 +1,37 @@
 use super::*;
 
+fn check_validator_source(source: &str) -> crate::CheckResult {
+    check_temp_typepython_source_with_checker_options(
+        source,
+        ParseOptions::default(),
+        crate::CheckerOptions::default().with_experimental_features(false, false, true),
+    )
+}
+
+#[test]
+fn check_validator_witness_is_disabled_without_experimental_acceptance() {
+    let result = check_temp_typepython_source(concat!(
+        "class User:\n",
+        "    name: str\n",
+        "    def greet(self) -> str:\n",
+        "        return self.name\n\n",
+        "from typing import Literal\n\n",
+        "def validate_user(value: unknown) -> ValidatorWitness[User, Literal[\"trusted\"]]:\n",
+        "    ...\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if validate_user(value):\n",
+        "        return value.greet()\n",
+        "    return \"\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(!rendered.contains("validator witness"), "{rendered}");
+}
+
 #[test]
 fn check_validator_witness_narrows_unknown_in_true_branch() {
-    let result = check_temp_typepython_source(concat!(
+    let result = check_validator_source(concat!(
         "class User:\n",
         "    name: str\n",
         "    def greet(self) -> str:\n",
@@ -21,7 +50,7 @@ fn check_validator_witness_narrows_unknown_in_true_branch() {
 
 #[test]
 fn check_trust_metadata_decorator_produces_generated_witness() {
-    let result = check_temp_typepython_source(concat!(
+    let result = check_validator_source(concat!(
         "from typing import Callable\n\n",
         "class User:\n",
         "    name: str\n",
@@ -45,7 +74,7 @@ fn check_trust_metadata_decorator_produces_generated_witness() {
 
 #[test]
 fn check_trust_metadata_decorator_uses_source_overrides_without_backing_file() {
-    let result = check_virtual_source_with_overrides(
+    let result = check_virtual_source_with_experimental_overrides(
         concat!(
             "from typing import Callable\n\n",
             "class User:\n",
@@ -123,7 +152,7 @@ fn check_imported_trust_metadata_validator_produces_witness() {
     ];
     let bindings = trees.iter().map(bind).collect::<Vec<_>>();
     let graph = build(&bindings);
-    let result = check_with_binding_metadata(
+    let result = check_with_experimental_binding_metadata(
         &graph,
         &bindings,
         false,
@@ -142,7 +171,7 @@ fn check_imported_trust_metadata_validator_produces_witness() {
 
 #[test]
 fn check_adapter_declared_validator_witness_trusts_one_arg_witness() {
-    let result = check_temp_typepython_source(concat!(
+    let result = check_validator_source(concat!(
         "class User:\n",
         "    name: str\n",
         "    def greet(self) -> str:\n",
@@ -168,7 +197,7 @@ fn check_adapter_declared_validator_witness_trusts_one_arg_witness() {
 
 #[test]
 fn check_adapter_declared_validator_witness_uses_source_overrides_without_backing_file() {
-    let result = check_virtual_source_with_overrides(
+    let result = check_virtual_source_with_experimental_overrides(
         concat!(
             "class User:\n",
             "    name: str\n",
@@ -199,7 +228,7 @@ fn check_adapter_declared_validator_witness_uses_source_overrides_without_backin
 
 #[test]
 fn check_validator_witness_does_not_narrow_after_reassignment() {
-    let result = check_temp_typepython_source(concat!(
+    let result = check_validator_source(concat!(
         "class User:\n",
         "    name: str\n",
         "    def greet(self) -> str:\n",
@@ -221,7 +250,7 @@ fn check_validator_witness_does_not_narrow_after_reassignment() {
 
 #[test]
 fn check_validator_witness_does_not_narrow_after_subscript_mutation() {
-    let result = check_temp_typepython_source(concat!(
+    let result = check_validator_source(concat!(
         "class User:\n",
         "    name: str\n",
         "    def greet(self) -> str:\n",
@@ -243,7 +272,7 @@ fn check_validator_witness_does_not_narrow_after_subscript_mutation() {
 
 #[test]
 fn check_validator_witness_does_not_narrow_after_attribute_mutation() {
-    let result = check_temp_typepython_source(concat!(
+    let result = check_validator_source(concat!(
         "class User:\n",
         "    name: str\n",
         "    def greet(self) -> str:\n",
@@ -265,7 +294,7 @@ fn check_validator_witness_does_not_narrow_after_attribute_mutation() {
 
 #[test]
 fn check_validator_witness_does_not_narrow_after_alias_mutation() {
-    let result = check_temp_typepython_source(concat!(
+    let result = check_validator_source(concat!(
         "class User:\n",
         "    name: str\n",
         "    def greet(self) -> str:\n",
@@ -288,7 +317,7 @@ fn check_validator_witness_does_not_narrow_after_alias_mutation() {
 
 #[test]
 fn check_validator_witness_without_trust_metadata_does_not_narrow() {
-    let result = check_temp_typepython_source_with_check_options(
+    let result = check_temp_typepython_source_with_experimental_check_options(
         concat!(
             "class User:\n",
             "    name: str\n",

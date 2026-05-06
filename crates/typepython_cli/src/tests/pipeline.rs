@@ -459,8 +459,11 @@ fn run_with_pipeline_check_persists_effect_metadata_sidecar() {
     let project_dir = temp_project_dir("run_with_pipeline_check_persists_effect_metadata_sidecar");
     let result = {
         fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
-        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
-            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[experimental]\naccepted_features = [\"effect_rows\"]\n",
+        )
+        .expect("test setup should succeed");
         fs::write(
             project_dir.join("src/app.tpy"),
             concat!(
@@ -495,6 +498,45 @@ fn run_with_pipeline_check_persists_effect_metadata_sidecar() {
     assert!(rendered.contains("\"name\": \"fetch\""), "{rendered}");
     assert!(rendered.contains("\"effects\""), "{rendered}");
     assert!(rendered.contains("io.net"), "{rendered}");
+}
+
+#[test]
+fn run_pipeline_suppresses_effect_rows_without_experimental_acceptance() {
+    let project_dir =
+        temp_project_dir("run_pipeline_suppresses_effect_rows_without_experimental_acceptance");
+    let rendered = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[typing]\nstrict = true\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.tpy"),
+            concat!(
+                "from typing import Callable\n\n",
+                "def effect(label: str):\n",
+                "    def wrap[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+                "        return fn\n",
+                "    return wrap\n\n",
+                "def effect_pure[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+                "    return fn\n\n",
+                "@effect(\"io.net\")\n",
+                "def fetch() -> str:\n",
+                "    return \"ok\"\n\n",
+                "@effect_pure\n",
+                "def parse() -> str:\n",
+                "    return fetch()\n",
+            ),
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        run_pipeline(&config).expect("check should run to completion").diagnostics.as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(!rendered.contains("TPY4026"), "{rendered}");
+    assert!(!rendered.contains("effect row"), "{rendered}");
 }
 
 #[test]

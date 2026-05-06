@@ -55,12 +55,12 @@ def load_user() -> Tainted[str, "html"]:
 
 
 @sanitizer
-def sanitize_user(raw: Tainted[str, "html"]) -> str:
+def sanitize_user(raw: unknown) -> str:
     return "safe"
 
 
 @sink
-def render_user(value: str) -> None:
+def render_user(value: unknown) -> None:
     ...
 
 
