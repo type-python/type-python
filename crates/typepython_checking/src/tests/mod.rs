@@ -331,6 +331,50 @@ pub(super) fn check_temp_typepython_source_with_checker_options(
     result
 }
 
+pub(super) fn check_two_module_typepython_sources_with_checker_options(
+    lib_source: &str,
+    app_source: &str,
+    checker_options: crate::CheckerOptions,
+) -> crate::CheckResult {
+    let root = create_temp_typepython_root();
+    let lib_path = root.join("lib.tpy");
+    let app_path = root.join("app.tpy");
+    fs::write(&lib_path, lib_source).expect("temp lib source should be written");
+    fs::write(&app_path, app_source).expect("temp app source should be written");
+
+    let trees = [
+        parse_with_options(
+            SourceFile {
+                path: lib_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("lib"),
+                text: lib_source.to_owned(),
+            },
+            ParseOptions::default(),
+        ),
+        parse_with_options(
+            SourceFile {
+                path: app_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app"),
+                text: app_source.to_owned(),
+            },
+            ParseOptions::default(),
+        ),
+    ];
+    let bindings = trees.iter().map(bind).collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let result = crate::check_with_binding_metadata_and_options(
+        &normalize_test_graph(&graph),
+        &bindings,
+        checker_options,
+        None,
+    );
+
+    let _ = fs::remove_dir_all(&root);
+    result
+}
+
 pub(super) fn check_temp_typepython_source_with_check_options(
     source_text: &str,
     options: ParseOptions,

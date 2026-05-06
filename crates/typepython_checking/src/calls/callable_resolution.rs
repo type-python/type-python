@@ -306,7 +306,18 @@ pub(super) fn resolve_direct_overload_selection<'a>(
 ) -> ResolvedOverloadSelection<'a> {
     let attempts = overloads
         .iter()
-        .map(|declaration| (*declaration, resolve_direct_call_candidate_detailed(node, nodes, declaration, call)))
+        .map(|declaration| {
+            (
+                *declaration,
+                resolve_direct_call_candidate_detailed_with_options(
+                    node,
+                    nodes,
+                    declaration,
+                    call,
+                    options,
+                ),
+            )
+        })
         .collect::<Vec<_>>();
     resolve_overload_selection_from_attempts_with_options(node, nodes, call, attempts, options)
 }

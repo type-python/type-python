@@ -152,6 +152,7 @@ pub(super) fn resolve_imported_module_method_return_semantic_type(
     current_line: usize,
     owner_name: &str,
     method_name: &str,
+    options: AssignabilityOptions,
 ) -> Option<SemanticType> {
     let module_node = resolve_imported_module_target(node, nodes, owner_name)?;
     let methods = module_node
@@ -182,7 +183,7 @@ pub(super) fn resolve_imported_module_method_return_semantic_type(
                 nodes,
                 &call,
                 &overloads,
-                AssignabilityOptions::default(),
+                options,
             ) {
                 ResolvedOverloadSelection::Selected(candidate) => candidate.return_type,
                 _ => None,
@@ -195,7 +196,15 @@ pub(super) fn resolve_imported_module_method_return_semantic_type(
                     && call.line == current_line
             })?;
             let call = imported_module_method_call_site(module_node, call);
-            resolve_direct_call_candidate(node, nodes, *methods.first()?, &call)?.return_type
+            resolve_direct_call_candidate_detailed_with_options(
+                node,
+                nodes,
+                *methods.first()?,
+                &call,
+                options,
+            )
+            .ok()?
+            .return_type
         };
     method_return.map(|return_type| rewrite_imported_typing_semantic_type(node, &return_type))
 }
@@ -217,6 +226,7 @@ pub(super) fn imported_module_method_call_site(
 }
 
 pub(super) fn imported_module_method_call_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::MethodCallSite,
@@ -264,22 +274,29 @@ pub(super) fn imported_module_method_call_diagnostics(
             nodes,
             &direct_call,
             &overloads,
-            AssignabilityOptions::default(),
+            context.assignability_options(),
         ) {
             ResolvedOverloadSelection::Selected(candidate) => {
                 let signature = candidate.signature_sites;
-                if let Some(diagnostic) =
-                    direct_source_function_arity_diagnostic(node, nodes, &direct_call, &signature)
+                if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
+                    context,
+                    node,
+                    nodes,
+                    &direct_call,
+                    &signature,
+                )
                 {
                     diagnostics.push(diagnostic);
                 }
-                diagnostics.extend(direct_source_function_keyword_diagnostics(
+                diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
+                    context,
                     node,
                     nodes,
                     &direct_call,
                     &signature,
                 ));
-                diagnostics.extend(direct_source_function_type_diagnostics(
+                diagnostics.extend(direct_source_function_type_diagnostics_with_context(
+                    context,
                     node,
                     nodes,
                     &direct_call,
@@ -326,11 +343,12 @@ pub(super) fn imported_module_method_call_diagnostics(
         return Some(diagnostics);
     }
 
-    let signature = match resolve_direct_call_candidate_detailed(
+    let signature = match resolve_direct_call_candidate_detailed_with_options(
         node,
         nodes,
         callable_candidates[0],
         &direct_call,
+        context.assignability_options(),
     ) {
         Ok(candidate) => candidate.signature_sites,
         Err(failure) if declaration_has_runtime_generic_paramlist(callable_candidates[0]) => {
@@ -344,18 +362,25 @@ pub(super) fn imported_module_method_call_diagnostics(
         }
         Err(_) => declaration_signature_sites(callable_candidates[0]),
     };
-    if let Some(diagnostic) =
-        direct_source_function_arity_diagnostic(node, nodes, &direct_call, &signature)
+    if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
+        context,
+        node,
+        nodes,
+        &direct_call,
+        &signature,
+    )
     {
         diagnostics.push(diagnostic);
     }
-    diagnostics.extend(direct_source_function_keyword_diagnostics(
+    diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
+        context,
         node,
         nodes,
         &direct_call,
         &signature,
     ));
-    diagnostics.extend(direct_source_function_type_diagnostics(
+    diagnostics.extend(direct_source_function_type_diagnostics_with_context(
+        context,
         node,
         nodes,
         &direct_call,

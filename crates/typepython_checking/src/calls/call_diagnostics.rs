@@ -283,16 +283,6 @@ pub(super) fn direct_call_keyword_diagnostics(
     diagnostics
 }
 
-pub(super) fn direct_source_function_arity_diagnostic(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    call: &typepython_binding::CallSite,
-    signature: &[typepython_syntax::DirectFunctionParamSite],
-) -> Option<Diagnostic> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
-    direct_source_function_arity_diagnostic_with_context(&context, node, nodes, call, signature)
-}
-
 pub(super) fn direct_source_function_arity_diagnostic_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -382,16 +372,6 @@ pub(super) fn direct_source_function_arity_diagnostic_with_context(
             ),
         )
     })
-}
-
-pub(super) fn direct_source_function_keyword_diagnostics(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    call: &typepython_binding::CallSite,
-    signature: &[typepython_syntax::DirectFunctionParamSite],
-) -> Vec<Diagnostic> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
-    direct_source_function_keyword_diagnostics_with_context(&context, node, nodes, call, signature)
 }
 
 pub(super) fn direct_source_function_keyword_diagnostics_with_context(
@@ -611,16 +591,6 @@ pub(super) fn keyword_duplicates_positional_arguments(
     call.keyword_names.iter().any(|keyword| {
         positional_param_names.iter().take(call.arg_count).any(|name| *name == keyword.as_str())
     })
-}
-
-pub(super) fn direct_source_function_type_diagnostics(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    call: &typepython_binding::CallSite,
-    signature: &[typepython_syntax::DirectFunctionParamSite],
-) -> Vec<Diagnostic> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
-    direct_source_function_type_diagnostics_with_context(&context, node, nodes, call, signature)
 }
 
 pub(super) fn direct_source_function_type_diagnostics_with_context(

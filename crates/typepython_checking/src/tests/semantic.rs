@@ -122,6 +122,17 @@ fn check_accepts_none_call_argument_when_strict_nulls_is_disabled() {
 }
 
 #[test]
+fn check_accepts_none_module_member_call_argument_when_strict_nulls_is_disabled() {
+    let result = check_two_module_typepython_sources_with_checker_options(
+        "def takes(value: int) -> None:\n    pass\n",
+        "import lib\n\nlib.takes(None)\n",
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_none_return_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "def build() -> int:\n    return None\n",

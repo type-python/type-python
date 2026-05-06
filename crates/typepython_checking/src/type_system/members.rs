@@ -168,6 +168,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             current_line,
             owner_name,
             method_name,
+            options,
         )
     {
         return Some(return_type);

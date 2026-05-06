@@ -78,6 +78,20 @@ fn check_rejects_tainted_value_at_plain_sink() {
 }
 
 #[test]
+fn check_rejects_tainted_module_member_call_argument_when_taint_is_enabled() {
+    let result = check_two_module_typepython_sources_with_checker_options(
+        "def consume(value: str) -> None:\n    ...\n",
+        concat!("import lib\n\n", "raw: Tainted[str, \"html\"]\n", "lib.consume(raw)\n",),
+        crate::CheckerOptions { experimental_taint: true, ..crate::CheckerOptions::default() },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("call to `lib.consume`"), "{rendered}");
+    assert!(rendered.contains("Tainted[str, \"html\"]"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_tainted_source_after_sanitizer_before_sink() {
     let result = check_temp_typepython_source_with_taint(concat!(
         "def request_body() -> Tainted[str, \"html\"]:\n",

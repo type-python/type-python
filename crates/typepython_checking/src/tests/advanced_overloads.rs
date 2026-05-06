@@ -937,6 +937,7 @@ fn imported_module_method_return_semantic_type_stays_semantic() {
             1,
             "helpers",
             "box_value",
+            crate::AssignabilityOptions::default(),
         )
         .as_ref()
         .map(crate::diagnostic_type_text),

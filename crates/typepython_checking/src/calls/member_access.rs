@@ -211,7 +211,7 @@ pub(super) fn direct_method_call_diagnostics(
     for call in &node.method_calls {
         if !call.through_instance
             && let Some(module_diagnostics) =
-                imported_module_method_call_diagnostics(node, nodes, call)
+                imported_module_method_call_diagnostics(context, node, nodes, call)
         {
             diagnostics.extend(module_diagnostics);
             continue;
