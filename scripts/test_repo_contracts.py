@@ -170,9 +170,12 @@ class RepoContractsTests(unittest.TestCase):
         pypi_readme = read_text("README-PyPI.md")
         beta = read_text("docs/beta-readiness.md")
         feature_status = read_text("docs/feature-status.md")
+        experimental = read_text("docs/experimental-features.md")
         conformance = read_text("docs/conformance-report.md")
 
         self.assertIn("[TypePython Feature Status](feature-status.md)", beta)
+        self.assertIn("[Experimental Feature Registry](experimental-features.md)", beta)
+        self.assertIn("[Experimental Feature Registry](experimental-features.md)", feature_status)
         for status in (
             "Stable Core v1",
             "Supported DX",
@@ -199,6 +202,24 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("Core checker semantics", readme)
         self.assertIn("Core checker semantics", pypi_readme)
         self.assertIn("author-time checks", pypi_readme)
+
+        for feature_id in (
+            "runtime_validators",
+            "conditional_returns",
+            "infer_passthrough",
+            "sync_async_dual_emit",
+            "shape_transforms",
+            "framework_adapters",
+            "effect_rows",
+            "taint",
+            "validator_witnesses",
+            "notebook_ingestion",
+        ):
+            self.assertIn(f"`{feature_id}`", experimental)
+        self.assertIn("disabled by default", experimental)
+        self.assertIn("explicit opt-in", experimental)
+        self.assertIn("No primary README differentiator", experimental)
+        self.assertIn("Promotion Checklist", experimental)
 
     def test_author_time_semantics_are_not_marketed_as_external_guarantees(self) -> None:
         readme = read_text("README.md")

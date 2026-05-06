@@ -3,8 +3,9 @@
 TypePython's Beta claim is intentionally narrow: **Core v1 Beta**. The package may include Supported
 DX, Experimental opt-in, and Roadmap / prototype capabilities, but those surfaces are not part of the
 Beta compatibility promise until they are promoted explicitly. The canonical status vocabulary lives
-in [TypePython Feature Status](feature-status.md). Editor and workflow maturity is tracked separately
-in [DX and LSP Stability](dx-stability.md).
+in [TypePython Feature Status](feature-status.md). Shipped-but-unstable feature gates are tracked in
+the [Experimental Feature Registry](experimental-features.md). Editor and workflow maturity is
+tracked separately in [DX and LSP Stability](dx-stability.md).
 
 ## Stable Core v1 During Beta
 
@@ -43,7 +44,8 @@ without a Beta-line compatibility guarantee:
 ## Experimental Opt-In
 
 The following features are outside Core v1 conformance and must require explicit opt-in before they
-can affect an ordinary project:
+can affect an ordinary project. Their feature ids, current gates, and promotion requirements are
+canonical in the [Experimental Feature Registry](experimental-features.md):
 
 - Runtime validators and boundary-validator adapter delegation.
 - Conditional returns, pass-through `.py` inference, sync/async dual emit, and other Experimental v1

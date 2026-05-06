@@ -2,7 +2,8 @@
 
 TypePython ships several surfaces in one package, but not every shipped surface has the same
 compatibility promise. User-facing claims, conformance reports, release notes, and roadmap examples
-should use the status vocabulary below.
+should use the status vocabulary below. Shipped-but-unstable features are tracked in the
+[Experimental Feature Registry](experimental-features.md).
 
 ## Status Vocabulary
 
@@ -38,7 +39,9 @@ compatibility-stable:
 
 ## Experimental Opt-In Examples
 
-Experimental features must be disabled by default for ordinary Core v1 builds:
+Experimental features must be disabled by default for ordinary Core v1 builds. The canonical feature
+ids, gates, and promotion requirements live in the
+[Experimental Feature Registry](experimental-features.md):
 
 - runtime validator emission
 - conditional return syntax
@@ -58,6 +61,6 @@ claims:
 - notebook ingestion
 - future type-level algebra and shape algebra work
 
-When a roadmap or prototype item graduates, the promoting change must update this document,
-`docs/beta-readiness.md`, the conformance feature matrix when applicable, and any README claims in
-the same commit series.
+When a roadmap, prototype, or experimental item graduates, the promoting change must update this
+document, `docs/experimental-features.md`, `docs/beta-readiness.md`, the conformance feature matrix
+when applicable, and any README claims in the same commit series.
