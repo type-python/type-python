@@ -1,7 +1,7 @@
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
-const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
+const { LanguageClient, TransportKind, Trace } = require("vscode-languageclient/node");
 
 let client;
 
@@ -53,7 +53,14 @@ function binaryPath() {
 
 function serverTrace() {
   const configured = extensionConfig().get("trace.server");
-  return configured || "off";
+  switch (configured) {
+    case "messages":
+      return Trace.Messages;
+    case "verbose":
+      return Trace.Verbose;
+    default:
+      return Trace.Off;
+  }
 }
 
 function buildClient(context) {

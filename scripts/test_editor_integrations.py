@@ -53,6 +53,10 @@ class EditorIntegrationTests(unittest.TestCase):
 
         self.assertIn("LanguageClient", extension)
         self.assertIn("TransportKind.stdio", extension)
+        self.assertIn("Trace", extension)
+        self.assertIn("Trace.Off", extension)
+        self.assertIn("Trace.Messages", extension)
+        self.assertIn("Trace.Verbose", extension)
         self.assertIn('args: ["lsp", "--project", workspaceProjectPath()]', extension)
         self.assertIn("TYPEPYTHON_BIN", extension)
         self.assertIn("typepython.restartServer", extension)
