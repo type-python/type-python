@@ -1008,7 +1008,7 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
 ) -> Vec<Diagnostic> {
     let unpack_extra_items_type = unpack_shape
         .and_then(|shape| shape.extra_items.as_ref())
-        .map(|extra| lower_type_text_or_name(&extra.value_type));
+        .and_then(TypedDictExtraItemsShape::semantic_value_type);
     let mut diagnostics = arg_types
         .iter()
         .take(param_types.len())

@@ -414,6 +414,7 @@ pub(super) fn direct_expr_metadata_from_assignment_site(
 pub(crate) struct TypedDictFieldShape {
     pub(crate) value_type: String,
     pub(crate) value_type_expr: Option<typepython_syntax::TypeExpr>,
+    pub(crate) semantic_type: Option<SemanticType>,
     pub(crate) required: bool,
     pub(crate) readonly: bool,
 }
@@ -422,6 +423,7 @@ pub(crate) struct TypedDictFieldShape {
 pub(crate) struct TypedDictExtraItemsShape {
     pub(crate) value_type: String,
     pub(crate) value_type_expr: Option<typepython_syntax::TypeExpr>,
+    pub(crate) semantic_type: Option<SemanticType>,
     pub(crate) readonly: bool,
 }
 
@@ -439,6 +441,7 @@ pub(crate) struct DataclassTransformFieldShape {
     pub(crate) keyword_name: String,
     pub(crate) annotation: String,
     pub(crate) annotation_expr: Option<typepython_syntax::TypeExpr>,
+    pub(crate) semantic_type: Option<SemanticType>,
     pub(crate) required: bool,
     pub(crate) kw_only: bool,
     pub(crate) frozen: bool,
@@ -497,6 +500,16 @@ pub(crate) struct Shape {
     pub(crate) extra_items: Option<ShapeExtraItems>,
 }
 
+pub(crate) fn semantic_type_from_type_parts(
+    rendered_type: &str,
+    parsed_type: &Option<typepython_syntax::TypeExpr>,
+) -> Option<SemanticType> {
+    parsed_type
+        .clone()
+        .map(lower_type_expr)
+        .or_else(|| (!rendered_type.is_empty()).then(|| lower_type_text_or_name(rendered_type)))
+}
+
 impl TypedDictFieldShape {
     #[must_use]
     pub(crate) fn rendered_value_type(&self) -> String {
@@ -508,9 +521,9 @@ impl TypedDictFieldShape {
 
     #[must_use]
     pub(crate) fn semantic_value_type(&self) -> Option<SemanticType> {
-        self.value_type_expr.clone().map(lower_type_expr).or_else(|| {
-            (!self.value_type.is_empty()).then(|| lower_type_text_or_name(&self.value_type))
-        })
+        self.semantic_type
+            .clone()
+            .or_else(|| semantic_type_from_type_parts(&self.value_type, &self.value_type_expr))
     }
 }
 
@@ -525,9 +538,9 @@ impl TypedDictExtraItemsShape {
 
     #[must_use]
     pub(crate) fn semantic_value_type(&self) -> Option<SemanticType> {
-        self.value_type_expr.clone().map(lower_type_expr).or_else(|| {
-            (!self.value_type.is_empty()).then(|| lower_type_text_or_name(&self.value_type))
-        })
+        self.semantic_type
+            .clone()
+            .or_else(|| semantic_type_from_type_parts(&self.value_type, &self.value_type_expr))
     }
 }
 
@@ -539,15 +552,16 @@ impl TypedDictShape {
                 .fields
                 .iter()
                 .map(|field| {
+                    let semantic_type = field
+                        .semantic_type
+                        .clone()
+                        .unwrap_or_else(|| lower_type_text_or_name("object"));
                     (
                         field.public_alias.clone(),
                         TypedDictFieldShape {
-                            value_type: field
-                                .semantic_type
-                                .as_ref()
-                                .map(render_semantic_type)
-                                .unwrap_or_else(|| String::from("object")),
+                            value_type: render_semantic_type(&semantic_type),
                             value_type_expr: None,
+                            semantic_type: Some(semantic_type),
                             required: field.required,
                             readonly: field.readonly,
                         },
@@ -555,14 +569,17 @@ impl TypedDictShape {
                 })
                 .collect(),
             closed: shape.closed,
-            extra_items: shape.extra_items.as_ref().map(|extra| TypedDictExtraItemsShape {
-                value_type: extra
+            extra_items: shape.extra_items.as_ref().map(|extra| {
+                let semantic_type = extra
                     .semantic_type
-                    .as_ref()
-                    .map(render_semantic_type)
-                    .unwrap_or_else(|| String::from("object")),
-                value_type_expr: None,
-                readonly: extra.readonly,
+                    .clone()
+                    .unwrap_or_else(|| lower_type_text_or_name("object"));
+                TypedDictExtraItemsShape {
+                    value_type: render_semantic_type(&semantic_type),
+                    value_type_expr: None,
+                    semantic_type: Some(semantic_type),
+                    readonly: extra.readonly,
+                }
             }),
         }
     }
@@ -579,9 +596,9 @@ impl DataclassTransformFieldShape {
 
     #[must_use]
     pub(crate) fn semantic_annotation(&self) -> Option<SemanticType> {
-        self.annotation_expr.clone().map(lower_type_expr).or_else(|| {
-            (!self.annotation.is_empty()).then(|| lower_type_text_or_name(&self.annotation))
-        })
+        self.semantic_type
+            .clone()
+            .or_else(|| semantic_type_from_type_parts(&self.annotation, &self.annotation_expr))
     }
 }
 
@@ -798,13 +815,6 @@ pub(super) enum TypedDictFieldShapeRef<'a> {
 }
 
 impl<'a> TypedDictFieldShapeRef<'a> {
-    pub(super) fn value_type(&self) -> &str {
-        match self {
-            Self::Known(field) => &field.value_type,
-            Self::Extra(field) => &field.value_type,
-        }
-    }
-
     pub(super) fn rendered_value_type(&self) -> String {
         match self {
             Self::Known(field) => field.rendered_value_type(),
@@ -947,7 +957,9 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
                     continue;
                 };
 
-                let expected_type = lower_type_text_or_name(target_field.value_type());
+                let Some(expected_type) = target_field.semantic_value_type() else {
+                    continue;
+                };
                 let Some(actual_type) = field.semantic_value_type() else {
                     continue;
                 };
@@ -1030,7 +1042,9 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
             line,
             &entry.value,
         ) {
-            let expected_type = lower_type_text_or_name(target_field.value_type());
+            let Some(expected_type) = target_field.semantic_value_type() else {
+                continue;
+            };
             if !context.semantic_type_is_assignable(node, &expected_type, &actual_type) {
                 diagnostics.push(typed_dict_literal_diagnostic(
                     node,

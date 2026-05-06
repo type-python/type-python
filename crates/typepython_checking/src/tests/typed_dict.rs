@@ -130,6 +130,7 @@ fn shared_shape_can_wrap_dataclass_transform_fields() {
                 keyword_name: String::from("display_name"),
                 annotation: String::from("str"),
                 annotation_expr: typepython_syntax::TypeExpr::parse("str"),
+                semantic_type: Some(crate::lower_type_text_or_name("str")),
                 required: true,
                 kw_only: false,
                 frozen: false,

@@ -108,11 +108,15 @@ pub(super) fn resolve_plain_dataclass_class_shape_from_decl_with_context(
             if recognized_field_specifier && field.field_specifier_init == Some(false) {
                 return None;
             }
+            let annotation = field.rendered_annotation();
+            let annotation_expr = field.annotation_expr.clone();
+            let semantic_type = semantic_type_from_type_parts(&annotation, &annotation_expr);
             Some(DataclassTransformFieldShape {
                 name: field.name.clone(),
                 keyword_name: field.name.clone(),
-                annotation: field.rendered_annotation(),
-                annotation_expr: field.annotation_expr.clone(),
+                annotation,
+                annotation_expr,
+                semantic_type,
                 required: if recognized_field_specifier {
                     !(field.field_specifier_has_default
                         || field.field_specifier_has_default_factory)
@@ -420,6 +424,9 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
             !field.has_default
         };
         let frozen = supports_readonly && field.field_specifier_frozen.unwrap_or(false);
+        let annotation = field.rendered_annotation();
+        let annotation_expr = field.annotation_expr.clone();
+        let semantic_type = semantic_type_from_type_parts(&annotation, &annotation_expr);
         let synthesized = DataclassTransformFieldShape {
             name: field.name.clone(),
             keyword_name: if supports_aliases {
@@ -427,8 +434,9 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
             } else {
                 field.name.clone()
             },
-            annotation: field.rendered_annotation(),
-            annotation_expr: field.annotation_expr.clone(),
+            annotation,
+            annotation_expr,
+            semantic_type,
             required,
             kw_only: if supports_required_optional {
                 field.field_specifier_kw_only.unwrap_or(false)
@@ -606,11 +614,15 @@ pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
         } else {
             metadata.kw_only_default
         };
+        let annotation = field.rendered_annotation();
+        let annotation_expr = field.annotation_expr.clone();
+        let semantic_type = semantic_type_from_type_parts(&annotation, &annotation_expr);
         let synthesized = DataclassTransformFieldShape {
             name: field.name.clone(),
             keyword_name: field.field_specifier_alias.clone().unwrap_or_else(|| field.name.clone()),
-            annotation: field.rendered_annotation(),
-            annotation_expr: field.annotation_expr.clone(),
+            annotation,
+            annotation_expr,
+            semantic_type,
             required,
             kw_only,
             frozen: false,

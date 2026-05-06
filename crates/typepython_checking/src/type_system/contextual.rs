@@ -582,7 +582,8 @@ pub(super) fn parse_typed_dict_extra_items(
     }
 
     let value_type_expr = typepython_syntax::TypeExpr::parse(&value_type);
-    Some(TypedDictExtraItemsShape { value_type, value_type_expr, readonly })
+    let semantic_type = semantic_type_from_type_parts(&value_type, &value_type_expr);
+    Some(TypedDictExtraItemsShape { value_type, value_type_expr, semantic_type, readonly })
 }
 
 pub(super) fn parse_typed_dict_extra_items_expr(
@@ -605,7 +606,8 @@ fn parse_typed_dict_extra_items_from_rendered(
     }
 
     let value_type_expr = typepython_syntax::TypeExpr::parse(&value_type);
-    Some(TypedDictExtraItemsShape { value_type, value_type_expr, readonly })
+    let semantic_type = semantic_type_from_type_parts(&value_type, &value_type_expr);
+    Some(TypedDictExtraItemsShape { value_type, value_type_expr, semantic_type, readonly })
 }
 
 pub(super) fn parse_typed_dict_field_shape(
@@ -656,7 +658,8 @@ fn parse_typed_dict_field_shape_from_rendered(
     }
 
     let value_type_expr = typepython_syntax::TypeExpr::parse(&value_type);
-    TypedDictFieldShape { value_type, value_type_expr, required, readonly }
+    let semantic_type = semantic_type_from_type_parts(&value_type, &value_type_expr);
+    TypedDictFieldShape { value_type, value_type_expr, semantic_type, required, readonly }
 }
 
 pub(super) fn callable_assignment_result(
