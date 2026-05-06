@@ -200,6 +200,52 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("Core checker semantics", pypi_readme)
         self.assertIn("author-time checks", pypi_readme)
 
+    def test_author_time_semantics_are_not_marketed_as_external_guarantees(self) -> None:
+        readme = read_text("README.md")
+        pypi_readme = read_text("README-PyPI.md")
+        interop = read_text("docs/interop.md")
+        beta = read_text("docs/beta-readiness.md")
+        feature_status = read_text("docs/feature-status.md")
+        author_time = read_text("docs/author-time-semantics.md")
+
+        for text in (readme, pypi_readme):
+            normalized = " ".join(text.split())
+            self.assertIn("author-time TypeScript-class ergonomics", normalized)
+            self.assertIn("emitted artifacts remain standard Python", normalized)
+            self.assertIn(
+                "do not transfer every TypePython-only constraint to downstream checkers",
+                normalized,
+            )
+            self.assertIn("No required per-checker plugin for emitted output", normalized)
+            self.assertIn("TypePython `.tpy` authoring", normalized)
+            self.assertIn("external consumers do not automatically inherit", normalized)
+            self.assertIn("TypePython-only", normalized)
+            self.assertNotIn("**TypePython `.tpy`**", normalized)
+            self.assertNotIn("No custom runtime. No per-checker plugin. No vendor lock-in.", normalized)
+
+        self.assertIn("TypePython-only safety applies inside the author package", readme)
+        self.assertIn(
+            "They validate the standard published surface; they do not make ordinary",
+            readme,
+        )
+        self.assertIn(
+            "They validate the standard published surface; they do not make ordinary",
+            pypi_readme,
+        )
+
+        self.assertIn("## Guarantee Levels", interop)
+        self.assertIn("TypePython-checked author package", interop)
+        self.assertIn("Default external consumer", interop)
+        self.assertIn("TypePython-aware consumer", interop)
+        self.assertIn("internal author-time safety plus portable external typing", interop)
+
+        self.assertIn("ordinary downstream consumers receive portable Python typing", beta)
+        self.assertIn("TypePython-aware sidecar, checker plugin, or consumer mode", beta)
+        self.assertIn("author-package checker semantics", feature_status)
+        self.assertIn("Public-facing claims should say", feature_status)
+        self.assertIn("## External Consumer Model", author_time)
+        self.assertIn("Standard consumers use the generated `.py`, `.pyi`, and `py.typed`", author_time)
+
     def test_conformance_beta_scope_classification_is_precise(self) -> None:
         conformance_report = load_script_module(
             "scripts/conformance_report.py",
