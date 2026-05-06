@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import json
 import pathlib
 import sys
 import tempfile
@@ -8,6 +9,9 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import downstream_checker_smoke
+
+
+SUPPORTED_TARGETS = {"3.10", "3.11", "3.12", "3.13", "3.14"}
 
 
 class DownstreamCheckerMatrixTests(unittest.TestCase):
@@ -29,6 +33,13 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
             self.assertGreater(len(case.targets), 0)
             self.assertGreater(len(case.profiles), 0)
 
+    def test_matrix_has_release_target_coverage(self) -> None:
+        matrix = downstream_checker_smoke.load_fixture_matrix()
+
+        self.assertEqual(set(matrix["basic-package"].targets), SUPPORTED_TARGETS)
+        self.assertEqual(set(matrix["standard-typing-package"].targets), SUPPORTED_TARGETS)
+        self.assertEqual(set(matrix["compat-package"].targets), SUPPORTED_TARGETS)
+
     def test_negative_fixtures_are_explicitly_marked(self) -> None:
         matrix = downstream_checker_smoke.load_fixture_matrix()
 
@@ -46,7 +57,6 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
     def test_expected_checker_disagreements_have_reason_and_expiry(self) -> None:
         matrix = downstream_checker_smoke.load_fixture_matrix()
         payload = downstream_checker_smoke.MATRIX_PATH.read_text(encoding="utf-8")
-        import json
 
         matrix_payload = json.loads(payload)
         for raw_case in matrix_payload["fixtures"]:
@@ -96,6 +106,18 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
             "basedpyright",
             downstream_checker_smoke.checker_command("basedpyright", "strict", "3.12", build_dir),
         )
+
+    def test_pyright_config_focuses_on_type_portability(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = pathlib.Path(tmp)
+            build_dir = project_dir / "checker-build"
+            build_dir.mkdir()
+
+            downstream_checker_smoke.write_pyright_config(project_dir, build_dir, "strict")
+            config = json.loads((project_dir / "pyrightconfig.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(config["typeCheckingMode"], "strict")
+            self.assertEqual(config["reportUnusedImport"], "none")
 
     def test_expected_stub_fragments_are_keyed_by_declared_target(self) -> None:
         matrix = downstream_checker_smoke.load_fixture_matrix()

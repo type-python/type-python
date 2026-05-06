@@ -248,6 +248,7 @@ def write_pyright_config(project_dir: pathlib.Path, build_dir: pathlib.Path, pro
         "reportUnknownMemberType": "none",
         "reportUnknownArgumentType": "none",
         "reportUnknownParameterType": "none",
+        "reportUnusedImport": "none",
     }
     (project_dir / "pyrightconfig.json").write_text(
         json.dumps(config, indent=2, sort_keys=True) + "\n",

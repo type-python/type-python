@@ -2,17 +2,22 @@
   "fixtures": [
     {
       "name": "basic-package",
-      "targets": ["3.10"]
+      "targets": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "rich-package",
-      "targets": ["3.10", "3.12"]
+      "targets": ["3.10", "3.12", "3.13", "3.14"]
     },
     {
       "name": "standard-typing-package",
-      "targets": ["3.10", "3.12"],
+      "targets": ["3.10", "3.11", "3.12", "3.13", "3.14"],
       "expected_stub_fragments": {
         "3.10": [
+          "class JsonRecord(TypedDict)",
+          "def consume(renderable: Renderable) -> str: ...",
+          "def merge_records(left: JsonRecord, right: JsonRecord) -> JsonRecord: ..."
+        ],
+        "3.11": [
           "class JsonRecord(TypedDict)",
           "def consume(renderable: Renderable) -> str: ...",
           "def merge_records(left: JsonRecord, right: JsonRecord) -> JsonRecord: ..."
@@ -21,12 +26,22 @@
           "class JsonRecord(TypedDict)",
           "def consume(renderable: Renderable) -> str: ...",
           "def merge_records(left: JsonRecord, right: JsonRecord) -> JsonRecord: ..."
+        ],
+        "3.13": [
+          "class JsonRecord(TypedDict)",
+          "def consume(renderable: Renderable) -> str: ...",
+          "def merge_records(left: JsonRecord, right: JsonRecord) -> JsonRecord: ..."
+        ],
+        "3.14": [
+          "class JsonRecord(TypedDict)",
+          "def consume(renderable: Renderable) -> str: ...",
+          "def merge_records(left: JsonRecord, right: JsonRecord) -> JsonRecord: ..."
         ]
       }
     },
     {
       "name": "compat-package",
-      "targets": ["3.10", "3.11", "3.12"],
+      "targets": ["3.10", "3.11", "3.12", "3.13", "3.14"],
       "expected_stub_fragments": {
         "3.10": [
           "typing_extensions.Self",
@@ -45,6 +60,18 @@
           "@typing.override",
           "typing_extensions.ReadOnly[int]",
           "typing_extensions.TypeIs[int]"
+        ],
+        "3.13": [
+          "typing.Self",
+          "@typing.override",
+          "typing.ReadOnly[int]",
+          "typing.TypeIs[int]"
+        ],
+        "3.14": [
+          "typing.Self",
+          "@typing.override",
+          "typing.ReadOnly[int]",
+          "typing.TypeIs[int]"
         ]
       }
     },
