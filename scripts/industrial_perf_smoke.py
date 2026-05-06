@@ -348,24 +348,26 @@ def is_macos_time_output_line(stripped: str) -> bool:
 def run_smoke(project: pathlib.Path, options: WorkspaceOptions, command: str) -> list[TimedStep]:
     base_command = resolve_typepython_command()
     steps = [
-        ("cold_check", typepython_invocation(base_command, command, project)),
-        ("warm_check", typepython_invocation(base_command, command, project)),
+        run_timed("cold_check", typepython_invocation(base_command, command, project), ROOT),
+        run_timed("warm_check", typepython_invocation(base_command, command, project), ROOT),
     ]
     implementation_edit(project, options.modules)
     steps.append(
-        (
+        run_timed(
             "single_file_implementation_edit",
             typepython_invocation(base_command, command, project),
+            ROOT,
         )
     )
     public_surface_edit(project)
     steps.append(
-        (
+        run_timed(
             "public_surface_edit",
             typepython_invocation(base_command, command, project),
+            ROOT,
         )
     )
-    return [run_timed(label, invocation, ROOT) for label, invocation in steps]
+    return steps
 
 
 def render_summary(payload: dict[str, Any]) -> None:

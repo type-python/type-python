@@ -69,6 +69,82 @@ class IndustrialPerfSmokeTests(unittest.TestCase):
         self.assertEqual(payload["external_stubs"], 8)
         self.assertEqual(payload["steps"][0]["peak_rss_bytes"], 1024)
 
+    def test_run_smoke_measures_each_edit_after_it_is_applied(self) -> None:
+        events: list[str] = []
+
+        def fake_resolve_typepython_command() -> list[str]:
+            return ["typepython"]
+
+        def fake_run_timed(
+            label: str,
+            command: list[str],
+            cwd: pathlib.Path,
+        ) -> industrial_perf_smoke.TimedStep:
+            events.append(f"run:{label}")
+            return industrial_perf_smoke.TimedStep(
+                label=label,
+                command=command,
+                seconds=0.0,
+                return_code=0,
+                peak_rss_bytes=None,
+                stdout_bytes=0,
+                stderr_bytes=0,
+            )
+
+        def fake_implementation_edit(project: pathlib.Path, module_count: int) -> pathlib.Path:
+            events.append("edit:implementation")
+            return project / "src" / "app" / f"mod_{module_count - 1:04}.tpy"
+
+        def fake_public_surface_edit(project: pathlib.Path) -> pathlib.Path:
+            events.append("edit:public")
+            return project / "src" / "app" / "mod_0000.tpy"
+
+        original_resolve = industrial_perf_smoke.resolve_typepython_command
+        original_run_timed = industrial_perf_smoke.run_timed
+        original_implementation_edit = industrial_perf_smoke.implementation_edit
+        original_public_surface_edit = industrial_perf_smoke.public_surface_edit
+        try:
+            industrial_perf_smoke.resolve_typepython_command = fake_resolve_typepython_command
+            industrial_perf_smoke.run_timed = fake_run_timed
+            industrial_perf_smoke.implementation_edit = fake_implementation_edit
+            industrial_perf_smoke.public_surface_edit = fake_public_surface_edit
+
+            steps = industrial_perf_smoke.run_smoke(
+                pathlib.Path("/tmp/workspace"),
+                industrial_perf_smoke.WorkspaceOptions(
+                    modules=4,
+                    external_stubs=0,
+                    target_python="3.12",
+                ),
+                "check",
+            )
+        finally:
+            industrial_perf_smoke.resolve_typepython_command = original_resolve
+            industrial_perf_smoke.run_timed = original_run_timed
+            industrial_perf_smoke.implementation_edit = original_implementation_edit
+            industrial_perf_smoke.public_surface_edit = original_public_surface_edit
+
+        self.assertEqual(
+            events,
+            [
+                "run:cold_check",
+                "run:warm_check",
+                "edit:implementation",
+                "run:single_file_implementation_edit",
+                "edit:public",
+                "run:public_surface_edit",
+            ],
+        )
+        self.assertEqual(
+            [step.label for step in steps],
+            [
+                "cold_check",
+                "warm_check",
+                "single_file_implementation_edit",
+                "public_surface_edit",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
