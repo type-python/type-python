@@ -1433,20 +1433,24 @@ pub(super) fn conditional_return_coverage_diagnostics(
         .load_conditional_return_sites(node)
         .into_iter()
         .filter_map(|site| {
-            let expected = normalize_type_text(&site.target_type);
-            let expected_branches = union_branches(&expected).unwrap_or_else(|| vec![expected.clone()]);
+            let expected = lower_type_text_or_name(&site.target_type);
+            let expected_branches =
+                semantic_union_branches(&expected).unwrap_or_else(|| vec![expected.clone()]);
             let covered = site
                 .case_input_types
                 .iter()
-                .map(|case_type| normalize_type_text(case_type))
+                .map(|case_type| lower_type_text_or_name(case_type))
                 .collect::<Vec<_>>();
             let missing = expected_branches
                 .into_iter()
                 .filter(|branch| {
                     !covered
                         .iter()
-                        .any(|covered_branch| direct_type_matches(node, nodes, branch, covered_branch))
+                        .any(|covered_branch| {
+                            semantic_type_matches(node, nodes, branch, covered_branch)
+                        })
                 })
+                .map(|branch| render_semantic_type(&branch))
                 .collect::<Vec<_>>();
             (!missing.is_empty()).then(|| {
                 Diagnostic::error(

@@ -1,18 +1,3 @@
-pub(super) fn direct_type_matches(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    expected: &str,
-    actual: &str,
-) -> bool {
-    let mut types = TypeStore::default();
-    let expected = types.intern(lower_type_text_or_name(expected));
-    let actual = types.intern(lower_type_text_or_name(actual));
-    TypeRelationContext::new(node, nodes).matches(
-        types.get(expected).expect("interned semantic expected type"),
-        types.get(actual).expect("interned semantic actual type"),
-    )
-}
-
 pub(super) fn direct_type_is_assignable(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
