@@ -637,7 +637,7 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("`SemanticType` is the checker relationship shape", architecture)
         self.assertIn("pub(super) struct TypeRelationContext", assignability)
         self.assertIn(
-            "semantic_invariant_type_matches(node, nodes, expected_arg, actual_arg)",
+            "semantic_invariant_type_matches_with_options(\n                    node,\n                    nodes,\n                    expected_arg,\n                    actual_arg,\n                    options,",
             assignability,
         )
         self.assertIn("join_semantic_type_candidates(actual_args.to_vec())", assignability)

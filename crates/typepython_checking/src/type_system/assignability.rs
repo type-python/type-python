@@ -58,11 +58,12 @@ pub(super) fn semantic_type_is_assignable(
 pub(super) struct AssignabilityOptions {
     pub(super) strict_nulls: bool,
     pub(super) framework_adapters: bool,
+    pub(super) taint: bool,
 }
 
 impl Default for AssignabilityOptions {
     fn default() -> Self {
-        Self { strict_nulls: true, framework_adapters: false }
+        Self { strict_nulls: true, framework_adapters: false, taint: false }
     }
 }
 
@@ -99,7 +100,14 @@ impl<'a> TypeRelationContext<'a> {
     }
 
     pub(super) fn matches(&self, expected: &SemanticType, actual: &SemanticType) -> bool {
-        direct_semantic_type_matches(self.node, self.nodes, expected, actual, &mut BTreeSet::new())
+        direct_semantic_type_matches(
+            self.node,
+            self.nodes,
+            expected,
+            actual,
+            self.options,
+            &mut BTreeSet::new(),
+        )
     }
 
     pub(super) fn is_assignable(&self, expected: &SemanticType, actual: &SemanticType) -> bool {
@@ -124,13 +132,14 @@ impl<'a> TypeRelationContext<'a> {
     }
 }
 
-pub(super) fn semantic_invariant_type_matches(
+fn semantic_invariant_type_matches_with_options(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     expected: &SemanticType,
     actual: &SemanticType,
+    options: AssignabilityOptions,
 ) -> bool {
-    TypeRelationContext::new(node, nodes).invariant_matches(expected, actual)
+    TypeRelationContext::with_options(node, nodes, options).invariant_matches(expected, actual)
 }
 
 fn direct_semantic_type_matches(
@@ -138,10 +147,11 @@ fn direct_semantic_type_matches(
     nodes: &[typepython_graph::ModuleNode],
     expected: &SemanticType,
     actual: &SemanticType,
+    options: AssignabilityOptions,
     visiting: &mut BTreeSet<(SemanticType, SemanticType)>,
 ) -> bool {
-    let expected = expected.strip_annotated().clone();
-    let actual = actual.strip_annotated().clone();
+    let expected = normalize_type_for_assignability_options(expected, options);
+    let actual = normalize_type_for_assignability_options(actual, options);
 
     if expected == actual || is_any_semantic_type(&expected) || is_any_semantic_type(&actual) {
         return true;
@@ -154,10 +164,24 @@ fn direct_semantic_type_matches(
 
     let result =
         if let Some(expanded_expected) = expand_semantic_type_alias_once(node, nodes, &expected) {
-            direct_semantic_type_matches(node, nodes, &expanded_expected, &actual, visiting)
+            direct_semantic_type_matches(
+                node,
+                nodes,
+                &expanded_expected,
+                &actual,
+                options,
+                visiting,
+            )
         } else if let Some(expanded_actual) = expand_semantic_type_alias_once(node, nodes, &actual)
         {
-            direct_semantic_type_matches(node, nodes, &expected, &expanded_actual, visiting)
+            direct_semantic_type_matches(
+                node,
+                nodes,
+                &expected,
+                &expanded_actual,
+                options,
+                visiting,
+            )
         } else if let Some(branches) = semantic_union_branches(&expected) {
             if let Some(actual_branches) = semantic_union_branches(&actual) {
                 actual_branches.iter().all(|actual_branch| {
@@ -167,6 +191,7 @@ fn direct_semantic_type_matches(
                             nodes,
                             expected_branch,
                             actual_branch,
+                            options,
                             visiting,
                         )
                     })
@@ -177,13 +202,14 @@ fn direct_semantic_type_matches(
                             nodes,
                             expected_branch,
                             actual_branch,
+                            options,
                             visiting,
                         )
                     })
                 })
             } else {
                 branches.into_iter().any(|branch| {
-                    direct_semantic_type_matches(node, nodes, &branch, &actual, visiting)
+                    direct_semantic_type_matches(node, nodes, &branch, &actual, options, visiting)
                 })
             }
         } else if semantic_enum_member_owner_name(&actual)
@@ -211,6 +237,7 @@ fn direct_semantic_type_matches(
                                     nodes,
                                     expected_arg,
                                     actual_arg,
+                                    options,
                                     visiting,
                                 )
                             },
@@ -232,8 +259,8 @@ fn direct_semantic_type_is_assignable(
     options: AssignabilityOptions,
     visiting: &mut BTreeSet<(SemanticType, SemanticType)>,
 ) -> bool {
-    let expected = expected.strip_annotated().clone();
-    let actual = actual.strip_annotated().clone();
+    let expected = normalize_type_for_assignability_options(expected, options);
+    let actual = normalize_type_for_assignability_options(actual, options);
 
     if expected == actual {
         return true;
@@ -266,7 +293,9 @@ fn direct_semantic_type_is_assignable(
         return true;
     }
 
-    if let Some(result) = taint_qualified_assignability(node, nodes, &expected, &actual, options) {
+    if options.taint
+        && let Some(result) = taint_qualified_assignability(node, nodes, &expected, &actual, options)
+    {
         return result;
     }
 
@@ -358,7 +387,14 @@ fn direct_semantic_type_is_assignable(
             } else if actual_is_unknown {
                 false
             } else {
-                direct_semantic_type_matches(node, nodes, &expected, &actual, &mut BTreeSet::new())
+                direct_semantic_type_matches(
+                    node,
+                    nodes,
+                    &expected,
+                    &actual,
+                    options,
+                    &mut BTreeSet::new(),
+                )
             }
         };
 
@@ -402,7 +438,13 @@ fn taint_qualified_assignability(
         (None, Some(_)) | (Some(_), None) => Some(false),
         (Some((expected_inner, expected_context)), Some((actual_inner, actual_context))) => {
             Some(
-                semantic_invariant_type_matches(node, nodes, expected_context, actual_context)
+                semantic_invariant_type_matches_with_options(
+                    node,
+                    nodes,
+                    expected_context,
+                    actual_context,
+                    options,
+                )
                     && direct_semantic_type_is_assignable(
                         node,
                         nodes,
@@ -437,6 +479,56 @@ fn semantic_type_is_never(ty: &SemanticType) -> bool {
 
 fn semantic_type_is_literal_domain(ty: &SemanticType) -> bool {
     matches!(ty.strip_annotated(), SemanticType::Generic { head, .. } if head == "Literal")
+}
+
+fn normalize_type_for_assignability_options(
+    ty: &SemanticType,
+    options: AssignabilityOptions,
+) -> SemanticType {
+    let ty = ty.strip_annotated();
+    if options.taint { ty.clone() } else { erase_taint_qualifiers(ty) }
+}
+
+fn erase_taint_qualifiers(ty: &SemanticType) -> SemanticType {
+    match ty {
+        SemanticType::Name(_) => ty.clone(),
+        SemanticType::Generic { head, args } if head == "Tainted" && args.len() == 2 => {
+            erase_taint_qualifiers(&args[0])
+        }
+        SemanticType::Generic { head, args } => SemanticType::Generic {
+            head: head.clone(),
+            args: args.iter().map(erase_taint_qualifiers).collect(),
+        },
+        SemanticType::Callable { params, return_type } => SemanticType::Callable {
+            params: erase_taint_qualifiers_from_callable_params(params),
+            return_type: Box::new(erase_taint_qualifiers(return_type)),
+        },
+        SemanticType::Union(branches) => {
+            SemanticType::Union(branches.iter().map(erase_taint_qualifiers).collect())
+        }
+        SemanticType::Annotated { value, metadata } => SemanticType::Annotated {
+            value: Box::new(erase_taint_qualifiers(value)),
+            metadata: metadata.clone(),
+        },
+        SemanticType::Unpack(inner) => SemanticType::Unpack(Box::new(erase_taint_qualifiers(inner))),
+    }
+}
+
+fn erase_taint_qualifiers_from_callable_params(
+    params: &SemanticCallableParams,
+) -> SemanticCallableParams {
+    match params {
+        SemanticCallableParams::Ellipsis => SemanticCallableParams::Ellipsis,
+        SemanticCallableParams::ParamList(params) => {
+            SemanticCallableParams::ParamList(params.iter().map(erase_taint_qualifiers).collect())
+        }
+        SemanticCallableParams::Concatenate(params) => {
+            SemanticCallableParams::Concatenate(params.iter().map(erase_taint_qualifiers).collect())
+        }
+        SemanticCallableParams::Single(param) => {
+            SemanticCallableParams::Single(Box::new(erase_taint_qualifiers(param)))
+        }
+    }
 }
 
 fn semantic_tainted_parts(ty: &SemanticType) -> Option<(&SemanticType, &SemanticType)> {
@@ -797,7 +889,13 @@ fn assignable_semantic_generic_bridge(
         }
         ("Mapping", "dict") if expected_args.len() == 2 && actual_args.len() == 2 => {
             return Some(
-                semantic_invariant_type_matches(node, nodes, &expected_args[0], &actual_args[0])
+                semantic_invariant_type_matches_with_options(
+                    node,
+                    nodes,
+                    &expected_args[0],
+                    &actual_args[0],
+                    options,
+                )
                     && semantic_type_is_assignable_with_options(
                     node,
                     nodes,
@@ -842,7 +940,13 @@ fn same_head_semantic_generic_assignable(
     Some(expected_args.iter().zip(actual_args.iter()).zip(variances).all(
         |((expected_arg, actual_arg), variance)| match variance {
             GenericVariance::Invariant => {
-                semantic_invariant_type_matches(node, nodes, expected_arg, actual_arg)
+                semantic_invariant_type_matches_with_options(
+                    node,
+                    nodes,
+                    expected_arg,
+                    actual_arg,
+                    options,
+                )
             }
             GenericVariance::Covariant => semantic_type_is_assignable_with_options(
                 node,

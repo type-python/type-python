@@ -1,8 +1,33 @@
 use super::*;
 
+fn check_temp_typepython_source_with_taint(source_text: &str) -> crate::CheckResult {
+    check_temp_typepython_source_with_checker_options(
+        source_text,
+        ParseOptions::default(),
+        crate::CheckerOptions { experimental_taint: true, ..crate::CheckerOptions::default() },
+    )
+}
+
+#[test]
+fn check_ignores_taint_qualifier_assignability_without_experimental_acceptance() {
+    let result = check_temp_typepython_source(concat!(
+        "def body() -> Tainted[str, \"html\"]:\n",
+        "    ...\n\n",
+        "raw: Tainted[str, \"html\"] = body()\n",
+        "safe: str = raw\n",
+        "roundtrip: Tainted[str, \"html\"] = safe\n",
+        "def bodies() -> list[Tainted[str, \"html\"]]:\n",
+        "    ...\n\n",
+        "items: list[str] = bodies()\n",
+        "roundtrip_items: list[Tainted[str, \"html\"]] = items\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
 #[test]
 fn check_rejects_assigning_tainted_value_to_plain_type() {
-    let result = check_temp_typepython_source(concat!(
+    let result = check_temp_typepython_source_with_taint(concat!(
         "raw: Tainted[str, \"html\"]\n",
         "safe: str = raw\n",
     ));
@@ -13,8 +38,21 @@ fn check_rejects_assigning_tainted_value_to_plain_type() {
 }
 
 #[test]
+fn check_rejects_nested_tainted_value_to_plain_type() {
+    let result = check_temp_typepython_source_with_taint(concat!(
+        "def bodies() -> list[Tainted[str, \"html\"]]:\n",
+        "    ...\n\n",
+        "items: list[str] = bodies()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("list[Tainted[str, \"html\"]]"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_explicit_taint_sanitizer_result() {
-    let result = check_temp_typepython_source(concat!(
+    let result = check_temp_typepython_source_with_taint(concat!(
         "def escape_html(value: Tainted[str, \"html\"]) -> str:\n",
         "    return \"safe\"\n\n",
         "raw: Tainted[str, \"html\"]\n",
@@ -26,7 +64,7 @@ fn check_accepts_explicit_taint_sanitizer_result() {
 
 #[test]
 fn check_rejects_tainted_value_at_plain_sink() {
-    let result = check_temp_typepython_source(concat!(
+    let result = check_temp_typepython_source_with_taint(concat!(
         "def request_body() -> Tainted[str, \"html\"]:\n",
         "    ...\n\n",
         "def render_html(value: str) -> None:\n",
@@ -41,7 +79,7 @@ fn check_rejects_tainted_value_at_plain_sink() {
 
 #[test]
 fn check_accepts_tainted_source_after_sanitizer_before_sink() {
-    let result = check_temp_typepython_source(concat!(
+    let result = check_temp_typepython_source_with_taint(concat!(
         "def request_body() -> Tainted[str, \"html\"]:\n",
         "    ...\n\n",
         "def escape_html(value: Tainted[str, \"html\"]) -> str:\n",
@@ -56,7 +94,7 @@ fn check_accepts_tainted_source_after_sanitizer_before_sink() {
 
 #[test]
 fn check_uses_source_sink_and_sanitizer_decorators_for_taint_slice() {
-    let result = check_temp_typepython_source(concat!(
+    let result = check_temp_typepython_source_with_taint(concat!(
         "from typing import Callable\n\n",
         "def source[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
         "    return fn\n\n",

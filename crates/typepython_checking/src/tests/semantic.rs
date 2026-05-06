@@ -532,10 +532,10 @@ fn check_allows_unsafe_effect_inside_unsafe_capability_scope() {
 
 #[test]
 fn check_rejects_assigning_tainted_value_to_plain_type() {
-    let result = check_temp_typepython_source(concat!(
-        "raw: Tainted[str, \"html\"]\n",
-        "safe: str = raw\n",
-    ));
+    let result = check_temp_typepython_source_with_taint(
+        concat!("raw: Tainted[str, \"html\"]\n", "safe: str = raw\n",),
+        false,
+    );
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"), "{rendered}");
@@ -544,25 +544,31 @@ fn check_rejects_assigning_tainted_value_to_plain_type() {
 
 #[test]
 fn check_accepts_explicit_taint_sanitizer_result() {
-    let result = check_temp_typepython_source(concat!(
-        "def escape_html(value: Tainted[str, \"html\"]) -> str:\n",
-        "    return \"safe\"\n\n",
-        "raw: Tainted[str, \"html\"]\n",
-        "safe: str = escape_html(raw)\n",
-    ));
+    let result = check_temp_typepython_source_with_taint(
+        concat!(
+            "def escape_html(value: Tainted[str, \"html\"]) -> str:\n",
+            "    return \"safe\"\n\n",
+            "raw: Tainted[str, \"html\"]\n",
+            "safe: str = escape_html(raw)\n",
+        ),
+        false,
+    );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }
 
 #[test]
 fn check_rejects_tainted_value_at_plain_sink() {
-    let result = check_temp_typepython_source(concat!(
-        "def request_body() -> Tainted[str, \"html\"]:\n",
-        "    ...\n\n",
-        "def render_html(value: str) -> None:\n",
-        "    ...\n\n",
-        "render_html(request_body())\n",
-    ));
+    let result = check_temp_typepython_source_with_taint(
+        concat!(
+            "def request_body() -> Tainted[str, \"html\"]:\n",
+            "    ...\n\n",
+            "def render_html(value: str) -> None:\n",
+            "    ...\n\n",
+            "render_html(request_body())\n",
+        ),
+        false,
+    );
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"), "{rendered}");
@@ -571,15 +577,18 @@ fn check_rejects_tainted_value_at_plain_sink() {
 
 #[test]
 fn check_accepts_tainted_source_after_sanitizer_before_sink() {
-    let result = check_temp_typepython_source(concat!(
-        "def request_body() -> Tainted[str, \"html\"]:\n",
-        "    ...\n\n",
-        "def escape_html(value: Tainted[str, \"html\"]) -> str:\n",
-        "    ...\n\n",
-        "def render_html(value: str) -> None:\n",
-        "    ...\n\n",
-        "render_html(escape_html(request_body()))\n",
-    ));
+    let result = check_temp_typepython_source_with_taint(
+        concat!(
+            "def request_body() -> Tainted[str, \"html\"]:\n",
+            "    ...\n\n",
+            "def escape_html(value: Tainted[str, \"html\"]) -> str:\n",
+            "    ...\n\n",
+            "def render_html(value: str) -> None:\n",
+            "    ...\n\n",
+            "render_html(escape_html(request_body()))\n",
+        ),
+        false,
+    );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }

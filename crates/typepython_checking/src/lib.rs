@@ -382,6 +382,7 @@ impl<'a> CheckerContext<'a> {
         AssignabilityOptions {
             strict_nulls: self.strict_nulls,
             framework_adapters: self.framework_adapters_enabled(),
+            taint: self.taint_enabled(),
         }
     }
 
