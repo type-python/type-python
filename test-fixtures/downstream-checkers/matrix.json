@@ -109,8 +109,8 @@
     {
       "name": "negative-pydantic-strictness-package",
       "targets": ["3.12"],
-      "expected_checker_failures": ["mypy", "ty"],
-      "allowlist_reason": "mypy and ty intentionally reject this consumer because the fixture exercises stricter constructor expectations than the generated Pydantic-like stub permits",
+      "expected_checker_failures": ["mypy", "pyright", "basedpyright", "ty"],
+      "allowlist_reason": "all downstream checkers intentionally reject this consumer because the fixture exercises stricter constructor expectations than the generated Pydantic-like stub permits",
       "allowlist_expires": "2026-12-31",
       "expected_stub_fragments": {
         "3.12": [

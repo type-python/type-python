@@ -317,6 +317,7 @@ def write_pyright_config(project_dir: pathlib.Path, build_dir: pathlib.Path, pro
         "extraPaths": extra_paths,
         "include": [build_dir.name],
         "typeCheckingMode": type_checking_mode,
+        "reportUnusedImport": "none",
     }
     if profile == "standard":
         config.update(

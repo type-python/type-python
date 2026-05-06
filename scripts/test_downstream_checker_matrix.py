@@ -73,7 +73,12 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
                 self.assertIsNotNone(case.allowlist_expires)
 
     def test_partial_expected_failures_still_run_consumer_for_other_checkers(self) -> None:
-        case = downstream_checker_smoke.load_fixture_matrix()["negative-pydantic-strictness-package"]
+        case = downstream_checker_smoke.FixtureCase(
+            name="negative-synthetic-package",
+            targets=("3.12",),
+            expected_checker_failures=("mypy",),
+            allowlist_reason="synthetic checker disagreement",
+        )
         self.assertFalse(
             downstream_checker_smoke.checker_failure_expected(
                 case,
@@ -155,6 +160,7 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
 
             self.assertEqual(config["typeCheckingMode"], "strict")
             self.assertEqual(config["extraPaths"], ["checker-build"])
+            self.assertEqual(config["reportUnusedImport"], "none")
             for strict_setting in (
                 "reportMissingTypeStubs",
                 "reportUnknownVariableType",

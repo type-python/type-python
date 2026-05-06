@@ -1,13 +1,13 @@
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 
 def framework_transform[T](*args: object, **kwargs: object) -> Callable[[T], T]:
     def wrap(obj: T) -> T:
         return obj
-    return wrap
+    return cast(Callable[[T], T], wrap)
 
 
-def Field(default=None, alias=None) -> Any:
+def Field(default: Any = None, alias: str | None = None) -> Any:
     return default
 
 
