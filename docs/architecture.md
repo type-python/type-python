@@ -228,6 +228,16 @@ The core type-checking engine. Runs multiple diagnostic rule categories against 
 
 The `typepython_checking` Criterion suite remains the baseline for deciding whether to thread Type IDs deeper into solver/candidate/diagnostic boundaries, but the current architecture already treats `TypeStore` as live checker infrastructure rather than a deferred side utility.
 
+**Canonical type model boundary:**
+
+The checker has three type representations with separate jobs:
+
+- `TypeExpr` is the parsed source and interchange shape. It is allowed at syntax, binding, summary, and emit boundaries where the original annotation spelling or a serializable structured form matters.
+- `SemanticType` is the checker relationship shape. Assignability, matching, generic inference, alias expansion, overload applicability, variance checks, flow narrowing, and shape compatibility must prefer `SemanticType` or interned `TypeId` values over rendered text.
+- Rendered type text is an exit format. It is allowed for diagnostics, `.pyi` emission, summary serialization, source suggestions, and legacy adapters that enter from user-authored or external text.
+
+New checker code should not render a `SemanticType` and immediately parse it back in order to make a type relationship decision. If a relationship helper only accepts `&str`, add a semantic overload and keep the string function as a boundary adapter. The expected migration path is to move hot relation paths from `SemanticType` values to `TypeId` only when profiling shows that the interned representation materially improves the checker or simplifies a shared relation cache.
+
 **Checker naming conventions:**
 
 | Prefix / term    | Meaning                                                                                                                                                              |
