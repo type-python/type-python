@@ -68,6 +68,36 @@ jobs:
       - name: Validate Python distribution metadata
         run: python -m twine check dist/*
 
+  industrial-performance-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.94.0
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal
+          rustup default 1.94.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build TypePython CLI
+        run: cargo build -p typepython-cli
+
+      - name: Run industrial performance smoke
+        run: python scripts/industrial_perf_smoke.py --json-out perf/industrial-smoke.json
+
+      - name: Upload industrial performance artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: industrial-performance-smoke
+          path: perf/industrial-smoke.json
+          if-no-files-found: error
+
   coverage:
     runs-on: ubuntu-latest
 
@@ -349,6 +379,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - workspace-fast
+      - industrial-performance-smoke
       - coverage
       - fuzz-smoke
       - python-min-supported

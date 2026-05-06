@@ -80,7 +80,7 @@ package-check:
 	$(PYTHON) -m build --sdist --wheel
 	$(PYTHON) -m twine check dist/*
 
-beta-release-gate: fmt-check lint test test-cli-verification test-downstream-checkers roadmap-demo-smoke fuzz-smoke package-check stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts
+beta-release-gate: fmt-check lint test test-cli-verification test-downstream-checkers roadmap-demo-smoke perf-smoke fuzz-smoke package-check stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts
 
 bump-version:
 	@test -n "$(VERSION)" || (echo "Usage: make bump-version VERSION=0.0.8" && exit 1)

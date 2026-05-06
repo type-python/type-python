@@ -90,10 +90,11 @@ A Beta release candidate must pass the tracked release gate before the classifie
 
 The GitHub `rust` workflow has the authoritative `beta-release-gate` job and depends on these
 families, including interpreter- and platform-specific smoke jobs that require GitHub-hosted Python
-3.13/3.14, macOS, and Windows runners. `make beta-release-gate` is the portable local aggregate for
-maintainers with the required checker/fuzz/package tooling installed; it is a preflight for the
-cross-platform CI gate, not a replacement for the CI-only interpreter and platform matrix. The PyPI
-publish workflow refuses to publish unless the release commit already has a successful `rust`
+3.13/3.14, macOS, Windows runners, and the industrial performance smoke artifact. The local
+`make beta-release-gate` target is the portable aggregate for maintainers with the required
+checker/fuzz/package/performance tooling installed; it is a preflight for the cross-platform CI
+gate, not a replacement for the CI-only interpreter, platform, and uploaded-artifact matrix. The
+PyPI publish workflow refuses to publish unless the release commit already has a successful `rust`
 workflow run containing a successful `beta-release-gate` job.
 
 ## Packaging and install contract

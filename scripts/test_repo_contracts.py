@@ -350,6 +350,7 @@ class RepoContractsTests(unittest.TestCase):
         beta = read_text("docs/beta-readiness.md")
         normalized_beta = " ".join(beta.split())
         makefile = read_text("Makefile")
+        workflow = read_text(".github/workflows/rust.yml")
         project = read_text("crates/typepython_project/src/lib.rs")
         lsp_bench = read_text("crates/typepython_lsp/benches/incremental.rs")
 
@@ -362,7 +363,12 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("p95/p99", benchmarks)
         self.assertIn("make perf-smoke", benchmarks)
         self.assertIn("perf-smoke:", makefile)
+        self.assertIn("beta-release-gate: fmt-check", makefile)
+        self.assertIn("perf-smoke", makefile.split("beta-release-gate:", 1)[1])
         self.assertIn("scripts/test_industrial_perf_smoke.py", makefile)
+        self.assertIn("industrial-performance-smoke:", workflow)
+        self.assertIn("scripts/industrial_perf_smoke.py --json-out", workflow)
+        self.assertIn("industrial-performance-smoke", workflow.split("beta-release-gate:", 1)[1])
 
         self.assertIn("lsp_incremental_impl_edit_session_512_modules", benchmarks)
         self.assertIn("lsp_incremental_public_edit_session_512_modules", benchmarks)
