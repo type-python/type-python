@@ -380,17 +380,86 @@ pub(super) fn resolve_direct_expression_semantic_type(
     value_binop_right: Option<&typepython_syntax::DirectExprMetadata>,
     value_binop_operator: Option<&str>,
 ) -> Option<SemanticType> {
+    resolve_direct_expression_semantic_type_with_options(
+        node,
+        nodes,
+        signature,
+        exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_type,
+        is_awaited,
+        value_callee,
+        value_name,
+        value_member_owner_name,
+        value_member_name,
+        value_member_through_instance,
+        value_method_owner_name,
+        value_method_name,
+        value_method_through_instance,
+        value_subscript_target,
+        value_subscript_string_key,
+        value_subscript_index,
+        value_if_true,
+        value_if_false,
+        value_if_guard,
+        value_bool_left,
+        value_bool_right,
+        value_binop_left,
+        value_binop_right,
+        value_binop_operator,
+        AssignabilityOptions::default(),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "semantic expression resolution mirrors the direct expression metadata shape"
+)]
+pub(super) fn resolve_direct_expression_semantic_type_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_type: Option<&str>,
+    is_awaited: bool,
+    value_callee: Option<&str>,
+    value_name: Option<&str>,
+    value_member_owner_name: Option<&str>,
+    value_member_name: Option<&str>,
+    value_member_through_instance: bool,
+    value_method_owner_name: Option<&str>,
+    value_method_name: Option<&str>,
+    value_method_through_instance: bool,
+    value_subscript_target: Option<&typepython_syntax::DirectExprMetadata>,
+    value_subscript_string_key: Option<&str>,
+    value_subscript_index: Option<&str>,
+    value_if_true: Option<&typepython_syntax::DirectExprMetadata>,
+    value_if_false: Option<&typepython_syntax::DirectExprMetadata>,
+    value_if_guard: Option<&typepython_binding::GuardConditionSite>,
+    value_bool_left: Option<&typepython_syntax::DirectExprMetadata>,
+    value_bool_right: Option<&typepython_syntax::DirectExprMetadata>,
+    value_binop_left: Option<&typepython_syntax::DirectExprMetadata>,
+    value_binop_right: Option<&typepython_syntax::DirectExprMetadata>,
+    value_binop_operator: Option<&str>,
+    options: AssignabilityOptions,
+) -> Option<SemanticType> {
     let resolved = value_type
         .filter(|value_type| !value_type.is_empty())
         .map(str::trim)
         .map(lower_type_text_or_name)
         .or_else(|| {
             value_callee.and_then(|callee| {
-                resolve_direct_callable_return_semantic_type_for_line(
+                resolve_direct_callable_return_semantic_type_for_line_with_options(
                     node,
                     nodes,
                     callee,
                     current_line,
+                    options,
                 )
                 .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, callee))
             })

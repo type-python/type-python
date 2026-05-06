@@ -7,6 +7,28 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
     current_line: usize,
     metadata: &typepython_syntax::DirectExprMetadata,
 ) -> Option<SemanticType> {
+    resolve_direct_expression_semantic_type_from_metadata_with_options(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        metadata,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    options: AssignabilityOptions,
+) -> Option<SemanticType> {
     if let Some(lambda) = metadata.value_lambda.as_deref() {
         return resolve_contextual_lambda_callable_semantic_type(
             node,
@@ -38,7 +60,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
         };
     }
     let value_if_guard = metadata.value_if_guard.as_ref().map(guard_to_site);
-    resolve_direct_expression_semantic_type(
+    resolve_direct_expression_semantic_type_with_options(
         node,
         nodes,
         signature,
@@ -67,6 +89,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
         metadata.value_binop_left.as_deref(),
         metadata.value_binop_right.as_deref(),
         metadata.value_binop_operator.as_deref(),
+        options,
     )
 }
 

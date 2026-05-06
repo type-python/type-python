@@ -988,10 +988,26 @@ pub(super) fn resolve_assignment_site_semantic_type(
     signature: Option<&str>,
     assignment: &typepython_binding::AssignmentSite,
 ) -> Option<SemanticType> {
+    resolve_assignment_site_semantic_type_with_options(
+        node,
+        nodes,
+        signature,
+        assignment,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn resolve_assignment_site_semantic_type_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    assignment: &typepython_binding::AssignmentSite,
+    options: AssignabilityOptions,
+) -> Option<SemanticType> {
     if let Some(index) = assignment.destructuring_index {
         let metadata = assignment.value_metadata()?;
         let tuple_elements = unpacked_fixed_tuple_semantic_elements(
-            &resolve_direct_expression_semantic_type_from_metadata(
+            &resolve_direct_expression_semantic_type_from_metadata_with_options(
                 node,
                 nodes,
                 signature,
@@ -999,6 +1015,7 @@ pub(super) fn resolve_assignment_site_semantic_type(
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
                 &metadata,
+                options,
             )?,
         )?;
         let target_names = assignment.destructuring_target_names.as_ref()?;
@@ -1062,7 +1079,7 @@ pub(super) fn resolve_assignment_site_semantic_type(
     }
 
     assignment.value_metadata().as_ref().and_then(|metadata| {
-        resolve_direct_expression_semantic_type_from_metadata(
+        resolve_direct_expression_semantic_type_from_metadata_with_options(
             node,
             nodes,
             signature,
@@ -1070,6 +1087,7 @@ pub(super) fn resolve_assignment_site_semantic_type(
             assignment.owner_type_name.as_deref(),
             assignment.line,
             metadata,
+            options,
         )
     })
 }

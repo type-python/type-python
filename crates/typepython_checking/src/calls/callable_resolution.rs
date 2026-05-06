@@ -167,16 +167,18 @@ fn resolve_callable_candidate_from_semantics<'a>(
     signature: Vec<typepython_syntax::DirectFunctionParamSite>,
     semantic_params: Vec<SemanticCallableParam>,
     return_type: Option<SemanticType>,
+    options: AssignabilityOptions,
 ) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
     let substitutions = if declaration.type_params.is_empty() {
         GenericTypeParamSubstitutions::default()
     } else {
-        infer_generic_type_param_substitutions_from_semantic_params_detailed(
+        infer_generic_type_param_substitutions_from_semantic_params_detailed_with_options(
             node,
             nodes,
             declaration,
             &semantic_params,
             call,
+            options,
         )
         .map_err(DirectCallResolutionFailure::GenericSolve)?
     };
@@ -223,6 +225,22 @@ pub(super) fn resolve_direct_call_candidate_detailed<'a>(
     declaration: &'a Declaration,
     call: &typepython_binding::CallSite,
 ) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
+    resolve_direct_call_candidate_detailed_with_options(
+        node,
+        nodes,
+        declaration,
+        call,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn resolve_direct_call_candidate_detailed_with_options<'a>(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    declaration: &'a Declaration,
+    call: &typepython_binding::CallSite,
+    options: AssignabilityOptions,
+) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
     let provider_node = resolve_function_provider_with_node(nodes, node, &call.callee)
         .map(|(provider_node, _)| provider_node)
         .unwrap_or(node);
@@ -234,6 +252,7 @@ pub(super) fn resolve_direct_call_candidate_detailed<'a>(
         declaration_signature_sites(declaration),
         declaration_semantic_signature_params(declaration).unwrap_or_default(),
         declaration_signature_return_semantic_type(declaration),
+        options,
     )
 }
 
@@ -270,6 +289,7 @@ pub(super) fn resolve_direct_call_candidate_with_context_detailed<'a>(
         callable_signature_sites_from_semantics(&callable),
         callable_semantic_params_from_semantics(&callable),
         callable.return_type,
+        context.assignability_options(),
     )
 }
 
@@ -335,6 +355,7 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
         ),
         callable_return_semantic_type_with_self_from_semantics(&callable, &owner_type_name)
             .map(|return_type| substitute_semantic_type_params(&return_type, &owner_substitutions)),
+        AssignabilityOptions::default(),
     )
 }
 
@@ -929,6 +950,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
                 &type_names,
                 &param_spec_names,
                 &substitutions,
+                AssignabilityOptions::default(),
             )
             .ok_or_else(|| {
                 DirectCallResolutionFailure::GenericSolve(
@@ -939,7 +961,14 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
                 )
             })?,
         };
-        merge_nested_generic_bindings(node, nodes, &mut substitutions, param_spec_bindings).ok_or_else(|| {
+        merge_nested_generic_bindings(
+            node,
+            nodes,
+            &mut substitutions,
+            AssignabilityOptions::default(),
+            param_spec_bindings,
+        )
+        .ok_or_else(|| {
             DirectCallResolutionFailure::GenericSolve(
                 GenericSolveFailure::ParamSpecBindingConflict {
                     param_name: declaration.name.clone(),
@@ -954,6 +983,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
             &type_names,
             &substitutions,
             &type_pack_names,
+            AssignabilityOptions::default(),
         )
         .ok_or_else(|| {
             DirectCallResolutionFailure::GenericSolve(GenericSolveFailure::TypeBindingInferenceFailed {
@@ -961,7 +991,14 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
                 actual: actual_return.clone(),
             })
         })?;
-        merge_nested_generic_bindings(node, nodes, &mut substitutions, return_bindings).ok_or_else(|| {
+        merge_nested_generic_bindings(
+            node,
+            nodes,
+            &mut substitutions,
+            AssignabilityOptions::default(),
+            return_bindings,
+        )
+        .ok_or_else(|| {
             DirectCallResolutionFailure::GenericSolve(
                 GenericSolveFailure::ParamSpecBindingConflict {
                     param_name: declaration.name.clone(),
@@ -978,6 +1015,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
             &type_names,
             &substitutions,
             &type_pack_names,
+            AssignabilityOptions::default(),
         )
         .ok_or_else(|| {
             DirectCallResolutionFailure::GenericSolve(GenericSolveFailure::TypeBindingInferenceFailed {
@@ -985,7 +1023,13 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
                 actual: actual.clone(),
             })
         })?;
-        merge_nested_generic_bindings(node, nodes, &mut substitutions, generic_bindings)
+        merge_nested_generic_bindings(
+            node,
+            nodes,
+            &mut substitutions,
+            AssignabilityOptions::default(),
+            generic_bindings,
+        )
         .ok_or_else(|| {
             DirectCallResolutionFailure::GenericSolve(GenericSolveFailure::TypeVarTupleBindingConflict {
                 param_name: declaration.name.clone(),
@@ -1058,10 +1102,17 @@ fn augment_semantic_callable_paramlist_substitutions(
         &BTreeSet::new(),
         &param_spec_names,
         &substitutions,
+        AssignabilityOptions::default(),
     ) else {
         return substitutions;
     };
-    let _ = merge_nested_generic_bindings(node, nodes, &mut substitutions, bindings);
+    let _ = merge_nested_generic_bindings(
+        node,
+        nodes,
+        &mut substitutions,
+        AssignabilityOptions::default(),
+        bindings,
+    );
     substitutions
 }
 
@@ -1471,11 +1522,12 @@ pub(super) fn resolve_instantiated_callable_return_semantic_type_from_declaratio
     resolve_direct_call_candidate(node, nodes, declaration, call)?.return_type
 }
 
-pub(super) fn resolve_direct_callable_return_semantic_type_for_line(
+pub(super) fn resolve_direct_callable_return_semantic_type_for_line_with_options(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
     line: usize,
+    options: AssignabilityOptions,
 ) -> Option<SemanticType> {
     let call = node
         .calls
@@ -1484,7 +1536,22 @@ pub(super) fn resolve_direct_callable_return_semantic_type_for_line(
         .or_else(|| node.calls.iter().find(|call| call.callee == callee))?;
     let overloads = resolve_direct_overloads(node, nodes, callee);
     if !overloads.is_empty() {
-        return match resolve_direct_overload_selection(node, nodes, call, &overloads) {
+        let attempts = overloads
+            .iter()
+            .map(|declaration| {
+                (
+                    *declaration,
+                    resolve_direct_call_candidate_detailed_with_options(
+                        node,
+                        nodes,
+                        declaration,
+                        call,
+                        options,
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        return match resolve_overload_selection_from_attempts(node, nodes, call, attempts) {
             ResolvedOverloadSelection::Selected(candidate) => candidate.return_type,
             _ => None,
         };
@@ -1500,7 +1567,9 @@ pub(super) fn resolve_direct_callable_return_semantic_type_for_line(
         return decorated_function_return_semantic_type_from_semantic_callable(&callable_type);
     }
     let function = resolve_direct_function(node, nodes, callee)?;
-    resolve_direct_call_candidate(node, nodes, function, call)?.return_type
+    resolve_direct_call_candidate_detailed_with_options(node, nodes, function, call, options)
+        .ok()?
+        .return_type
 }
 
 pub(super) fn resolve_direct_callable_signature(

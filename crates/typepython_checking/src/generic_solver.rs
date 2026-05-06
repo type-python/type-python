@@ -212,13 +212,18 @@ impl GenericConstraintSet {
 struct GenericSolverState {
     metadata: GenericSolverMetadata,
     constraints: GenericConstraintSet,
+    assignability_options: AssignabilityOptions,
 }
 
 impl GenericSolverState {
-    fn new(function: &Declaration) -> Self {
+    fn new_with_options(
+        function: &Declaration,
+        assignability_options: AssignabilityOptions,
+    ) -> Self {
         Self {
             metadata: GenericSolverMetadata::from_function(function),
             constraints: GenericConstraintSet::default(),
+            assignability_options,
         }
     }
 
@@ -227,7 +232,12 @@ impl GenericSolverState {
         node: &typepython_graph::ModuleNode,
         nodes: &[typepython_graph::ModuleNode],
     ) -> Result<GenericSolution, GenericSolveFailure> {
-        solve_collected_generic_constraints_detailed(node, nodes, &self.constraints)
+        solve_collected_generic_constraints_detailed(
+            node,
+            nodes,
+            &self.constraints,
+            self.assignability_options,
+        )
     }
 
     fn record_bindings(&mut self, bindings: GenericSolution) {
@@ -243,7 +253,13 @@ impl GenericSolverState {
         node: &typepython_graph::ModuleNode,
         nodes: &[typepython_graph::ModuleNode],
     ) -> Result<GenericSolution, GenericSolveFailure> {
-        finalize_generic_solution_detailed(node, nodes, &self.metadata, &self.constraints)
+        finalize_generic_solution_detailed(
+            node,
+            nodes,
+            &self.metadata,
+            &self.constraints,
+            self.assignability_options,
+        )
     }
 }
 
@@ -286,6 +302,7 @@ fn infer_variadic_annotation_bindings_detailed(
             &solver.metadata.type_names,
             &existing,
             &solver.metadata.type_pack_names,
+            solver.assignability_options,
         )
         .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
             annotation: annotation.clone(),
@@ -412,6 +429,7 @@ fn infer_single_argument_bindings_detailed(
         &solver.metadata.type_names,
         &solver.metadata.param_spec_names,
         &existing,
+        solver.assignability_options,
     )
     .ok_or_else(|| GenericSolveFailure::ParamSpecInferenceFailed {
         annotation: annotation.clone(),
@@ -431,6 +449,7 @@ fn infer_single_argument_bindings_detailed(
         &solver.metadata.type_names,
         &existing,
         &solver.metadata.type_pack_names,
+        solver.assignability_options,
     )
     .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
         annotation: annotation.clone(),
@@ -445,6 +464,7 @@ fn solve_collected_generic_constraints_detailed(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     constraints: &GenericConstraintSet,
+    options: AssignabilityOptions,
 ) -> Result<GenericSolution, GenericSolveFailure> {
     let mut solution = GenericSolution::default();
     let mut type_ids = BTreeMap::<String, TypeId>::new();
@@ -464,8 +484,8 @@ fn solve_collected_generic_constraints_detailed(
                         .get(constraint.candidate_id)
                         .cloned()
                         .expect("candidate interned type should be available");
-                    let merged = merge_generic_type_candidates_with_context(
-                        node, nodes, &existing, &candidate,
+                    let merged = merge_generic_type_candidates_with_context_and_options(
+                        node, nodes, &existing, &candidate, options,
                     );
                     let merged_id = type_store.intern(merged);
                     type_ids.insert(constraint.name.clone(), merged_id);
@@ -619,8 +639,10 @@ fn finalize_generic_solution_detailed(
     nodes: &[typepython_graph::ModuleNode],
     metadata: &GenericSolverMetadata,
     constraints: &GenericConstraintSet,
+    options: AssignabilityOptions,
 ) -> Result<GenericSolution, GenericSolveFailure> {
-    let mut substitutions = solve_collected_generic_constraints_detailed(node, nodes, constraints)?;
+    let mut substitutions =
+        solve_collected_generic_constraints_detailed(node, nodes, constraints, options)?;
 
     for type_param in &metadata.params {
         match type_param.kind {
@@ -636,7 +658,7 @@ fn finalize_generic_solution_detailed(
                 let Some(actual) = substitutions.types.get(&type_param.name) else {
                     continue;
                 };
-                if !generic_type_param_accepts_actual(
+                if !generic_type_param_accepts_actual_with_options(
                     node,
                     nodes,
                     &typepython_binding::GenericTypeParam {
@@ -658,6 +680,7 @@ fn finalize_generic_solution_detailed(
                             .map(|expr| typepython_binding::BoundTypeExpr { expr }),
                     },
                     actual,
+                    options,
                 ) {
                     return Err(GenericSolveFailure::ConstraintViolation {
                         param_name: type_param.name.clone(),
@@ -715,10 +738,26 @@ pub(crate) fn finalize_generic_type_param_substitutions_detailed(
     function: &Declaration,
     substitutions: GenericTypeParamSubstitutions,
 ) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
+    finalize_generic_type_param_substitutions_detailed_with_options(
+        node,
+        nodes,
+        function,
+        substitutions,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(crate) fn finalize_generic_type_param_substitutions_detailed_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    function: &Declaration,
+    substitutions: GenericTypeParamSubstitutions,
+    options: AssignabilityOptions,
+) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
     let metadata = GenericSolverMetadata::from_function(function);
     let mut constraints = GenericConstraintSet::default();
     constraints.extend_bindings(substitutions);
-    finalize_generic_solution_detailed(node, nodes, &metadata, &constraints)
+    finalize_generic_solution_detailed(node, nodes, &metadata, &constraints, options)
 }
 
 #[allow(dead_code)]
@@ -739,7 +778,25 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
     signature: &[typepython_syntax::DirectFunctionParamSite],
     call: &typepython_binding::CallSite,
 ) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
-    let mut solver = GenericSolverState::new(function);
+    infer_generic_type_param_substitutions_detailed_with_options(
+        node,
+        nodes,
+        function,
+        signature,
+        call,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(crate) fn infer_generic_type_param_substitutions_detailed_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    function: &Declaration,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    call: &typepython_binding::CallSite,
+    options: AssignabilityOptions,
+) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
+    let mut solver = GenericSolverState::new_with_options(function, options);
     let expected_positional_arg_types =
         expected_positional_arg_semantic_types_from_signature_sites(signature, call.arg_count);
     let (positional_types, variadic_starred_types) =
@@ -817,14 +874,15 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
     solver.finish_detailed(node, nodes)
 }
 
-pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detailed(
+pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detailed_with_options(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     function: &Declaration,
     params: &[SemanticCallableParam],
     call: &typepython_binding::CallSite,
+    options: AssignabilityOptions,
 ) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
-    let mut solver = GenericSolverState::new(function);
+    let mut solver = GenericSolverState::new_with_options(function, options);
     let expected_positional_arg_types =
         expected_positional_arg_semantic_types_from_semantic_params(params, call.arg_count);
     let (positional_types, variadic_starred_types) =
@@ -1007,6 +1065,7 @@ pub(crate) fn infer_callable_param_spec_bindings(
     type_names: &BTreeSet<String>,
     param_spec_names: &BTreeSet<String>,
     existing: &GenericTypeParamSubstitutions,
+    options: AssignabilityOptions,
 ) -> Option<GenericTypeParamSubstitutions> {
     if param_spec_names.is_empty() {
         return Some(GenericTypeParamSubstitutions::default());
@@ -1029,12 +1088,14 @@ pub(crate) fn infer_callable_param_spec_bindings(
         type_names,
         param_spec_names,
         existing,
+        options,
     )?;
     let combined = combine_generic_substitutions(existing, &bindings);
     merge_nested_generic_bindings(
         node,
         nodes,
         &mut bindings,
+        options,
         infer_generic_type_param_bindings(
             node,
             nodes,
@@ -1043,6 +1104,7 @@ pub(crate) fn infer_callable_param_spec_bindings(
             type_names,
             &combined,
             &BTreeSet::new(),
+            options,
         )?,
     )?;
     Some(bindings)
@@ -1071,6 +1133,7 @@ pub(crate) fn infer_callable_param_expr_bindings(
     type_names: &BTreeSet<String>,
     param_spec_names: &BTreeSet<String>,
     existing: &GenericTypeParamSubstitutions,
+    options: AssignabilityOptions,
 ) -> Option<GenericTypeParamSubstitutions> {
     match expected_params_expr {
         SemanticCallableParams::Single(expr) => {
@@ -1100,6 +1163,7 @@ pub(crate) fn infer_callable_param_expr_bindings(
                     node,
                     nodes,
                     &mut bindings,
+                    options,
                     infer_generic_type_param_bindings(
                         node,
                         nodes,
@@ -1108,6 +1172,7 @@ pub(crate) fn infer_callable_param_expr_bindings(
                         type_names,
                         &combined,
                         &BTreeSet::new(),
+                        options,
                     )?,
                 )?;
             }
@@ -1285,21 +1350,29 @@ pub(crate) fn extract_param_spec_args_name_from_semantic(
     }
 }
 
-pub(crate) fn generic_type_param_accepts_actual(
+pub(crate) fn generic_type_param_accepts_actual_with_options(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     type_param: &typepython_binding::GenericTypeParam,
     actual: &SemanticType,
+    options: AssignabilityOptions,
 ) -> bool {
     if let Some(bound) = type_param.rendered_bound() {
-        return semantic_type_is_assignable(node, nodes, &lower_type_text_or_name(&bound), actual);
+        return semantic_type_is_assignable_with_options(
+            node,
+            nodes,
+            &lower_type_text_or_name(&bound),
+            actual,
+            options,
+        );
     }
     let constraints = type_param.rendered_constraints();
     if !constraints.is_empty() {
-        return constraints
-            .iter()
-            .map(|constraint| lower_type_text_or_name(constraint))
-            .any(|constraint| semantic_type_is_assignable(node, nodes, &constraint, actual));
+        return constraints.iter().map(|constraint| lower_type_text_or_name(constraint)).any(
+            |constraint| {
+                semantic_type_is_assignable_with_options(node, nodes, &constraint, actual, options)
+            },
+        );
     }
     true
 }
@@ -1312,6 +1385,7 @@ pub(crate) fn infer_generic_type_param_bindings(
     generic_names: &BTreeSet<String>,
     substitutions: &GenericTypeParamSubstitutions,
     type_pack_names: &BTreeSet<String>,
+    options: AssignabilityOptions,
 ) -> Option<GenericTypeParamSubstitutions> {
     infer_generic_type_param_bindings_full(
         node,
@@ -1321,6 +1395,7 @@ pub(crate) fn infer_generic_type_param_bindings(
         generic_names,
         substitutions,
         type_pack_names,
+        options,
     )
 }
 
@@ -1332,6 +1407,7 @@ fn infer_generic_type_param_bindings_full(
     generic_names: &BTreeSet<String>,
     substitutions: &GenericTypeParamSubstitutions,
     type_pack_names: &BTreeSet<String>,
+    options: AssignabilityOptions,
 ) -> Option<GenericTypeParamSubstitutions> {
     if let SemanticType::Name(name) = &actual
         && name.is_empty()
@@ -1346,7 +1422,9 @@ fn infer_generic_type_param_bindings_full(
             .types
             .get(name)
             .map(|existing| {
-                merge_generic_type_candidates_with_context(node, nodes, existing, actual)
+                merge_generic_type_candidates_with_context_and_options(
+                    node, nodes, existing, actual, options,
+                )
             })
             .unwrap_or_else(|| actual.clone());
         let mut inferred = GenericTypeParamSubstitutions::default();
@@ -1367,10 +1445,17 @@ fn infer_generic_type_param_bindings_full(
                 generic_names,
                 substitutions,
                 type_pack_names,
+                options,
             )?;
             let combined = combine_generic_substitutions(substitutions, &candidate);
             let substituted_annotation = substitute_semantic_type_params(annotation, &combined);
-            if !semantic_type_is_assignable(node, nodes, &substituted_annotation, &branch) {
+            if !semantic_type_is_assignable_with_options(
+                node,
+                nodes,
+                &substituted_annotation,
+                &branch,
+                options,
+            ) {
                 return None;
             }
             candidates.push(candidate);
@@ -1392,11 +1477,18 @@ fn infer_generic_type_param_bindings_full(
                     generic_names,
                     substitutions,
                     type_pack_names,
+                    options,
                 )?;
                 let combined = combine_generic_substitutions(substitutions, &candidate);
                 let substituted_branch = substitute_semantic_type_params(&branch, &combined);
-                semantic_type_is_assignable(node, nodes, &substituted_branch, actual)
-                    .then_some(candidate)
+                semantic_type_is_assignable_with_options(
+                    node,
+                    nodes,
+                    &substituted_branch,
+                    actual,
+                    options,
+                )
+                .then_some(candidate)
             })
             .collect::<Vec<_>>();
         return select_best_union_branch_binding(candidates);
@@ -1410,6 +1502,7 @@ fn infer_generic_type_param_bindings_full(
         generic_names,
         substitutions,
         type_pack_names,
+        options,
     )
 }
 
@@ -1421,6 +1514,7 @@ pub(crate) fn infer_generic_type_param_bindings_semantic(
     generic_names: &BTreeSet<String>,
     substitutions: &GenericTypeParamSubstitutions,
     type_pack_names: &BTreeSet<String>,
+    options: AssignabilityOptions,
 ) -> Option<GenericTypeParamSubstitutions> {
     match (annotation.generic_parts(), actual.generic_parts()) {
         (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
@@ -1434,9 +1528,10 @@ pub(crate) fn infer_generic_type_param_bindings_semantic(
                 generic_names,
                 substitutions,
                 type_pack_names,
+                options,
             )
         }
-        _ => semantic_type_is_assignable(node, nodes, annotation, actual)
+        _ => semantic_type_is_assignable_with_options(node, nodes, annotation, actual, options)
             .then_some(GenericTypeParamSubstitutions::default()),
     }
 }
@@ -1499,16 +1594,17 @@ pub(crate) fn merge_generic_type_candidates(
     }
 }
 
-pub(crate) fn merge_generic_type_candidates_with_context(
+pub(crate) fn merge_generic_type_candidates_with_context_and_options(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     existing: &SemanticType,
     actual: &SemanticType,
+    options: AssignabilityOptions,
 ) -> SemanticType {
-    if semantic_type_is_assignable(node, nodes, actual, existing) {
+    if semantic_type_is_assignable_with_options(node, nodes, actual, existing, options) {
         return actual.clone();
     }
-    if semantic_type_is_assignable(node, nodes, existing, actual) {
+    if semantic_type_is_assignable_with_options(node, nodes, existing, actual, options) {
         return existing.clone();
     }
     merge_generic_type_candidates(existing, actual)
@@ -1730,6 +1826,7 @@ pub(crate) fn infer_generic_type_arg_bindings(
     generic_names: &BTreeSet<String>,
     substitutions: &GenericTypeParamSubstitutions,
     type_pack_names: &BTreeSet<String>,
+    options: AssignabilityOptions,
 ) -> Option<GenericTypeParamSubstitutions> {
     let expected_args = expand_inferred_generic_args(expected_args, type_pack_names);
     let actual_args = expand_inferred_generic_args(actual_args, type_pack_names);
@@ -1748,6 +1845,7 @@ pub(crate) fn infer_generic_type_arg_bindings(
                 node,
                 nodes,
                 &mut inferred,
+                options,
                 infer_generic_type_param_bindings_full(
                     node,
                     nodes,
@@ -1756,6 +1854,7 @@ pub(crate) fn infer_generic_type_arg_bindings(
                     generic_names,
                     substitutions,
                     type_pack_names,
+                    options,
                 )?,
             )?;
         }
@@ -1775,6 +1874,7 @@ pub(crate) fn infer_generic_type_arg_bindings(
                 node,
                 nodes,
                 &mut inferred,
+                options,
                 infer_generic_type_param_bindings_full(
                     node,
                     nodes,
@@ -1783,6 +1883,7 @@ pub(crate) fn infer_generic_type_arg_bindings(
                     generic_names,
                     substitutions,
                     type_pack_names,
+                    options,
                 )?,
             )?;
         }
@@ -1797,6 +1898,7 @@ pub(crate) fn infer_generic_type_arg_bindings(
             node,
             nodes,
             &mut inferred,
+            options,
             infer_generic_type_param_bindings_full(
                 node,
                 nodes,
@@ -1805,6 +1907,7 @@ pub(crate) fn infer_generic_type_arg_bindings(
                 generic_names,
                 substitutions,
                 type_pack_names,
+                options,
             )?,
         )?;
     }
@@ -1815,13 +1918,19 @@ pub(crate) fn merge_nested_generic_bindings(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     inferred: &mut GenericTypeParamSubstitutions,
+    options: AssignabilityOptions,
     nested: GenericTypeParamSubstitutions,
 ) -> Option<()> {
     for (name, actual_type) in nested.types {
         match inferred.types.get(&name) {
             Some(existing) if existing != &actual_type => {
-                let merged =
-                    merge_generic_type_candidates_with_context(node, nodes, existing, &actual_type);
+                let merged = merge_generic_type_candidates_with_context_and_options(
+                    node,
+                    nodes,
+                    existing,
+                    &actual_type,
+                    options,
+                );
                 inferred.types.insert(name, merged);
             }
             Some(_) => {}

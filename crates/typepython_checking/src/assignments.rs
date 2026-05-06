@@ -141,8 +141,13 @@ pub(super) fn annotated_assignment_type_diagnostics(
             continue;
         }
 
-        let Some(actual) = resolve_assignment_site_semantic_type(node, nodes, None, assignment)
-        else {
+        let Some(actual) = resolve_assignment_site_semantic_type_with_options(
+            node,
+            nodes,
+            None,
+            assignment,
+            context.assignability_options(),
+        ) else {
             continue;
         };
         let expected_type = lower_type_text_or_name(&expected);

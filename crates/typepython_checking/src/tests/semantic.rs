@@ -111,6 +111,17 @@ fn check_accepts_callable_none_return_when_strict_nulls_is_disabled() {
 }
 
 #[test]
+fn check_accepts_bounded_generic_none_argument_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        "def first[T: int](value: T) -> T:\n    return value\n\nresult: int = first(None)\n",
+        ParseOptions::default(),
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_rejects_none_literal_assignment_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "from typing import Literal\n\nvalue: Literal[1] = None\n",
