@@ -19,10 +19,11 @@
 
 <p align="center">
   TypePython is a typed dialect of Python that compiles to standard <code>.py</code> + <code>.pyi</code>.<br/>
-  It brings TypeScript-class ergonomics — <code>sealed</code> classes, exhaustive <code>match</code>,
+  It brings author-time TypeScript-class ergonomics — <code>sealed</code> classes, exhaustive <code>match</code>,
   strict null checks, <code>unknown</code>, <code>interface</code>, <code>data class</code> —
   to a language whose output runs anywhere CPython runs.<br/>
-  <em>No custom runtime. No per-checker plugin. No vendor lock-in.</em>
+  Those stronger checks are enforced while authoring <code>.tpy</code>; emitted artifacts remain standard Python and do not transfer every TypePython-only constraint to downstream checkers.<br/>
+  <em>No custom runtime. No required per-checker plugin for emitted output. No vendor lock-in.</em>
 </p>
 
 ---
@@ -48,7 +49,7 @@ def evaluate(expr: Expr) -> int:
     # Add a fourth subclass and TypePython tells you exactly where to update.
 ```
 
-`typepython build` lowers that to ordinary Python and writes a matching `.pyi` that any modern type checker can consume:
+`typepython build` lowers that to ordinary Python and writes a matching `.pyi` that any modern type checker can consume. The exhaustiveness proof happens before emit; downstream tools see a normal Python class hierarchy:
 
 ```python
 # .typepython/build/app/expr.py        # runs on stock CPython, no TypePython runtime
@@ -94,8 +95,10 @@ Full lowering map: [`docs/interop.md`](docs/interop.md) · syntax tour: [`docs/s
 
 Python's type story has gotten genuinely good. TypePython exists for the gaps that source-only annotations still can't close.
 
-| Capability                                              | mypy strict | pyright strict | PEP 695 `.py` | **TypePython `.tpy`** |
-| ------------------------------------------------------- | :---------: | :------------: | :-----------: | :-------------------: |
+The comparison below is about `.tpy` authoring inside the package checked by TypePython. Emitted `.py` / `.pyi` remain standard Python typing, so external consumers do not automatically inherit TypePython-only constraints such as sealed exhaustiveness or `unknown` strictness.
+
+| Capability                                              | mypy strict | pyright strict | PEP 695 `.py` | **TypePython `.tpy` authoring** |
+| ------------------------------------------------------- | :---------: | :------------: | :-----------: | :--------------------------------: |
 | `sealed class` + compiler-proved exhaustiveness         |      —      |       —        |       —       |          ✅           |
 | `unknown` — safe dynamic boundary, must narrow          |      —      |       —        |       —       |          ✅           |
 | `unsafe:` audit fence for `eval` / `exec` / `setattr`   |      —      |       —        |       —       |          ✅           |
@@ -109,7 +112,7 @@ TypePython doesn't replace those checkers. It sits **one step earlier**: you aut
 ## Who this is for
 
 - **Python developers who envy TypeScript.** You want sealed unions, exhaustiveness, `unknown`, strict nulls, and `interface` without inventing five mypy plugins to get there.
-- **Library authors.** You publish a typed package and need `py.typed`, `.pyi`, wheel/sdist contents, and public-API drift to all stay in sync. `verify`, `compat`, and `api-diff` are built for that.
+- **Library authors.** You publish a standard typed package and need `py.typed`, `.pyi`, wheel/sdist contents, and public-API drift to all stay in sync. TypePython-only safety applies inside the author package checked by TypePython; downstream users receive portable Python typing unless they also opt into TypePython-aware metadata or checking.
 - **Application teams adopting types gradually.** Mix `.tpy`, `.py`, and `.pyi` in the same source tree; baseline existing debt; gate new debt with type-budgets.
 - **Framework authors** (advanced, currently prototype). Describe your runtime-generated shape **once**, declaratively, and stop maintaining one plugin per checker.
 - **Platform / typing owners.** Centralize multi-checker policy, dependency type-health checks, and framework adapters in CI.
@@ -154,8 +157,7 @@ TypePython makes one strong promise about its output:
 
 > Emitted `.py` and `.pyi` contain **only standard Python typing constructs**. Nothing TypePython-specific leaves the build directory.
 
-A few stronger guarantees are author-time only — they live in your `.tpy` source and intentionally
-degrade to standard typing surfaces in consumer-facing artifacts:
+The stronger guarantee is for the package while it is authored and checked by TypePython. A few facts intentionally degrade to standard typing surfaces in consumer-facing artifacts:
 
 | TypePython author-time fact         | Stability status                | At the boundary                                |
 | ----------------------------------- | ------------------------------- | ---------------------------------------------- |
@@ -165,7 +167,7 @@ degrade to standard typing surfaces in consumer-facing artifacts:
 | `TypedDict` transforms              | Stable Core v1                  | expanded to standard `TypedDict` shapes        |
 | effect, taint, and witness facts    | Roadmap / prototype             | checked at author-time; erased or sidecar-only |
 
-This trade is intentional: **you get stronger checks while authoring; consumers get clean, portable Python they can read with mypy, pyright, ty, IDEs, and any PEP 561 tool**. See [`docs/interop.md`](docs/interop.md), [`docs/feature-status.md`](docs/feature-status.md), and [`docs/author-time-semantics.md`](docs/author-time-semantics.md).
+This trade is intentional: **the author package gets stronger checks before publish; consumers get clean, portable Python they can read with mypy, pyright, ty, IDEs, and any PEP 561 tool**. Carrying TypePython-only semantics across that boundary would require an opt-in sidecar, checker plugin, or TypePython-aware consumer. See [`docs/interop.md`](docs/interop.md), [`docs/feature-status.md`](docs/feature-status.md), and [`docs/author-time-semantics.md`](docs/author-time-semantics.md).
 
 ## For library and framework authors
 
@@ -181,7 +183,7 @@ typepython api-diff    dist/previous.whl .typepython/build
 typepython type-health --project . --fail-under 85
 ```
 
-These catch missing/stale `py.typed`, wheel ↔ build-tree drift, multi-checker portability gaps, public-API drift between releases, and runtime-annotation hazards for frameworks that introspect annotations.
+These catch missing/stale `py.typed`, wheel ↔ build-tree drift, multi-checker portability gaps, public-API drift between releases, and runtime-annotation hazards for frameworks that introspect annotations. They validate the standard published surface; they do not make ordinary downstream `.py` checkers enforce TypePython-only facts.
 
 **Framework shape adapters** *(prototype tier)* — describe a runtime-generated API once, lower it into `.pyi` declaratively, and skip per-checker plugins:
 
@@ -208,7 +210,7 @@ The breakdown:
 
 | Tier | What's there |
 | ---- | ------------ |
-| **Stable Core v1** | `.tpy` Core syntax; Core checker semantics such as sealed exhaustiveness, `unknown` narrowing, `unsafe:` fences, and supported `TypedDict` transforms; project discovery and `typepython.toml` Core config; `init`, `check`, `build`, `clean`, `verify`; diagnostic code identity; `.py` lowering and `.pyi` generation with no mandatory TypePython runtime. |
+| **Stable Core v1** | `.tpy` Core syntax; Core checker semantics for TypePython-checked author packages, such as sealed exhaustiveness, `unknown` narrowing, `unsafe:` fences, and supported `TypedDict` transforms; project discovery and `typepython.toml` Core config; `init`, `check`, `build`, `clean`, `verify`; diagnostic code identity; `.py` lowering and `.pyi` generation with no mandatory TypePython runtime. |
 | **Supported DX, non-stable** | `watch`, LSP UX details, `compat`, `api-diff`, `type-health`, `migrate`, checker portability profiles, type budgets, and migration dashboards. |
 | **Experimental opt-in** | runtime validators, shape projection beyond `TypedDict`, conditional return syntax, pass-through `.py` inference, sync/async dual emit paths, and other opt-in research slices. |
 | **Roadmap / prototype** | framework adapter manifests and SDK details, effect/capability rows beyond `unsafe:`, taint facts, validator witnesses, notebook ingestion, and other deferred research tracks. |
