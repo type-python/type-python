@@ -57,6 +57,11 @@ class EditorIntegrationTests(unittest.TestCase):
         self.assertIn("TYPEPYTHON_BIN", extension)
         self.assertIn("typepython.restartServer", extension)
         self.assertIn("createFileSystemWatcher", extension)
+        self.assertIn("hasTypePythonProjectConfig", extension)
+        self.assertIn("typepython.toml", extension)
+        self.assertIn(r"\[tool\.typepython", extension)
+        self.assertIn("shouldStartServer", extension)
+        self.assertIn("TypePython project config not found", extension)
 
     def test_lsp_docs_reference_official_extension_and_generic_editors(self) -> None:
         lsp = read_text("docs/lsp.md")

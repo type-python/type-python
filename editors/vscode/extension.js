@@ -1,4 +1,6 @@
 const vscode = require("vscode");
+const fs = require("fs");
+const path = require("path");
 const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
 
 let client;
@@ -14,6 +16,31 @@ function workspaceProjectPath() {
   }
   const folder = vscode.workspace.workspaceFolders?.[0];
   return folder ? folder.uri.fsPath : ".";
+}
+
+function hasConfiguredProjectPath() {
+  const configured = extensionConfig().get("projectPath");
+  return Boolean(configured && configured.trim() !== "");
+}
+
+function hasTypePythonProjectConfig(projectPath) {
+  if (fs.existsSync(path.join(projectPath, "typepython.toml"))) {
+    return true;
+  }
+  const pyprojectPath = path.join(projectPath, "pyproject.toml");
+  if (!fs.existsSync(pyprojectPath)) {
+    return false;
+  }
+  try {
+    const pyproject = fs.readFileSync(pyprojectPath, "utf8");
+    return /^\s*\[tool\.typepython(?:\]|\.)/m.test(pyproject);
+  } catch (_) {
+    return false;
+  }
+}
+
+function shouldStartServer() {
+  return hasConfiguredProjectPath() || hasTypePythonProjectConfig(workspaceProjectPath());
 }
 
 function binaryPath() {
@@ -63,7 +90,15 @@ function buildClient(context) {
   return languageClient;
 }
 
-async function startServer(context) {
+async function startServer(context, explicit = false) {
+  if (!shouldStartServer()) {
+    if (explicit) {
+      vscode.window.showWarningMessage(
+        "TypePython project config not found. Add typepython.toml, [tool.typepython], or set typepython.projectPath."
+      );
+    }
+    return;
+  }
   if (client) {
     await client.stop();
   }
@@ -74,7 +109,7 @@ async function startServer(context) {
 async function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand("typepython.restartServer", async () => {
-      await startServer(context);
+      await startServer(context, true);
     })
   );
   await startServer(context);
