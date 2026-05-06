@@ -64,6 +64,12 @@ The server also exposes source actions for project-level workflows so editor int
 
 The command argument is the current document URI. Project-level workflow commands execute the corresponding TypePython CLI workflow for the active workspace. `typepython.previewEmit` runs in memory and returns a JSON payload with `python` and `stub` fields so editors can show a preview without materializing build artifacts. `typepython.findTypeSource` takes `[uri, line, character]` and reports whether `Any`/`unknown` came from typing, an explicit TypePython boundary, a project declaration, or an unresolved import fallback.
 
+Code-action behavior is covered by LSP tests for diagnostic quick fixes, project
+workflow command IDs, portability rewrites, and empty-range source actions:
+`code_actions_offer_machine_applicable_return_suggestion`,
+`code_actions_offer_project_workflow_commands`, and
+`code_action_returns_only_source_commands_when_no_quickfixes_apply`.
+
 ### Formatting
 
 Document formatting is exposed via `textDocument/formatting`.
@@ -80,6 +86,11 @@ Example configuration:
 command = ["python3", "{workspace_root}/tools/format_stdin.py", "{file}"]
 line_length = 1000
 ```
+
+Formatter behavior is covered by golden-style LSP tests for restored `.tpy`
+source edits and explicit formatter startup failures:
+`formatting_returns_restored_typepython_source_edits` and
+`formatting_reports_missing_explicit_formatter`.
 
 ### Hover
 

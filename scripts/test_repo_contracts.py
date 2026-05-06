@@ -408,6 +408,24 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("configuration reload", dx)
         self.assertIn("rebuild failure recovery", dx)
 
+    def test_formatter_and_code_action_golden_coverage_is_documented(self) -> None:
+        lsp_tests = read_text("crates/typepython_lsp/src/tests.rs")
+        lsp_docs = read_text("docs/lsp.md")
+        dx = read_text("docs/dx-stability.md")
+
+        for test_name in (
+            "formatting_returns_restored_typepython_source_edits",
+            "formatting_reports_missing_explicit_formatter",
+            "code_actions_offer_machine_applicable_return_suggestion",
+            "code_actions_offer_project_workflow_commands",
+            "code_action_returns_only_source_commands_when_no_quickfixes_apply",
+        ):
+            self.assertIn(test_name, lsp_tests)
+            self.assertIn(test_name, lsp_docs)
+
+        self.assertIn("formatting and code-action golden tests", dx)
+        self.assertIn("diagnostic quick fixes and command IDs", dx)
+
     def test_conformance_beta_scope_classification_is_precise(self) -> None:
         conformance_report = load_script_module(
             "scripts/conformance_report.py",
