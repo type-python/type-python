@@ -6538,6 +6538,131 @@ fn check_accepts_callable_assignment_compatibility() {
     assert!(result.diagnostics.is_empty());
 }
 
+fn check_callable_assignment_from_function(
+    expected: &str,
+    actual_signature: &str,
+) -> crate::CheckResult {
+    check(&ModuleGraph {
+        nodes: vec![ModuleNode {
+            module_path: PathBuf::from("src/app/module.py"),
+            module_key: String::from("app.module"),
+            module_kind: SourceKind::Python,
+            declarations: vec![
+                declaration! {
+                    name: String::from("handler"),
+                    kind: DeclarationKind::Value,
+                    metadata: value_metadata(expected),
+                    value_type_expr: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+                declaration! {
+                    name: String::from("takes"),
+                    kind: DeclarationKind::Function,
+                    metadata: callable_metadata(actual_signature),
+                    value_type_expr: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+            ],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: vec![typepython_binding::AssignmentSite {
+                name: String::from("handler"),
+                destructuring_target_names: None,
+                destructuring_index: None,
+                annotation: Some(expected.to_owned()),
+                annotation_expr: None,
+                is_awaited: false,
+                value_callee: None,
+                value_name: Some(String::from("takes")),
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+                value_subscript_target: None,
+                value_subscript_string_key: None,
+                value_subscript_index: None,
+                value_if_true: None,
+                value_if_false: None,
+                value_if_guard: None,
+                value_bool_left: None,
+                value_bool_right: None,
+                value_binop_left: None,
+                value_binop_right: None,
+                value_binop_operator: None,
+                value_lambda: None,
+                value_list_comprehension: None,
+                value_generator_comprehension: None,
+                value_list_elements: None,
+                value_set_elements: None,
+                value_dict_entries: None,
+                value: None,
+                owner_name: None,
+                owner_type_name: None,
+                line: 1,
+            }],
+            summary_fingerprint: 1,
+        }],
+    })
+}
+
+#[test]
+fn check_reports_callable_assignment_contravariant_parameter_mismatch() {
+    let result =
+        check_callable_assignment_from_function("Callable[[object], str]", "(value:str)->str");
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(
+        rendered.contains(
+            "assigns callable `Callable[[str], str]` where `handler` expects `Callable[[object], str]`"
+        ),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn check_accepts_callable_assignment_contravariant_parameter() {
+    let result =
+        check_callable_assignment_from_function("Callable[[str], str]", "(value:object)->str");
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
 #[test]
 fn check_accepts_annotated_type_equivalence() {
     let result = check(&ModuleGraph {

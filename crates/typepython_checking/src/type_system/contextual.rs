@@ -737,29 +737,24 @@ pub(super) fn callable_assignment_result(
         assignability_options,
     )?;
 
-    let params_match = expected_params.as_ref().is_none_or(|expected_params| {
-        expected_params.len() == actual_params.len()
-            && expected_params.iter().zip(actual_params.iter()).all(
-                |(expected_param, actual_param)| {
-                    semantic_type_is_assignable_with_options(
-                        node,
-                        nodes,
-                        expected_param,
-                        actual_param,
-                        assignability_options,
-                    )
-                },
-            )
-    });
+    let expected_callable = SemanticType::Callable {
+        params: expected_params
+            .map(SemanticCallableParams::ParamList)
+            .unwrap_or(SemanticCallableParams::Ellipsis),
+        return_type: Box::new(expected_return),
+    };
+    let actual_callable = SemanticType::Callable {
+        params: SemanticCallableParams::ParamList(actual_params.clone()),
+        return_type: Box::new(actual_return.clone()),
+    };
 
-    let matches = params_match
-        && semantic_type_is_assignable_with_options(
-            node,
-            nodes,
-            &expected_return,
-            &actual_return,
-            assignability_options,
-        );
+    let matches = semantic_type_is_assignable_with_options(
+        node,
+        nodes,
+        &expected_callable,
+        &actual_callable,
+        assignability_options,
+    );
 
     Some((!matches).then(|| {
         let actual_signature = format_semantic_assignment_signature(&actual_params, &actual_return);
