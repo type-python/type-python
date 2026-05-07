@@ -164,6 +164,7 @@ impl DirectCallResolutionFailure {
     reason = "call candidate resolution threads semantic call context and assignability policy"
 )]
 fn resolve_callable_candidate_from_semantics<'a>(
+    context: Option<&CheckerContext<'_>>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     declaration: &'a Declaration,
@@ -175,6 +176,16 @@ fn resolve_callable_candidate_from_semantics<'a>(
 ) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
     let substitutions = if declaration.type_params.is_empty() {
         GenericTypeParamSubstitutions::default()
+    } else if let Some(context) = context {
+        infer_generic_type_param_substitutions_from_semantic_params_detailed_with_context(
+            context,
+            node,
+            nodes,
+            declaration,
+            &semantic_params,
+            call,
+        )
+        .map_err(DirectCallResolutionFailure::GenericSolve)?
     } else {
         infer_generic_type_param_substitutions_from_semantic_params_detailed_with_options(
             node,
@@ -249,6 +260,7 @@ pub(super) fn resolve_direct_call_candidate_detailed_with_options<'a>(
         .map(|(provider_node, _)| provider_node)
         .unwrap_or(node);
     resolve_callable_candidate_from_semantics(
+        None,
         provider_node,
         nodes,
         declaration,
@@ -286,6 +298,7 @@ pub(super) fn resolve_direct_call_candidate_with_context_detailed<'a>(
         .map(|(provider_node, _)| provider_node)
         .unwrap_or(node);
     resolve_callable_candidate_from_semantics(
+        Some(context),
         provider_node,
         nodes,
         declaration,
@@ -358,6 +371,7 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
         .map(|(provider_node, _)| provider_node)
         .unwrap_or(node);
     resolve_callable_candidate_from_semantics(
+        None,
         provider_node,
         nodes,
         declaration,

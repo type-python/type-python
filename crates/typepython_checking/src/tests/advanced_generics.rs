@@ -385,6 +385,63 @@ fn check_infers_paramspec_from_callable_argument() {
 }
 
 #[test]
+fn check_paramspec_shape_inference_uses_context_decorated_metadata() {
+    let source_text = concat!(
+        "from typing import Callable, cast\n\n",
+        "def widen(fn: Callable[[str], str]) -> Callable[[object], str]:\n",
+        "    return cast(Callable[[object], str], fn)\n\n",
+        "@widen\n",
+        "def takes_str(value: str) -> str:\n",
+        "    return value\n",
+    );
+    let source = SourceFile {
+        path: PathBuf::from("virtual/app.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("app"),
+        text: source_text.to_owned(),
+    };
+    let tree = parse_with_options(source, ParseOptions::default());
+    let binding = bind(&tree);
+    let bound_surface_facts =
+        BTreeMap::from([(binding.module_key.clone(), binding.surface_facts.clone())]);
+    let graph = build(std::slice::from_ref(&binding));
+    let node = &graph.nodes[0];
+    let context = crate::CheckerContext::new_with_bound_surface_facts_and_options(
+        &graph.nodes,
+        None,
+        Some(&bound_surface_facts),
+        crate::CheckerOptions::default(),
+    );
+    let mut actual_value = crate::synthetic_direct_expr_metadata("Callable[[str], str]");
+    actual_value.value_name = Some(String::from("takes_str"));
+
+    let substitutions = crate::infer_callable_param_spec_bindings(
+        &context,
+        node,
+        &graph.nodes,
+        &crate::lower_type_text_or_name("Callable[P, str]"),
+        &crate::lower_type_text_or_name("Callable[[str], str]"),
+        Some(&actual_value),
+        &BTreeSet::new(),
+        &BTreeSet::from([String::from("P")]),
+        &crate::GenericTypeParamSubstitutions::default(),
+        crate::AssignabilityOptions::default(),
+    )
+    .expect("decorated callable metadata should infer ParamSpec bindings");
+
+    assert_eq!(
+        substitutions.param_lists.get("P").map(|binding| {
+            binding
+                .params
+                .iter()
+                .map(|param| param.annotation.as_deref().unwrap_or_default().to_owned())
+                .collect::<Vec<_>>()
+        }),
+        Some(vec![String::from("object")]),
+    );
+}
+
+#[test]
 fn check_instantiates_variadic_typevartuple_signature_and_return() {
     let node = ModuleNode {
         module_path: PathBuf::from("<generic-inference>"),

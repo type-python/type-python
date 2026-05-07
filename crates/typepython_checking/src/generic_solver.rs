@@ -410,6 +410,7 @@ fn expected_keyword_arg_semantic_types_from_semantic_params(
 
 fn infer_single_argument_bindings_detailed(
     solver: &mut GenericSolverState,
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     annotation: &SemanticType,
@@ -421,6 +422,7 @@ fn infer_single_argument_bindings_detailed(
     });
     let existing = solver.current_bindings_detailed(node, nodes)?;
     let bindings = infer_callable_param_spec_bindings(
+        context,
         node,
         nodes,
         annotation,
@@ -781,6 +783,21 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed_with_options(
     call: &typepython_binding::CallSite,
     options: AssignabilityOptions,
 ) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
+    let context = checker_context_for_assignability_options(nodes, options);
+    infer_generic_type_param_substitutions_detailed_with_context(
+        &context, node, nodes, function, signature, call,
+    )
+}
+
+pub(crate) fn infer_generic_type_param_substitutions_detailed_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    function: &Declaration,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    call: &typepython_binding::CallSite,
+) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
+    let options = context.assignability_options();
     let mut solver = GenericSolverState::new_with_options(function, options);
     let expected_positional_arg_types =
         expected_positional_arg_semantic_types_from_signature_sites(signature, call.arg_count);
@@ -830,6 +847,7 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed_with_options(
         };
         infer_single_argument_bindings_detailed(
             &mut solver,
+            context,
             node,
             nodes,
             &annotation,
@@ -850,6 +868,7 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed_with_options(
         };
         infer_single_argument_bindings_detailed(
             &mut solver,
+            context,
             node,
             nodes,
             &annotation,
@@ -869,6 +888,21 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
     call: &typepython_binding::CallSite,
     options: AssignabilityOptions,
 ) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
+    let context = checker_context_for_assignability_options(nodes, options);
+    infer_generic_type_param_substitutions_from_semantic_params_detailed_with_context(
+        &context, node, nodes, function, params, call,
+    )
+}
+
+pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detailed_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    function: &Declaration,
+    params: &[SemanticCallableParam],
+    call: &typepython_binding::CallSite,
+) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
+    let options = context.assignability_options();
     let mut solver = GenericSolverState::new_with_options(function, options);
     let expected_positional_arg_types =
         expected_positional_arg_semantic_types_from_semantic_params(params, call.arg_count);
@@ -918,6 +952,7 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
         };
         infer_single_argument_bindings_detailed(
             &mut solver,
+            context,
             node,
             nodes,
             &annotation,
@@ -938,6 +973,7 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
         };
         infer_single_argument_bindings_detailed(
             &mut solver,
+            context,
             node,
             nodes,
             &annotation,
@@ -1046,6 +1082,7 @@ pub(crate) fn instantiate_direct_function_param_annotation(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn infer_callable_param_spec_bindings(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     annotation: &SemanticType,
@@ -1068,7 +1105,7 @@ pub(crate) fn infer_callable_param_spec_bindings(
     }
 
     let (actual_binding, actual_return) =
-        resolve_callable_shape_from_actual(node, nodes, actual, actual_value)?;
+        resolve_callable_shape_from_actual(context, node, nodes, actual, actual_value)?;
     let mut bindings = infer_callable_param_expr_bindings(
         node,
         nodes,
@@ -1198,13 +1235,15 @@ pub(crate) fn insert_param_spec_binding(
 }
 
 pub(crate) fn resolve_callable_shape_from_actual(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     actual: &SemanticType,
     actual_value: Option<&typepython_syntax::DirectExprMetadata>,
 ) -> Option<(ParamListBinding, SemanticType)> {
     if let Some(actual_value) = actual_value
-        && let Some(shape) = resolve_callable_shape_from_metadata(node, nodes, actual_value, actual)
+        && let Some(shape) =
+            resolve_callable_shape_from_metadata(context, node, nodes, actual_value, actual)
     {
         return Some(shape);
     }
@@ -1220,6 +1259,7 @@ pub(crate) fn resolve_callable_shape_from_actual(
 }
 
 pub(crate) fn resolve_callable_shape_from_metadata(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     actual_value: &typepython_syntax::DirectExprMetadata,
@@ -1253,7 +1293,7 @@ pub(crate) fn resolve_callable_shape_from_metadata(
 
     let function_name = actual_value.value_name.as_deref()?;
     if let Some(callable_type) = resolve_decorated_function_callable_semantic_type_with_context(
-        &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+        context,
         node,
         nodes,
         function_name,
