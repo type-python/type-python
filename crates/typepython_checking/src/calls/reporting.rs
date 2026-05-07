@@ -521,6 +521,7 @@ pub(super) fn describe_return_trace_expression(
 }
 
 pub(super) fn inferred_return_type_for_owner(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     return_site: &typepython_binding::ReturnSite,
@@ -537,7 +538,7 @@ pub(super) fn inferred_return_type_for_owner(
 
     let mut trace_types = Vec::new();
     for candidate in related_returns {
-        let contextual = resolve_contextual_return_type(node, nodes, candidate, expected);
+        let contextual = resolve_contextual_return_type(context, node, nodes, candidate, expected);
         let candidate_type = contextual
             .actual_type
             .or_else(|| direct_return_site_semantic_type(node, nodes, candidate))
@@ -554,6 +555,7 @@ pub(super) fn inferred_return_type_for_owner(
 
 pub(super) fn attach_return_inference_trace(
     mut diagnostic: Diagnostic,
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     return_site: &typepython_binding::ReturnSite,
@@ -573,7 +575,7 @@ pub(super) fn attach_return_inference_trace(
     let mut trace_lines = Vec::new();
 
     for candidate in related_returns {
-        let contextual = resolve_contextual_return_type(node, nodes, candidate, expected);
+        let contextual = resolve_contextual_return_type(context, node, nodes, candidate, expected);
         let candidate_type = contextual
             .actual_type
             .or_else(|| direct_return_site_semantic_type(node, nodes, candidate))
@@ -587,7 +589,7 @@ pub(super) fn attach_return_inference_trace(
         ));
     }
 
-    let inferred_return_type = inferred_return_type_for_owner(node, nodes, return_site, expected)
+    let inferred_return_type = inferred_return_type_for_owner(context, node, nodes, return_site, expected)
         .unwrap_or_else(|| normalize_type_text(actual));
     diagnostic = diagnostic
         .with_note(format!(

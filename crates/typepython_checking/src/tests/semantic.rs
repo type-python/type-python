@@ -144,6 +144,23 @@ fn check_accepts_none_return_when_strict_nulls_is_disabled() {
 }
 
 #[test]
+fn check_accepts_none_contextual_typed_dict_return_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        concat!(
+            "from typing import TypedDict\n\n",
+            "class Payload(TypedDict):\n",
+            "    body: str\n\n",
+            "def build() -> Payload:\n",
+            "    return {\"body\": None}\n",
+        ),
+        ParseOptions::default(),
+        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_callable_none_return_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "from typing import Callable\n\nhandler: Callable[[int], int] = lambda value: None\n",

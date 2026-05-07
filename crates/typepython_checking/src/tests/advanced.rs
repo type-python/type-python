@@ -20002,8 +20002,10 @@ fn inferred_return_trace_prefers_structured_return_metadata() {
         summary_fingerprint: 0,
     };
 
+    let context = crate::CheckerContext::new(&[], crate::ImportFallback::Unknown, None);
     assert_eq!(
-        crate::inferred_return_type_for_owner(&node, &[], &node.returns[0], "int").as_deref(),
+        crate::inferred_return_type_for_owner(&context, &node, &[], &node.returns[0], "int")
+            .as_deref(),
         Some("int"),
     );
 }

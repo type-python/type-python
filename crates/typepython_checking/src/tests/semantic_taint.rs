@@ -51,6 +51,40 @@ fn check_rejects_nested_tainted_value_to_plain_type() {
 }
 
 #[test]
+fn check_rejects_tainted_contextual_typed_dict_return_when_taint_is_enabled() {
+    let result = check_temp_typepython_source_with_taint(concat!(
+        "from typing import TypedDict\n\n",
+        "class Payload(TypedDict):\n",
+        "    body: str\n\n",
+        "def request_body() -> Tainted[str, \"html\"]:\n",
+        "    ...\n\n",
+        "def build() -> Payload:\n",
+        "    return {\"body\": request_body()}\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4013"), "{rendered}");
+    assert!(rendered.contains("Tainted[str, \"html\"]"), "{rendered}");
+}
+
+#[test]
+fn check_rejects_tainted_contextual_typed_dict_yield_when_taint_is_enabled() {
+    let result = check_temp_typepython_source_with_taint(concat!(
+        "from typing import Generator, TypedDict\n\n",
+        "class Payload(TypedDict):\n",
+        "    body: str\n\n",
+        "def request_body() -> Tainted[str, \"html\"]:\n",
+        "    ...\n\n",
+        "def build() -> Generator[Payload, None, None]:\n",
+        "    yield {\"body\": request_body()}\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4013"), "{rendered}");
+    assert!(rendered.contains("Tainted[str, \"html\"]"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_explicit_taint_sanitizer_result() {
     let result = check_temp_typepython_source_with_taint(concat!(
         "def escape_html(value: Tainted[str, \"html\"]) -> str:\n",

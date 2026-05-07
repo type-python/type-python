@@ -415,7 +415,7 @@ pub(super) fn attach_missing_none_return_suggestion(
     expected: &str,
     actual: &str,
 ) -> Diagnostic {
-    let inferred_actual = inferred_return_type_for_owner(node, nodes, return_site, expected)
+    let inferred_actual = inferred_return_type_for_owner(context, node, nodes, return_site, expected)
         .unwrap_or_else(|| normalize_type_text(actual));
     if union_branches(expected)
         .is_some_and(|branches| branches.iter().any(|branch| branch == "None"))
@@ -429,7 +429,7 @@ pub(super) fn attach_missing_none_return_suggestion(
     };
     let expected_type = lower_type_text_or_name(expected);
     let without_none_type = lower_type_text_or_name(&without_none);
-    if !semantic_type_is_assignable(node, nodes, &expected_type, &without_none_type) {
+    if !context.semantic_type_is_assignable(node, &expected_type, &without_none_type) {
         return diagnostic;
     }
     if node.module_path.to_string_lossy().starts_with('<') {

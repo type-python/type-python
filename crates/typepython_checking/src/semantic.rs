@@ -1694,7 +1694,8 @@ pub(super) fn direct_return_type_diagnostics(
         }
         let expected = diagnostic_type_text(&expected_type);
 
-        let contextual = resolve_contextual_return_type(node, nodes, return_site, &expected);
+        let contextual =
+            resolve_contextual_return_type(context, node, nodes, return_site, &expected);
         diagnostics.extend(contextual.diagnostics);
         let Some(actual) = contextual.actual_type else {
             continue;
@@ -1740,6 +1741,7 @@ pub(super) fn direct_return_type_diagnostics(
             );
             let diagnostic = attach_return_inference_trace(
                 diagnostic,
+                context,
                 node,
                 nodes,
                 return_site,
@@ -1767,6 +1769,7 @@ pub(super) struct ContextualReturnTypeResult {
 }
 
 pub(super) fn resolve_contextual_return_type(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     return_site: &typepython_binding::ReturnSite,
@@ -1791,7 +1794,7 @@ pub(super) fn resolve_contextual_return_type(
         };
     }
     if let Some(result) = resolve_contextual_typed_dict_literal_semantic_type_with_context(
-        &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+        context,
         node,
         nodes,
         return_site.line,
@@ -1804,7 +1807,7 @@ pub(super) fn resolve_contextual_return_type(
         };
     }
     if let Some(result) = resolve_contextual_collection_literal_semantic_type_in_scope_with_context(
-        &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+        context,
         node,
         nodes,
         None,
@@ -1821,7 +1824,7 @@ pub(super) fn resolve_contextual_return_type(
     }
     ContextualReturnTypeResult {
         actual_type: return_site.value_metadata().as_ref().and_then(|metadata| {
-            resolve_direct_expression_semantic_type_from_metadata(
+            resolve_direct_expression_semantic_type_from_metadata_with_options(
                 node,
                 nodes,
                 None,
@@ -1829,6 +1832,7 @@ pub(super) fn resolve_contextual_return_type(
                 return_site.owner_type_name.as_deref(),
                 return_site.line,
                 metadata,
+                context.assignability_options(),
             )
         }),
         diagnostics: Vec::new(),
@@ -1909,6 +1913,7 @@ pub(super) struct ContextualYieldTypeResult {
 }
 
 pub(super) fn resolve_contextual_yield_type(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     yield_site: &typepython_binding::YieldSite,
@@ -1934,7 +1939,7 @@ pub(super) fn resolve_contextual_yield_type(
             };
         }
         if let Some(result) = resolve_contextual_typed_dict_literal_semantic_type_with_context(
-            &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+            context,
             node,
             nodes,
             yield_site.line,
@@ -1948,7 +1953,7 @@ pub(super) fn resolve_contextual_yield_type(
         }
         if let Some(result) =
             resolve_contextual_collection_literal_semantic_type_in_scope_with_context(
-                &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+                context,
                 node,
                 nodes,
                 None,
@@ -1967,7 +1972,7 @@ pub(super) fn resolve_contextual_yield_type(
     }
     ContextualYieldTypeResult {
         actual_type: yield_site.value_metadata().as_ref().and_then(|metadata| {
-            resolve_direct_expression_semantic_type_from_metadata(
+            resolve_direct_expression_semantic_type_from_metadata_with_options(
                 node,
                 nodes,
                 None,
@@ -1975,6 +1980,7 @@ pub(super) fn resolve_contextual_yield_type(
                 yield_site.owner_type_name.as_deref(),
                 yield_site.line,
                 metadata,
+                context.assignability_options(),
             )
         }),
         diagnostics: Vec::new(),
@@ -2013,7 +2019,7 @@ pub(super) fn direct_yield_type_diagnostics(
         };
         let expected_type = rewrite_imported_typing_semantic_type(node, &expected_type);
         let expected = diagnostic_type_text(&expected_type);
-        let contextual = resolve_contextual_yield_type(node, nodes, yield_site, &expected);
+        let contextual = resolve_contextual_yield_type(context, node, nodes, yield_site, &expected);
         diagnostics.extend(contextual.diagnostics);
         let Some(actual) = contextual.actual_type else {
             continue;
