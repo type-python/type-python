@@ -1642,6 +1642,34 @@ fn collect_unknown_direct_expression_operation_diagnostics(
     diagnostics: &mut Vec<Diagnostic>,
     seen: &mut std::collections::BTreeSet<String>,
 ) {
+    let suppressed_names = std::collections::BTreeSet::new();
+    collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
+        context,
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        line,
+        metadata,
+        &suppressed_names,
+        diagnostics,
+        seen,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    suppressed_names: &std::collections::BTreeSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+    seen: &mut std::collections::BTreeSet<String>,
+) {
     if let Some(target) = metadata.value_subscript_target.as_deref() {
         if direct_expr_metadata_resolves_to_unknown(
             context,
@@ -1651,6 +1679,7 @@ fn collect_unknown_direct_expression_operation_diagnostics(
             current_owner_type_name,
             line,
             target,
+            suppressed_names,
         ) {
             let label = direct_expr_operation_label(target);
             push_unique_unknown_operation_diagnostic(
@@ -1664,7 +1693,7 @@ fn collect_unknown_direct_expression_operation_diagnostics(
                 ),
             );
         }
-        collect_unknown_direct_expression_operation_diagnostics(
+        collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
             context,
             node,
             nodes,
@@ -1672,6 +1701,7 @@ fn collect_unknown_direct_expression_operation_diagnostics(
             current_owner_type_name,
             line,
             target,
+            suppressed_names,
             diagnostics,
             seen,
         );
@@ -1691,6 +1721,7 @@ fn collect_unknown_direct_expression_operation_diagnostics(
                     current_owner_type_name,
                     line,
                     operand,
+                    suppressed_names,
                 )
             {
                 let label = direct_expr_operation_label(operand);
@@ -1721,7 +1752,7 @@ fn collect_unknown_direct_expression_operation_diagnostics(
     .into_iter()
     .flatten()
     {
-        collect_unknown_direct_expression_operation_diagnostics(
+        collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
             context,
             node,
             nodes,
@@ -1729,13 +1760,14 @@ fn collect_unknown_direct_expression_operation_diagnostics(
             current_owner_type_name,
             line,
             child,
+            suppressed_names,
             diagnostics,
             seen,
         );
     }
 
     if let Some(lambda) = metadata.value_lambda.as_deref() {
-        collect_unknown_direct_expression_operation_diagnostics(
+        collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
             context,
             node,
             nodes,
@@ -1743,6 +1775,7 @@ fn collect_unknown_direct_expression_operation_diagnostics(
             current_owner_type_name,
             line,
             &lambda.body,
+            suppressed_names,
             diagnostics,
             seen,
         );
@@ -1754,8 +1787,9 @@ fn collect_unknown_direct_expression_operation_diagnostics(
     .into_iter()
     .flatten()
     {
+        let mut comprehension_suppressed_names = suppressed_names.clone();
         for clause in &comprehension.clauses {
-            collect_unknown_direct_expression_operation_diagnostics(
+            collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
                 context,
                 node,
                 nodes,
@@ -1763,12 +1797,15 @@ fn collect_unknown_direct_expression_operation_diagnostics(
                 current_owner_type_name,
                 line,
                 &clause.iter,
+                suppressed_names,
                 diagnostics,
                 seen,
             );
+            comprehension_suppressed_names.insert(clause.target_name.clone());
+            comprehension_suppressed_names.extend(clause.target_names.iter().cloned());
         }
         if let Some(key) = comprehension.key.as_deref() {
-            collect_unknown_direct_expression_operation_diagnostics(
+            collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
                 context,
                 node,
                 nodes,
@@ -1776,11 +1813,12 @@ fn collect_unknown_direct_expression_operation_diagnostics(
                 current_owner_type_name,
                 line,
                 key,
+                &comprehension_suppressed_names,
                 diagnostics,
                 seen,
             );
         }
-        collect_unknown_direct_expression_operation_diagnostics(
+        collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
             context,
             node,
             nodes,
@@ -1788,6 +1826,7 @@ fn collect_unknown_direct_expression_operation_diagnostics(
             current_owner_type_name,
             line,
             &comprehension.element,
+            &comprehension_suppressed_names,
             diagnostics,
             seen,
         );
@@ -1798,7 +1837,7 @@ fn collect_unknown_direct_expression_operation_diagnostics(
         .flatten()
         .chain(metadata.value_set_elements.iter().flatten())
     {
-        collect_unknown_direct_expression_operation_diagnostics(
+        collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
             context,
             node,
             nodes,
@@ -1806,6 +1845,7 @@ fn collect_unknown_direct_expression_operation_diagnostics(
             current_owner_type_name,
             line,
             element,
+            suppressed_names,
             diagnostics,
             seen,
         );
@@ -1813,7 +1853,7 @@ fn collect_unknown_direct_expression_operation_diagnostics(
     if let Some(entries) = metadata.value_dict_entries.as_ref() {
         for entry in entries {
             if let Some(key) = entry.key_value.as_deref() {
-                collect_unknown_direct_expression_operation_diagnostics(
+                collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
                     context,
                     node,
                     nodes,
@@ -1821,11 +1861,12 @@ fn collect_unknown_direct_expression_operation_diagnostics(
                     current_owner_type_name,
                     line,
                     key,
+                    suppressed_names,
                     diagnostics,
                     seen,
                 );
             }
-            collect_unknown_direct_expression_operation_diagnostics(
+            collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
                 context,
                 node,
                 nodes,
@@ -1833,6 +1874,7 @@ fn collect_unknown_direct_expression_operation_diagnostics(
                 current_owner_type_name,
                 line,
                 &entry.value,
+                suppressed_names,
                 diagnostics,
                 seen,
             );
@@ -1849,8 +1891,12 @@ fn direct_expr_metadata_resolves_to_unknown(
     current_owner_type_name: Option<&str>,
     line: usize,
     metadata: &typepython_syntax::DirectExprMetadata,
+    suppressed_names: &std::collections::BTreeSet<String>,
 ) -> bool {
     if let Some(name) = metadata.value_name.as_deref() {
+        if suppressed_names.contains(name) {
+            return false;
+        }
         return name_is_unknown_boundary_with_context(
             context,
             node,
