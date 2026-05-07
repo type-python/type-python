@@ -2765,6 +2765,56 @@ fn incremental_workspace_loads_support_index_lazily() {
 
 #[cfg(unix)]
 #[test]
+fn incremental_workspace_skips_external_probe_for_stdlib_only_imports() {
+    let root = env::temp_dir().join(format!(
+        "typepython-lsp-stdlib-support-index-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let probe = root.join("python-probe");
+    let probe_log = root.join("python-probe.log");
+    write_executable_script(
+        &probe,
+        &format!(
+            "#!/bin/sh\nprintf 'probe\\n' >> '{}'\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+            probe_log.display()
+        ),
+    );
+    let config = temp_workspace_with_config(
+        "incremental_workspace_skips_external_probe_for_stdlib_only_imports",
+        &format!(
+            "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"site-packages\"]\npython_executable = \"{}\"\n",
+            probe.display()
+        ),
+        &[(
+            "src/app/__init__.tpy",
+            "from typing import Callable\n\ndef run(callback: Callable[[], int]) -> int:\n    return callback()\n",
+        )],
+    );
+    fs::create_dir_all(config.config_dir.join("site-packages/demo"))
+        .expect("support package directory should be created");
+    fs::write(config.config_dir.join("site-packages/demo/__init__.pyi"), "value: int\n")
+        .expect("support package stub should be written");
+    let _ = fs::remove_file(&probe_log);
+
+    let mut server = Server::new(config.clone());
+    server.publish_diagnostics().expect("initial diagnostics should publish");
+    let workspace = server
+        .analysis
+        .cached_workspace
+        .as_ref()
+        .expect("workspace should be cached after diagnostics publish");
+
+    assert!(workspace.support_catalog.stdlib_index.is_some());
+    assert!(workspace.support_catalog.index.is_none());
+    assert!(!probe_log.exists(), "stdlib-only support imports must not probe Python type roots");
+}
+
+#[cfg(unix)]
+#[test]
 fn watched_file_change_invalidates_support_source_cache() {
     let root = env::temp_dir().join(format!(
         "typepython-lsp-watched-support-change-{}",

@@ -208,6 +208,7 @@ struct CachedDocument {
 
 #[derive(Debug, Clone, Default)]
 struct SupportSourceCatalog {
+    stdlib_index: Option<SupportSourceIndex>,
     index: Option<SupportSourceIndex>,
 }
 

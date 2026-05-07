@@ -33,7 +33,8 @@ use typepython_incremental::{
 };
 use typepython_lowering::{LoweredModule, LoweringOptions, LoweringResult, lower_with_options};
 use typepython_project::{
-    collect_import_source_paths, import_resolves_within_modules, inferred_shadow_stub_syntax_trees,
+    bundled_support_source_index, collect_import_source_paths, import_resolves_within_modules,
+    inferred_shadow_stub_syntax_trees, is_bundled_stdlib_support_source,
     replace_local_python_surfaces_with_shadow_stubs, support_source_snapshot_identity,
     write_shadow_stub_cache,
 };
@@ -522,7 +523,7 @@ fn analyze_pipeline_state(
     let analysis_python = config.analysis_python().to_string();
     let stdlib_snapshot = Some(bundled_stdlib_snapshot_identity(&analysis_python)?);
     let checker_options = CheckerOptions::from_config(&config.config);
-    let support_snapshot = if prepared.has_support_syntax {
+    let support_snapshot = if prepared.has_external_support_syntax {
         Some(support_source_snapshot_identity(config, &analysis_python)?)
     } else {
         None

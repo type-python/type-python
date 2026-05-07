@@ -5,7 +5,12 @@ pub(super) struct PreparedPipelineSyntax {
     pub(super) source_paths: Vec<PathBuf>,
     pub(super) syntax_trees: Vec<typepython_syntax::SyntaxTree>,
     pub(super) all_syntax_trees: Vec<typepython_syntax::SyntaxTree>,
-    pub(super) has_support_syntax: bool,
+    pub(super) has_external_support_syntax: bool,
+}
+
+struct LoadedSupportSyntax {
+    syntax_trees: Vec<typepython_syntax::SyntaxTree>,
+    has_external_syntax: bool,
 }
 
 pub(crate) fn load_syntax_trees(
@@ -62,17 +67,22 @@ pub(super) fn prepare_pipeline_syntax(
         } else {
             syntax_trees.clone()
         };
-    let checking_support_syntax = load_support_syntax_trees(config, &all_syntax_trees)?;
-    let has_support_syntax = !checking_support_syntax.is_empty();
-    all_syntax_trees.extend(checking_support_syntax);
+    let checking_support = load_support_syntax_trees(config, &all_syntax_trees)?;
+    let has_external_support_syntax = checking_support.has_external_syntax;
+    all_syntax_trees.extend(checking_support.syntax_trees);
 
-    Ok(PreparedPipelineSyntax { source_paths, syntax_trees, all_syntax_trees, has_support_syntax })
+    Ok(PreparedPipelineSyntax {
+        source_paths,
+        syntax_trees,
+        all_syntax_trees,
+        has_external_support_syntax,
+    })
 }
 
 fn load_support_syntax_trees(
     config: &ConfigHandle,
     surface_syntax_trees: &[typepython_syntax::SyntaxTree],
-) -> Result<Vec<typepython_syntax::SyntaxTree>> {
+) -> Result<LoadedSupportSyntax> {
     let project_modules = surface_syntax_trees
         .iter()
         .map(|tree| tree.source.logical_module.clone())
@@ -83,25 +93,87 @@ fn load_support_syntax_trees(
         .filter(|import_path| !import_resolves_within_modules(import_path, &project_modules))
         .collect::<Vec<_>>();
     if external_import_paths.is_empty() {
-        return Ok(Vec::new());
+        return Ok(LoadedSupportSyntax { syntax_trees: Vec::new(), has_external_syntax: false });
     }
 
-    let support_index = support_source_index(config, &config.analysis_python().to_string())?;
-
+    let stdlib_index = bundled_support_source_index(&config.analysis_python().to_string())?;
     let mut queued_modules = BTreeSet::new();
     let mut queue = VecDeque::new();
-    for import_path in external_import_paths {
-        for module_key in support_index.matching_module_keys(&import_path) {
+    let mut loaded_modules = BTreeSet::new();
+    let mut loaded_paths = BTreeSet::new();
+    let mut support_syntax_trees = Vec::new();
+    let pending_external_import_paths = queue_matching_support_modules(
+        &stdlib_index,
+        external_import_paths,
+        &mut queued_modules,
+        &mut queue,
+    );
+    load_support_queue(
+        config,
+        &stdlib_index,
+        &mut queued_modules,
+        &mut queue,
+        &mut loaded_modules,
+        &mut loaded_paths,
+        &mut support_syntax_trees,
+    )?;
+
+    let mut has_external_syntax = false;
+    if !pending_external_import_paths.is_empty() {
+        let support_index = support_source_index(config, &config.analysis_python().to_string())?;
+        queue_matching_support_modules(
+            &support_index,
+            pending_external_import_paths,
+            &mut queued_modules,
+            &mut queue,
+        );
+        has_external_syntax = load_support_queue(
+            config,
+            &support_index,
+            &mut queued_modules,
+            &mut queue,
+            &mut loaded_modules,
+            &mut loaded_paths,
+            &mut support_syntax_trees,
+        )?;
+    }
+
+    support_syntax_trees.sort_by(|left, right| left.source.path.cmp(&right.source.path));
+    Ok(LoadedSupportSyntax { syntax_trees: support_syntax_trees, has_external_syntax })
+}
+
+fn queue_matching_support_modules(
+    support_index: &typepython_project::SupportSourceIndex,
+    import_paths: impl IntoIterator<Item = String>,
+    queued_modules: &mut BTreeSet<String>,
+    queue: &mut VecDeque<String>,
+) -> Vec<String> {
+    let mut unmatched_import_paths = Vec::new();
+    for import_path in import_paths {
+        let module_keys = support_index.matching_module_keys(&import_path);
+        if module_keys.is_empty() {
+            unmatched_import_paths.push(import_path);
+            continue;
+        }
+        for module_key in module_keys {
             if queued_modules.insert(module_key.clone()) {
                 queue.push_back(module_key);
             }
         }
     }
+    unmatched_import_paths
+}
 
-    let mut loaded_modules = BTreeSet::new();
-    let mut loaded_paths = BTreeSet::new();
-    let mut support_syntax_trees = Vec::new();
-
+fn load_support_queue(
+    config: &ConfigHandle,
+    support_index: &typepython_project::SupportSourceIndex,
+    queued_modules: &mut BTreeSet<String>,
+    queue: &mut VecDeque<String>,
+    loaded_modules: &mut BTreeSet<String>,
+    loaded_paths: &mut BTreeSet<PathBuf>,
+    support_syntax_trees: &mut Vec<typepython_syntax::SyntaxTree>,
+) -> Result<bool> {
+    let mut has_external_syntax = false;
     while let Some(module_key) = queue.pop_front() {
         if !loaded_modules.insert(module_key.clone()) {
             continue;
@@ -111,6 +183,7 @@ fn load_support_syntax_trees(
         };
 
         for source in module_sources.iter().cloned() {
+            has_external_syntax |= !is_bundled_stdlib_support_source(&source);
             if !loaded_paths.insert(source.path.clone()) {
                 continue;
             }
@@ -157,16 +230,16 @@ fn load_support_syntax_trees(
                 )
             };
             for import_path in collect_import_source_paths(std::slice::from_ref(&tree)) {
-                for nested_module_key in support_index.matching_module_keys(&import_path) {
-                    if queued_modules.insert(nested_module_key.clone()) {
-                        queue.push_back(nested_module_key);
-                    }
-                }
+                queue_matching_support_modules(
+                    support_index,
+                    std::iter::once(import_path),
+                    queued_modules,
+                    queue,
+                );
             }
             support_syntax_trees.push(tree);
         }
     }
 
-    support_syntax_trees.sort_by(|left, right| left.source.path.cmp(&right.source.path));
-    Ok(support_syntax_trees)
+    Ok(has_external_syntax)
 }

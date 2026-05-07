@@ -571,6 +571,18 @@ pub fn support_source_index(
     Ok(index)
 }
 
+pub fn bundled_support_source_index(target_python: &str) -> Result<SupportSourceIndex> {
+    let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
+    Ok(SupportSourceIndex::from_sources(bundled_stdlib_sources_for_root(
+        &stdlib_root,
+        target_python,
+    )?))
+}
+
+pub fn is_bundled_stdlib_support_source(source: &DiscoveredSource) -> bool {
+    source.root == bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"))
+}
+
 pub fn support_source_snapshot_identity(
     config: &ConfigHandle,
     target_python: &str,

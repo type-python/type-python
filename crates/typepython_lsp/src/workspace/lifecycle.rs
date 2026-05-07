@@ -3,6 +3,22 @@ impl SupportSourceCatalog {
         Self::default()
     }
 
+    pub(super) fn ensure_stdlib_loaded(
+        &mut self,
+        config: &ConfigHandle,
+    ) -> Result<&SupportSourceIndex, LspError> {
+        if self.stdlib_index.is_none() {
+            self.stdlib_index = Some(typepython_project::bundled_support_source_index(
+                &config.analysis_python().to_string(),
+            )?);
+        }
+        self.stdlib_index.as_ref().ok_or_else(|| {
+            LspError::internal(String::from(
+                "stdlib support source index was not populated after loading support sources",
+            ))
+        })
+    }
+
     pub(super) fn ensure_loaded(
         &mut self,
         config: &ConfigHandle,
@@ -25,6 +41,13 @@ impl SupportSourceCatalog {
             return false;
         }
         if let Some(index) = &self.index
+            && index.sources_by_module().values().flatten().any(|source| {
+                source.path == path || path.starts_with(&source.root)
+            })
+        {
+            return true;
+        }
+        if let Some(index) = &self.stdlib_index
             && index.sources_by_module().values().flatten().any(|source| {
                 source.path == path || path.starts_with(&source.root)
             })
@@ -65,6 +88,28 @@ fn project_collision_diagnostics(
     }
 
     diagnostics
+}
+
+fn queue_matching_support_modules(
+    support_index: &SupportSourceIndex,
+    import_paths: impl IntoIterator<Item = String>,
+    queued_modules: &mut BTreeSet<String>,
+    queue: &mut VecDeque<String>,
+) -> Vec<String> {
+    let mut unmatched_import_paths = Vec::new();
+    for import_path in import_paths {
+        let module_keys = support_index.matching_module_keys(&import_path);
+        if module_keys.is_empty() {
+            unmatched_import_paths.push(import_path);
+            continue;
+        }
+        for module_key in module_keys {
+            if queued_modules.insert(module_key.clone()) {
+                queue.push_back(module_key);
+            }
+        }
+    }
+    unmatched_import_paths
 }
 
 impl IncrementalWorkspace {
@@ -234,19 +279,50 @@ impl IncrementalWorkspace {
             self.active_support_paths.clear();
             return Ok(());
         }
-        let support_index = self.support_catalog.ensure_loaded(&self.config)?.clone();
-
         let mut queued_modules = BTreeSet::new();
         let mut queue = VecDeque::new();
-        for import_path in external_import_paths {
-            for module_key in support_index.matching_module_keys(&import_path) {
-                if queued_modules.insert(module_key.clone()) {
-                    queue.push_back(module_key);
-                }
-            }
-        }
+        let stdlib_index = self.support_catalog.ensure_stdlib_loaded(&self.config)?.clone();
+        let pending_external_import_paths = queue_matching_support_modules(
+            &stdlib_index,
+            external_import_paths,
+            &mut queued_modules,
+            &mut queue,
+        );
 
         let mut active_support_paths = BTreeSet::new();
+        self.load_support_queue(
+            &stdlib_index,
+            &mut queued_modules,
+            &mut queue,
+            &mut active_support_paths,
+        )?;
+        if !pending_external_import_paths.is_empty() {
+            let support_index = self.support_catalog.ensure_loaded(&self.config)?.clone();
+            queue_matching_support_modules(
+                &support_index,
+                pending_external_import_paths,
+                &mut queued_modules,
+                &mut queue,
+            );
+            self.load_support_queue(
+                &support_index,
+                &mut queued_modules,
+                &mut queue,
+                &mut active_support_paths,
+            )?;
+        }
+
+        self.active_support_paths = active_support_paths;
+        Ok(())
+    }
+
+    fn load_support_queue(
+        &mut self,
+        support_index: &SupportSourceIndex,
+        queued_modules: &mut BTreeSet<String>,
+        queue: &mut VecDeque<String>,
+        active_support_paths: &mut BTreeSet<PathBuf>,
+    ) -> Result<(), LspError> {
         while let Some(module_key) = queue.pop_front() {
             let Some(module_sources) = support_index.module_sources(&module_key).map(|sources| sources.to_vec()) else {
                 continue;
@@ -263,16 +339,16 @@ impl IncrementalWorkspace {
                 for import_path in
                     collect_import_source_paths(std::slice::from_ref(&document.document.syntax))
                 {
-                    for nested_module_key in support_index.matching_module_keys(&import_path) {
-                        if queued_modules.insert(nested_module_key.clone()) {
-                            queue.push_back(nested_module_key);
-                        }
-                    }
+                    queue_matching_support_modules(
+                        support_index,
+                        std::iter::once(import_path),
+                        queued_modules,
+                        queue,
+                    );
                 }
             }
         }
 
-        self.active_support_paths = active_support_paths;
         Ok(())
     }
 
