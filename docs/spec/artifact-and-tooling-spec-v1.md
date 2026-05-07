@@ -1039,6 +1039,8 @@ If a frontend reuses previously materialized build outputs rather than only sema
 
 - the previous and current public-summary sets are semantically equal
 - the previous and current bundled-stdlib snapshot identities are equal
+- the previous and current output-affecting config fingerprints are equal, including `target_python`, `emit.emit_style`, `emit.emit_pyi`, `emit.write_py_typed`, `emit.emit_pyc`, `emit.runtime_validators`, and experimental gates that can alter lowering or emitted metadata
+- the previous and current emitted artifact plan is equal, including the runtime and stub paths selected by config
 - the persisted build artifacts still exist and are structurally valid for the current build tree
 
 If any of those checks fail, the frontend MUST rebuild or re-emit the affected outputs even if the project source files themselves are unchanged.

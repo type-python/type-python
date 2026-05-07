@@ -960,6 +960,99 @@ fn run_pipeline_reuses_cached_outputs_when_snapshot_is_unchanged() {
 }
 
 #[test]
+fn materialized_build_manifest_records_output_affecting_config() {
+    let manifest = {
+        let project_dir =
+            temp_project_dir("materialized_build_manifest_records_output_affecting_config");
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!(
+                "[project]\n",
+                "src = [\"src\"]\n",
+                "target_python = \"3.13\"\n\n",
+                "[emit]\n",
+                "emit_style = \"compat\"\n",
+                "emit_pyi = false\n",
+                "write_py_typed = false\n",
+            ),
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        let snapshot = run_pipeline(&config).expect("test setup should succeed");
+        materialize_build_outputs(&config, &snapshot).expect("test setup should succeed");
+        let manifest =
+            fs::read_to_string(project_dir.join(".typepython/cache/build-manifest.json"))
+                .expect("manifest should exist");
+        remove_temp_project_dir(&project_dir);
+        manifest
+    };
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest).expect("manifest should be JSON");
+    let output_config = &manifest["output_config"];
+
+    assert_eq!(manifest["schema_version"].as_u64(), Some(3));
+    assert_eq!(output_config["target_python"].as_str(), Some("3.13"));
+    assert_eq!(output_config["emit_style"].as_str(), Some("compat"));
+    assert_eq!(output_config["emit_pyi"].as_bool(), Some(false));
+    assert_eq!(output_config["write_py_typed"].as_bool(), Some(false));
+    assert_eq!(output_config["runtime_validators"].as_bool(), Some(false));
+}
+
+#[test]
+fn run_pipeline_invalidates_materialized_outputs_when_emit_pyi_changes() {
+    let (lowered_modules, stub_exists_after_rebuild, manifest) = {
+        let project_dir =
+            temp_project_dir("run_pipeline_invalidates_materialized_outputs_when_emit_pyi_changes");
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\ntarget_python = \"3.13\"\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let stub_path = project_dir.join(".typepython/build/app.pyi");
+
+        let first = run_pipeline(&config).expect("test setup should succeed");
+        persist_pipeline_analysis_state(&config, &first).expect("test setup should succeed");
+        materialize_build_outputs(&config, &first).expect("test setup should succeed");
+        assert!(stub_path.exists(), "initial build should write a stub");
+
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!(
+                "[project]\n",
+                "src = [\"src\"]\n",
+                "target_python = \"3.13\"\n\n",
+                "[emit]\n",
+                "emit_pyi = false\n",
+            ),
+        )
+        .expect("test setup should succeed");
+        let updated_config = load(&project_dir).expect("test setup should succeed");
+        let second = run_pipeline(&updated_config).expect("test setup should succeed");
+        materialize_build_outputs(&updated_config, &second).expect("test setup should succeed");
+        let manifest =
+            fs::read_to_string(project_dir.join(".typepython/cache/build-manifest.json"))
+                .expect("manifest should exist");
+        let result = (second.lowered_modules.len(), stub_path.exists(), manifest);
+        remove_temp_project_dir(&project_dir);
+        result
+    };
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest).expect("manifest should be JSON");
+
+    assert_eq!(lowered_modules, 1);
+    assert!(!stub_exists_after_rebuild);
+    assert_eq!(manifest["output_config"]["emit_pyi"].as_bool(), Some(false));
+}
+
+#[test]
 fn run_pipeline_invalidates_cache_when_emit_style_changes() {
     let (lowered_modules, runtime_source) = {
         let project_dir =

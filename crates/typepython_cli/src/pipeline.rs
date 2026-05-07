@@ -82,7 +82,7 @@ struct AnalyzedPipelineState {
     pre_lowering_emit_plan: Vec<EmitArtifact>,
 }
 
-const MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION: u32 = 2;
+const MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION: u32 = 3;
 const ANALYSIS_CACHE_SCHEMA_VERSION: u32 = 3;
 const EFFECT_METADATA_SIDECAR_SCHEMA_VERSION: u32 = 1;
 
@@ -98,12 +98,19 @@ struct MaterializedBuildManifest {
     schema_version: u32,
     incremental: IncrementalState,
     emit_plan: Vec<CachedEmitArtifact>,
+    output_config: OutputAffectingConfigFingerprint,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+struct OutputAffectingConfigFingerprint {
+    target_python: String,
+    emit_style: String,
+    emit_pyi: bool,
+    write_py_typed: bool,
+    emit_pyc: bool,
     runtime_validators: bool,
-    #[serde(default)]
     experimental_shape_transforms: bool,
-    #[serde(default)]
     experimental_sync_async_dual_emit: bool,
-    #[serde(default)]
     experimental_framework_adapters: bool,
 }
 
@@ -650,6 +657,26 @@ fn emit_artifacts_from_cached(artifacts: &[CachedEmitArtifact]) -> Vec<EmitArtif
         .collect()
 }
 
+fn output_affecting_config_fingerprint(config: &ConfigHandle) -> OutputAffectingConfigFingerprint {
+    OutputAffectingConfigFingerprint {
+        target_python: config.config.project.target_python.to_string(),
+        emit_style: config.config.emit.emit_style.to_string(),
+        emit_pyi: config.config.emit.emit_pyi,
+        write_py_typed: config.config.emit.write_py_typed,
+        emit_pyc: config.config.emit.emit_pyc,
+        runtime_validators: config.config.emit.runtime_validators,
+        experimental_shape_transforms: config.config.experimental.shape_transforms,
+        experimental_sync_async_dual_emit: config
+            .config
+            .experimental
+            .accepts_feature(typepython_config::EXPERIMENTAL_SYNC_ASYNC_DUAL_EMIT),
+        experimental_framework_adapters: config
+            .config
+            .experimental
+            .accepts_feature(typepython_config::EXPERIMENTAL_FRAMEWORK_ADAPTERS),
+    }
+}
+
 fn analysis_cache_metadata(
     config: &ConfigHandle,
     snapshot: &SnapshotMetadata,
@@ -805,27 +832,16 @@ fn can_reuse_cached_pipeline_outputs(
     previous_manifest.is_some_and(|manifest| {
         manifest.incremental == analyzed.incremental
             && manifest.emit_plan == cached_emit_artifacts(&analyzed.pre_lowering_emit_plan)
-            && manifest.runtime_validators == config.config.emit.runtime_validators
-            && materialized_manifest_experimental_options_match(config, manifest)
+            && materialized_manifest_output_config_matches(config, manifest)
             && !verify_build_artifacts(config, &analyzed.pre_lowering_emit_plan).has_errors()
     })
 }
 
-fn materialized_manifest_experimental_options_match(
+fn materialized_manifest_output_config_matches(
     config: &ConfigHandle,
     manifest: &MaterializedBuildManifest,
 ) -> bool {
-    manifest.experimental_shape_transforms == config.config.experimental.shape_transforms
-        && manifest.experimental_sync_async_dual_emit
-            == config
-                .config
-                .experimental
-                .accepts_feature(typepython_config::EXPERIMENTAL_SYNC_ASYNC_DUAL_EMIT)
-        && manifest.experimental_framework_adapters
-            == config
-                .config
-                .experimental
-                .accepts_feature(typepython_config::EXPERIMENTAL_FRAMEWORK_ADAPTERS)
+    manifest.output_config == output_affecting_config_fingerprint(config)
 }
 
 fn reusable_cached_pipeline_snapshot(
@@ -958,8 +974,9 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let modules_requiring_materialization = match previous_manifest.as_ref() {
         Some(manifest)
             if manifest.incremental == analyzed.incremental
-                && manifest.runtime_validators == config.config.emit.runtime_validators
-                && materialized_manifest_experimental_options_match(config, manifest)
+                && manifest.emit_plan
+                    == cached_emit_artifacts(&analyzed.pre_lowering_emit_plan)
+                && materialized_manifest_output_config_matches(config, manifest)
                 && verify_build_artifacts(config, &analyzed.pre_lowering_emit_plan)
                     .has_errors() =>
         {
@@ -967,15 +984,17 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         }
         Some(manifest)
             if manifest.incremental == analyzed.incremental
-                && manifest.runtime_validators == config.config.emit.runtime_validators
-                && materialized_manifest_experimental_options_match(config, manifest) =>
+                && manifest.emit_plan
+                    == cached_emit_artifacts(&analyzed.pre_lowering_emit_plan)
+                && materialized_manifest_output_config_matches(config, manifest) =>
         {
             BTreeSet::new()
         }
         Some(manifest)
             if manifest.incremental.metadata != analyzed.incremental.metadata
-                || manifest.runtime_validators != config.config.emit.runtime_validators
-                || !materialized_manifest_experimental_options_match(config, manifest) =>
+                || manifest.emit_plan
+                    != cached_emit_artifacts(&analyzed.pre_lowering_emit_plan)
+                || !materialized_manifest_output_config_matches(config, manifest) =>
         {
             project_module_keys.clone()
         }
@@ -1183,16 +1202,7 @@ fn write_materialized_build_manifest(
         schema_version: MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION,
         incremental: snapshot.incremental.clone(),
         emit_plan: cached_emit_artifacts(&snapshot.emit_plan),
-        runtime_validators: config.config.emit.runtime_validators,
-        experimental_shape_transforms: config.config.experimental.shape_transforms,
-        experimental_sync_async_dual_emit: config
-            .config
-            .experimental
-            .accepts_feature(typepython_config::EXPERIMENTAL_SYNC_ASYNC_DUAL_EMIT),
-        experimental_framework_adapters: config
-            .config
-            .experimental
-            .accepts_feature(typepython_config::EXPERIMENTAL_FRAMEWORK_ADAPTERS),
+        output_config: output_affecting_config_fingerprint(config),
     })
     .context("unable to serialize materialized build manifest")?;
     fs::write(&manifest_path, payload)
