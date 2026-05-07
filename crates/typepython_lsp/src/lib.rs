@@ -339,6 +339,31 @@ struct LspContentChangeEvent {
     text: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspWatchedFileChange {
+    uri: String,
+    #[serde(rename = "type")]
+    change_type: u8,
+}
+
+impl LspWatchedFileChange {
+    fn is_deleted(&self) -> bool {
+        self.change_type == 3
+    }
+
+    fn validate(&self) -> Result<(), LspError> {
+        if matches!(self.change_type, 1..=3) {
+            Ok(())
+        } else {
+            Err(LspError::invalid_params(format!(
+                "workspace/didChangeWatchedFiles received invalid file change type {}",
+                self.change_type
+            )))
+        }
+    }
+}
+
 struct Server {
     analysis: AnalysisHost,
     scheduler: LspScheduler,

@@ -117,6 +117,21 @@ impl IncrementalWorkspace {
         self.rebuild_state(direct_changes, false)
     }
 
+    pub(super) fn apply_file_system_path_update(
+        &mut self,
+        path: &Path,
+        overlay: Option<&OverlayDocument>,
+    ) -> Result<(), LspError> {
+        let direct_changes = self.update_project_document(path, overlay)?;
+        let support_changed =
+            direct_changes.is_empty() && self.invalidate_support_documents_for_path(path)?;
+        if direct_changes.is_empty() && !support_changed {
+            return Ok(());
+        }
+        self.sync_support_documents()?;
+        self.rebuild_state(direct_changes, support_changed)
+    }
+
     pub(super) fn update_project_document(
         &mut self,
         path: &Path,
@@ -125,6 +140,10 @@ impl IncrementalWorkspace {
         let mut direct_changes = BTreeSet::new();
         if let Some(existing) = self.project_documents.get(path) {
             direct_changes.insert(existing.source.logical_module.clone());
+        }
+        if overlay.is_none() && !path.is_file() {
+            self.project_documents.remove(path);
+            return Ok(direct_changes);
         }
 
         let next_source = self.project_source_for_path(path)?;
@@ -149,6 +168,35 @@ impl IncrementalWorkspace {
         }
 
         Ok(direct_changes)
+    }
+
+    pub(super) fn invalidate_support_documents_for_path(
+        &mut self,
+        path: &Path,
+    ) -> Result<bool, LspError> {
+        if !self.path_may_be_support_source(path)? {
+            return Ok(false);
+        }
+        self.support_catalog.index = None;
+        self.support_documents.clear();
+        self.active_support_paths.clear();
+        Ok(true)
+    }
+
+    fn path_may_be_support_source(&self, path: &Path) -> Result<bool, LspError> {
+        if self.support_documents.contains_key(path) || self.active_support_paths.contains(path) {
+            return Ok(true);
+        }
+        if self.support_catalog.index.as_ref().is_some_and(|index| {
+            index.all_sources().into_iter().any(|source| source.path == path)
+        }) {
+            return Ok(true);
+        }
+        if typepython_syntax::SourceKind::from_path(path).is_none() {
+            return Ok(false);
+        }
+        let roots = typepython_project::configured_external_type_roots(&self.config)?;
+        Ok(roots.iter().any(|root| path.starts_with(&root.path)))
     }
 
     pub(super) fn project_source_for_path(

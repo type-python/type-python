@@ -12,6 +12,18 @@ fn single_error_response(responses: &[Value]) -> &Value {
     responses[0].get("error").expect("response should contain an error payload")
 }
 
+fn published_diagnostics_for_uri<'a>(responses: &'a [Value], uri: &str) -> &'a Vec<Value> {
+    responses
+        .iter()
+        .find(|response| {
+            response["method"] == json!("textDocument/publishDiagnostics")
+                && response["params"]["uri"] == json!(uri)
+        })
+        .expect("publishDiagnostics notification should be present")["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics payload should be an array")
+}
+
 #[test]
 fn handle_initialize_returns_required_capabilities() {
     let config = temp_config("handle_initialize_returns_required_capabilities", "pass\n");
@@ -2456,6 +2468,80 @@ fn did_change_updates_overlay_and_republishes_diagnostics() {
 }
 
 #[test]
+fn watched_file_change_updates_closed_project_file() {
+    let config = temp_config("watched_file_change_updates_closed_project_file", "value: int = 1\n");
+    let mut server = Server::new(config.clone());
+    let path = config.config_dir.join("src/app/__init__.tpy");
+    let uri = path_to_uri(&path);
+    let initial = server.publish_diagnostics().expect("initial diagnostics should publish");
+    assert!(published_diagnostics_for_uri(&initial, &uri).is_empty());
+
+    fs::write(&path, "def broken(:\n").expect("source file should be rewritten");
+    let responses = server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"workspace/didChangeWatchedFiles",
+            "params": {"changes": [{"uri": uri, "type": 2}]}
+        }))
+        .expect("watched file change should republish diagnostics");
+
+    assert!(!published_diagnostics_for_uri(&responses, &uri).is_empty());
+}
+
+#[test]
+fn watched_file_create_adds_closed_project_file() {
+    let config = temp_config("watched_file_create_adds_closed_project_file", "pass\n");
+    let mut server = Server::new(config.clone());
+    server.publish_diagnostics().expect("initial diagnostics should publish");
+
+    let path = config.config_dir.join("src/app/created.tpy");
+    let uri = path_to_uri(&path);
+    fs::write(&path, "def broken(:\n").expect("created source file should be written");
+    let responses = server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"workspace/didChangeWatchedFiles",
+            "params": {"changes": [{"uri": uri, "type": 1}]}
+        }))
+        .expect("watched file create should republish diagnostics");
+
+    assert!(!published_diagnostics_for_uri(&responses, &uri).is_empty());
+    let workspace = server
+        .analysis
+        .cached_workspace
+        .as_ref()
+        .expect("workspace should remain cached after watched create");
+    assert!(workspace.state.documents.iter().any(|document| document.path == path));
+}
+
+#[test]
+fn watched_file_delete_removes_closed_project_file() {
+    let config = temp_config("watched_file_delete_removes_closed_project_file", "def broken(:\n");
+    let mut server = Server::new(config.clone());
+    let path = config.config_dir.join("src/app/__init__.tpy");
+    let uri = path_to_uri(&path);
+    let initial = server.publish_diagnostics().expect("initial diagnostics should publish");
+    assert!(!published_diagnostics_for_uri(&initial, &uri).is_empty());
+
+    fs::remove_file(&path).expect("source file should be removed");
+    let responses = server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"workspace/didChangeWatchedFiles",
+            "params": {"changes": [{"uri": uri, "type": 3}]}
+        }))
+        .expect("watched file delete should clear diagnostics");
+
+    assert!(published_diagnostics_for_uri(&responses, &uri).is_empty());
+    let workspace = server
+        .analysis
+        .cached_workspace
+        .as_ref()
+        .expect("workspace should remain cached after watched delete");
+    assert!(!workspace.state.documents.iter().any(|document| document.path == path));
+}
+
+#[test]
 fn overlay_export_change_republishes_dependent_module_diagnostics() {
     let config = temp_workspace(
         "overlay_export_change_republishes_dependent_module_diagnostics",
@@ -2675,6 +2761,77 @@ fn incremental_workspace_loads_support_index_lazily() {
 
     assert!(workspace.support_catalog.index.is_some());
     assert!(!workspace.active_support_paths.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn watched_file_change_invalidates_support_source_cache() {
+    let root = env::temp_dir().join(format!(
+        "typepython-lsp-watched-support-change-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let probe = root.join("python-probe");
+    write_executable_script(
+        &probe,
+        "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+    );
+    let config = temp_workspace_with_config(
+        "watched_file_change_invalidates_support_source_cache",
+        &format!(
+            "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"site-packages\"]\npython_executable = \"{}\"\n",
+            probe.display()
+        ),
+        &[("src/app/__init__.tpy", "from demo import value\n\nresult: int = value\n")],
+    );
+    let support_path = config.config_dir.join("site-packages/demo/__init__.pyi");
+    fs::create_dir_all(support_path.parent().expect("support path should have a parent"))
+        .expect("support package directory should be created");
+    fs::write(&support_path, "value: int\n").expect("support package stub should be written");
+
+    let mut server = Server::new(config.clone());
+    let project_uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+    let initial = server.publish_diagnostics().expect("initial diagnostics should publish");
+    assert!(published_diagnostics_for_uri(&initial, &project_uri).is_empty());
+    let workspace = server
+        .analysis
+        .cached_workspace
+        .as_ref()
+        .expect("workspace should be cached after initial diagnostics");
+    let support_document = workspace
+        .state
+        .documents
+        .iter()
+        .find(|document| document.path == support_path)
+        .expect("support document should be active before watched change");
+    assert!(support_document.text.contains("value: int"));
+
+    fs::write(&support_path, "value: str\n").expect("support package stub should be rewritten");
+    let support_uri = path_to_uri(&support_path);
+    server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"workspace/didChangeWatchedFiles",
+            "params": {"changes": [{"uri": support_uri, "type": 2}]}
+        }))
+        .expect("watched support change should republish diagnostics");
+
+    let workspace = server
+        .analysis
+        .cached_workspace
+        .as_ref()
+        .expect("workspace should remain cached after support change");
+    assert!(workspace.last_state_refresh_was_full);
+    let support_document = workspace
+        .state
+        .documents
+        .iter()
+        .find(|document| document.path == support_path)
+        .expect("support document should remain active after watched change");
+    assert!(support_document.text.contains("value: str"));
 }
 
 #[cfg(unix)]

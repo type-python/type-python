@@ -108,6 +108,23 @@ impl AnalysisHost {
         Ok(uri.to_owned())
     }
 
+    pub(super) fn change_watched_files(
+        &mut self,
+        changes: &[LspWatchedFileChange],
+    ) -> Result<Vec<String>, LspError> {
+        let mut cleared_diagnostics = Vec::new();
+        for change in changes {
+            let path = uri_to_path(&change.uri)?;
+            if change.is_deleted() && !self.overlays.contains_key(&path) {
+                cleared_diagnostics.push(change.uri.clone());
+            }
+            if let Some(workspace) = self.cached_workspace.as_mut() {
+                workspace.apply_file_system_path_update(&path, self.overlays.get(&path))?;
+            }
+        }
+        Ok(cleared_diagnostics)
+    }
+
     pub(super) fn spawn_support_index_prewarm(&mut self) {
         if self.support_index_prewarm_started {
             return;

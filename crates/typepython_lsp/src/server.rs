@@ -177,6 +177,10 @@ impl Server {
                 let cleared = self.apply_did_close(params)?;
                 self.schedule_diagnostics_batch(cleared)
             }
+            "workspace/didChangeWatchedFiles" => {
+                let cleared = self.apply_did_change_watched_files(params)?;
+                self.schedule_diagnostics_batch(cleared)
+            }
             "textDocument/hover" => {
                 Ok(request_ok_response(id, self.handle_hover(params)?).into_iter().collect())
             }
@@ -296,6 +300,32 @@ impl Server {
             })?;
         let uri = self.analysis.close_document(uri)?;
         Ok(vec![publish_diagnostics_notification(&uri, Vec::new())])
+    }
+
+    pub(super) fn apply_did_change_watched_files(
+        &mut self,
+        params: Value,
+    ) -> Result<Vec<Value>, LspError> {
+        let raw_changes = params.get("changes").cloned().ok_or_else(|| {
+            LspError::invalid_params(String::from(
+                "workspace/didChangeWatchedFiles missing `params.changes`",
+            ))
+        })?;
+        let changes: Vec<LspWatchedFileChange> =
+            serde_json::from_value(raw_changes).map_err(|error| {
+                LspError::invalid_params(format!(
+                    "workspace/didChangeWatchedFiles has invalid `params.changes`: {error}"
+                ))
+            })?;
+        for change in &changes {
+            change.validate()?;
+        }
+        Ok(self
+            .analysis
+            .change_watched_files(&changes)?
+            .into_iter()
+            .map(|uri| publish_diagnostics_notification(&uri, Vec::new()))
+            .collect())
     }
 
     pub(super) fn publish_diagnostics(&mut self) -> Result<Vec<Value>, LspError> {
