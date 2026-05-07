@@ -161,7 +161,7 @@ tracked in [`docs/dx-stability.md`](docs/dx-stability.md).
 
 TypePython makes one strong promise about its output:
 
-> Emitted `.py` and `.pyi` contain **only standard Python typing constructs**. Nothing TypePython-specific leaves the build directory.
+> Emitted `.py` and `.pyi` use **standard Python syntax** and **standard Python typing constructs**. TypePython-specific metadata, when emitted, appears only as comments and is not required by CPython or downstream type checkers.
 
 The stronger guarantee is for the package while it is authored and checked by TypePython. A few facts intentionally degrade to standard typing surfaces in consumer-facing artifacts:
 
