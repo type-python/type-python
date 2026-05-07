@@ -56,6 +56,22 @@ fn check_decorated_callable_transform_honors_strict_nulls_option() {
 }
 
 #[test]
+fn check_callable_assignment_uses_decorated_function_params() {
+    let result = check_virtual_binding_metadata_source(concat!(
+        "from typing import Callable, cast\n\n",
+        "def widen(fn: Callable[[str], str]) -> Callable[[object], str]:\n",
+        "    return cast(Callable[[object], str], fn)\n\n",
+        "@widen\n",
+        "def takes_str(value: str) -> str:\n",
+        "    return value\n\n",
+        "handler: Callable[[object], str] = takes_str\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
 fn check_reports_positional_only_parameter_passed_as_keyword() {
     let result =
         check_temp_typepython_source("def takes(x: int, /):\n    return x\n\ntakes(x=1)\n");

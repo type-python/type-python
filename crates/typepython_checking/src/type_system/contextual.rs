@@ -719,22 +719,23 @@ fn parse_typed_dict_field_shape_from_rendered(
 }
 
 pub(super) fn callable_assignment_result(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     assignment: &typepython_binding::AssignmentSite,
     expected: &str,
-    assignability_options: AssignabilityOptions,
 ) -> Option<Option<Diagnostic>> {
+    let assignability_options = context.assignability_options();
     let (expected_params, expected_return) = parse_callable_annotation(expected)?;
     let expected_params = expected_params.map(|params| {
         params.into_iter().map(|param| lower_type_text_or_name(&param)).collect::<Vec<_>>()
     });
     let expected_return = lower_type_text_or_name(&expected_return);
-    let (actual_params, actual_return) = resolve_callable_assignment_semantic_signature_with_options(
+    let (actual_params, actual_return) = resolve_callable_assignment_semantic_signature_with_context(
+        context,
         node,
         nodes,
         assignment,
-        assignability_options,
     )?;
 
     let expected_callable = SemanticType::Callable {
@@ -820,6 +821,17 @@ pub(super) fn resolve_callable_assignment_semantic_signature_with_options(
     assignment: &typepython_binding::AssignmentSite,
     options: AssignabilityOptions,
 ) -> Option<(Vec<SemanticType>, SemanticType)> {
+    let context = checker_context_for_assignability_options(nodes, options);
+    resolve_callable_assignment_semantic_signature_with_context(&context, node, nodes, assignment)
+}
+
+pub(super) fn resolve_callable_assignment_semantic_signature_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    assignment: &typepython_binding::AssignmentSite,
+) -> Option<(Vec<SemanticType>, SemanticType)> {
+    let options = context.assignability_options();
     if let Some(lambda) = assignment.value_lambda.as_deref() {
         let expected = normalized_assignment_annotation(assignment.annotation_text()?)?;
         return resolve_contextual_lambda_callable_semantic_signature_with_options(
@@ -838,6 +850,19 @@ pub(super) fn resolve_callable_assignment_semantic_signature_with_options(
     let metadata = assignment.value_metadata()?;
 
     if let Some(value_name) = metadata.value_name.as_deref() {
+        if let Some(callable_type) = resolve_decorated_function_callable_semantic_type_with_context(
+            context,
+            node,
+            nodes,
+            value_name,
+        ) {
+            let (params, return_type) = callable_type.callable_parts()?;
+            let SemanticCallableParams::ParamList(params) = params else {
+                return None;
+            };
+            return Some((params.clone(), return_type.clone()));
+        }
+
         let function = resolve_direct_function(node, nodes, value_name)?;
         let actual_params = declaration_semantic_signature_params(function)
             .unwrap_or_default()
