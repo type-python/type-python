@@ -112,6 +112,25 @@ fn check_reports_none_assignment_when_strict_nulls_is_enabled() {
 }
 
 #[test]
+fn check_reports_none_call_argument_when_strict_nulls_is_enabled() {
+    let result =
+        check_temp_typepython_source("def takes(value: int) -> None:\n    pass\n\ntakes(None)\n");
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("passes `None`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_none_return_when_strict_nulls_is_enabled() {
+    let result = check_temp_typepython_source("def build() -> int:\n    return None\n");
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("returns `None`"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_none_assignment_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "value: int = None\n",

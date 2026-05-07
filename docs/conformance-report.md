@@ -79,6 +79,37 @@ Core v1 is the Beta compatibility claim. DX v1 and Experimental v1 features may 
 | Pass-through `.py` inference (`infer_passthrough`) | Experimental v1 | MAY | missing |
 | Runtime validator emission for selected data-class trust boundaries | Experimental v1 | MAY | `cargo test -p typepython-emit write_runtime_outputs`<br>`cargo test -p typepython-emit write_runtime_outputs_honors_named_validation_boundary_kinds`<br>`cargo test -p typepython-config loads_all_supported_typepython_toml_configuration_fields` |
 
+## Semantic Sub-Rule Evidence
+
+This table expands broad Core v1 feature claims into the specific semantic cases that are easiest to over-map accidentally. Each row points to a concrete test filter or smoke command rather than only a broad crate-level family.
+
+| Area | Sub-rule | Evidence |
+| ---- | -------- | -------- |
+| unknown | member access on `unknown` is diagnosed as TPY4003 | `cargo test -p typepython-checking check_reports_unknown_member_access` |
+| unknown | direct call of `unknown` is diagnosed as TPY4003 | `cargo test -p typepython-checking check_reports_unknown_direct_call_keyword`<br>`cargo test -p typepython-checking check_reports_unknown_direct_call_on_import` |
+| unknown | method call on `unknown` is diagnosed as TPY4003 | `cargo test -p typepython-checking check_reports_unknown_method_call` |
+| unknown | subscript/indexing on `unknown` is diagnosed as TPY4003 | `cargo test -p typepython-checking check_reports_unknown_subscript_from_real_parse_pipeline` |
+| unknown | binary arithmetic with either operand `unknown` is diagnosed as TPY4003 | `cargo test -p typepython-checking check_reports_unknown_arithmetic_from_real_parse_pipeline` |
+| unknown | `unknown` cannot flow into concrete parameters or returns without narrowing | `cargo test -p typepython-checking check_reports_unknown_call_argument_to_concrete_parameter`<br>`cargo test -p typepython-checking check_reports_unknown_return_to_concrete_type` |
+| unknown | `unknown` assignment into concrete or `Any` targets is rejected | `cargo test -p typepython-checking check_reports_unknown_assignment_to_concrete_type`<br>`cargo test -p typepython-checking check_reports_unknown_assignment_to_any` |
+| unknown | explicit casts make subsequent supported operations legal | `cargo test -p typepython-checking check_accepts_unknown_after_explicit_cast`<br>`cargo test -p typepython-checking check_accepts_unknown_subscript_and_arithmetic_after_explicit_cast` |
+| no_implicit_dynamic | unannotated function and method parameters are diagnosed when enabled | `cargo test -p typepython-checking check_reports_implicit_dynamic_function_and_method_params_when_enabled` |
+| no_implicit_dynamic | explicit `dynamic` remains accepted when the option is enabled | `cargo test -p typepython-checking check_accepts_explicit_dynamic_when_no_implicit_dynamic_is_enabled` |
+| no_implicit_dynamic | uncontextualized lambda parameters are diagnosed | `cargo test -p typepython-checking check_reports_uncontextualized_lambda_param_when_no_implicit_dynamic_is_enabled` |
+| no_implicit_dynamic | contextual callable lambda parameters are accepted | `cargo test -p typepython-checking check_accepts_contextual_lambda_param_when_no_implicit_dynamic_is_enabled` |
+| strict_nulls | `None` assignment into non-optional targets is diagnosed when enabled | `cargo test -p typepython-checking check_reports_none_assignment_when_strict_nulls_is_enabled` |
+| strict_nulls | `None` call arguments for non-optional parameters are diagnosed when enabled | `cargo test -p typepython-checking check_reports_none_call_argument_when_strict_nulls_is_enabled` |
+| strict_nulls | `None` returns for non-optional return types are diagnosed when enabled | `cargo test -p typepython-checking check_reports_none_return_when_strict_nulls_is_enabled` |
+| strict_nulls | compatibility mode allows selected `None` flows when strict nulls are disabled | `cargo test -p typepython-checking strict_nulls` |
+| sealed | non-exhaustive sealed matches name missing subclasses | `cargo test -p typepython-checking check_reports_non_exhaustive_sealed_match` |
+| sealed | sealed matches with explicit coverage or wildcard are accepted | `cargo test -p typepython-checking check_accepts_exhaustive_sealed_match_with_wildcard` |
+| enum | non-exhaustive enum matches name missing members | `cargo test -p typepython-checking check_reports_non_exhaustive_enum_match`<br>`cargo test -p typepython-checking check_reports_non_exhaustive_enum_match_missing_member` |
+| enum | exhaustive enum matches are accepted | `cargo test -p typepython-checking check_accepts_enum_exhaustive_match` |
+| TypedDict | contextual literals reject missing keys, unknown keys, and value mismatches | `cargo test -p typepython-checking check_reports_missing_required_typed_dict_key`<br>`cargo test -p typepython-checking check_reports_unknown_typed_dict_key`<br>`cargo test -p typepython-checking check_reports_incompatible_typed_dict_value` |
+| TypedDict | `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `Required_` lower to standard stubs | `cargo test -p typepython-lowering transform` |
+| public API emit | typed publication and verify failures cover missing or divergent artifacts | `cargo test -p typepython-cli tests::verification` |
+| downstream compatibility | emitted artifacts are consumed by the downstream checker matrix | `python3 scripts/downstream_checker_smoke.py` |
+
 ## Current Validation Evidence
 
 These commands are the exact post-remediation checks used to validate the current strategic roadmap closure:

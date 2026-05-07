@@ -133,6 +133,9 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("scripts/conformance_report.py --check", rust_workflow)
         self.assertIn("TypePython Conformance Report", report)
         self.assertIn("Normative MUST Traceability", report)
+        self.assertIn("Semantic Sub-Rule Evidence", report)
+        self.assertIn("unknown` is diagnosed as TPY4003", report)
+        self.assertIn("check_reports_none_call_argument_when_strict_nulls_is_enabled", report)
         self.assertIn("language-spec-v1:L", report)
         self.assertNotIn("| Core v1 | MUST | missing |", report)
         subprocess.run(
@@ -622,10 +625,13 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("Unknown and dynamic boundary assignability", conformance_plan)
         self.assertIn("Unknown and dynamic boundary assignability", conformance_report)
         self.assertIn("cargo test -p typepython-checking unknown", conformance_report)
+        self.assertIn("check_reports_unknown_subscript_from_real_parse_pipeline", conformance_report)
+        self.assertIn("check_reports_unknown_arithmetic_from_real_parse_pipeline", conformance_report)
         self.assertIn(
             '"Unknown and dynamic boundary assignability": ("cargo test -p typepython-checking unknown",)',
             conformance_script,
         )
+        self.assertIn("SEMANTIC_SUBRULE_EVIDENCE", conformance_script)
 
     def test_canonical_type_relation_boundaries_are_enforced(self) -> None:
         architecture = read_text("docs/architecture.md")

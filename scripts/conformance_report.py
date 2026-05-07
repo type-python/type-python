@@ -39,11 +39,167 @@ class NormativeRule:
     tests: tuple[str, ...]
 
 
+@dataclasses.dataclass(frozen=True)
+class SemanticSubRule:
+    area: str
+    rule: str
+    tests: tuple[str, ...]
+
+
 BETA_SCOPE_NOTES: dict[str, str] = {
     "mapped": "Evidence command(s) cover this rule for the Core v1 Beta claim.",
     "meta-rule": "Spec governance or terminology rule; non-blocking for Core v1 Beta runtime/tool behavior.",
     "not-claimed-beta": "Not part of the externally visible Core v1 Beta compatibility claim.",
 }
+
+
+SEMANTIC_SUBRULE_EVIDENCE: tuple[SemanticSubRule, ...] = (
+    SemanticSubRule(
+        "unknown",
+        "member access on `unknown` is diagnosed as TPY4003",
+        ("cargo test -p typepython-checking check_reports_unknown_member_access",),
+    ),
+    SemanticSubRule(
+        "unknown",
+        "direct call of `unknown` is diagnosed as TPY4003",
+        (
+            "cargo test -p typepython-checking check_reports_unknown_direct_call_keyword",
+            "cargo test -p typepython-checking check_reports_unknown_direct_call_on_import",
+        ),
+    ),
+    SemanticSubRule(
+        "unknown",
+        "method call on `unknown` is diagnosed as TPY4003",
+        ("cargo test -p typepython-checking check_reports_unknown_method_call",),
+    ),
+    SemanticSubRule(
+        "unknown",
+        "subscript/indexing on `unknown` is diagnosed as TPY4003",
+        ("cargo test -p typepython-checking check_reports_unknown_subscript_from_real_parse_pipeline",),
+    ),
+    SemanticSubRule(
+        "unknown",
+        "binary arithmetic with either operand `unknown` is diagnosed as TPY4003",
+        ("cargo test -p typepython-checking check_reports_unknown_arithmetic_from_real_parse_pipeline",),
+    ),
+    SemanticSubRule(
+        "unknown",
+        "`unknown` cannot flow into concrete parameters or returns without narrowing",
+        (
+            "cargo test -p typepython-checking check_reports_unknown_call_argument_to_concrete_parameter",
+            "cargo test -p typepython-checking check_reports_unknown_return_to_concrete_type",
+        ),
+    ),
+    SemanticSubRule(
+        "unknown",
+        "`unknown` assignment into concrete or `Any` targets is rejected",
+        (
+            "cargo test -p typepython-checking check_reports_unknown_assignment_to_concrete_type",
+            "cargo test -p typepython-checking check_reports_unknown_assignment_to_any",
+        ),
+    ),
+    SemanticSubRule(
+        "unknown",
+        "explicit casts make subsequent supported operations legal",
+        (
+            "cargo test -p typepython-checking check_accepts_unknown_after_explicit_cast",
+            "cargo test -p typepython-checking check_accepts_unknown_subscript_and_arithmetic_after_explicit_cast",
+        ),
+    ),
+    SemanticSubRule(
+        "no_implicit_dynamic",
+        "unannotated function and method parameters are diagnosed when enabled",
+        (
+            "cargo test -p typepython-checking check_reports_implicit_dynamic_function_and_method_params_when_enabled",
+        ),
+    ),
+    SemanticSubRule(
+        "no_implicit_dynamic",
+        "explicit `dynamic` remains accepted when the option is enabled",
+        ("cargo test -p typepython-checking check_accepts_explicit_dynamic_when_no_implicit_dynamic_is_enabled",),
+    ),
+    SemanticSubRule(
+        "no_implicit_dynamic",
+        "uncontextualized lambda parameters are diagnosed",
+        (
+            "cargo test -p typepython-checking check_reports_uncontextualized_lambda_param_when_no_implicit_dynamic_is_enabled",
+        ),
+    ),
+    SemanticSubRule(
+        "no_implicit_dynamic",
+        "contextual callable lambda parameters are accepted",
+        (
+            "cargo test -p typepython-checking check_accepts_contextual_lambda_param_when_no_implicit_dynamic_is_enabled",
+        ),
+    ),
+    SemanticSubRule(
+        "strict_nulls",
+        "`None` assignment into non-optional targets is diagnosed when enabled",
+        ("cargo test -p typepython-checking check_reports_none_assignment_when_strict_nulls_is_enabled",),
+    ),
+    SemanticSubRule(
+        "strict_nulls",
+        "`None` call arguments for non-optional parameters are diagnosed when enabled",
+        ("cargo test -p typepython-checking check_reports_none_call_argument_when_strict_nulls_is_enabled",),
+    ),
+    SemanticSubRule(
+        "strict_nulls",
+        "`None` returns for non-optional return types are diagnosed when enabled",
+        ("cargo test -p typepython-checking check_reports_none_return_when_strict_nulls_is_enabled",),
+    ),
+    SemanticSubRule(
+        "strict_nulls",
+        "compatibility mode allows selected `None` flows when strict nulls are disabled",
+        ("cargo test -p typepython-checking strict_nulls",),
+    ),
+    SemanticSubRule(
+        "sealed",
+        "non-exhaustive sealed matches name missing subclasses",
+        ("cargo test -p typepython-checking check_reports_non_exhaustive_sealed_match",),
+    ),
+    SemanticSubRule(
+        "sealed",
+        "sealed matches with explicit coverage or wildcard are accepted",
+        ("cargo test -p typepython-checking check_accepts_exhaustive_sealed_match_with_wildcard",),
+    ),
+    SemanticSubRule(
+        "enum",
+        "non-exhaustive enum matches name missing members",
+        (
+            "cargo test -p typepython-checking check_reports_non_exhaustive_enum_match",
+            "cargo test -p typepython-checking check_reports_non_exhaustive_enum_match_missing_member",
+        ),
+    ),
+    SemanticSubRule(
+        "enum",
+        "exhaustive enum matches are accepted",
+        ("cargo test -p typepython-checking check_accepts_enum_exhaustive_match",),
+    ),
+    SemanticSubRule(
+        "TypedDict",
+        "contextual literals reject missing keys, unknown keys, and value mismatches",
+        (
+            "cargo test -p typepython-checking check_reports_missing_required_typed_dict_key",
+            "cargo test -p typepython-checking check_reports_unknown_typed_dict_key",
+            "cargo test -p typepython-checking check_reports_incompatible_typed_dict_value",
+        ),
+    ),
+    SemanticSubRule(
+        "TypedDict",
+        "`Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, and `Required_` lower to standard stubs",
+        ("cargo test -p typepython-lowering transform",),
+    ),
+    SemanticSubRule(
+        "public API emit",
+        "typed publication and verify failures cover missing or divergent artifacts",
+        ("cargo test -p typepython-cli tests::verification",),
+    ),
+    SemanticSubRule(
+        "downstream compatibility",
+        "emitted artifacts are consumed by the downstream checker matrix",
+        ("python3 scripts/downstream_checker_smoke.py",),
+    ),
+)
 
 
 TEST_EVIDENCE: dict[str, tuple[str, ...]] = {
@@ -339,6 +495,20 @@ def render_markdown(claims: Iterable[FeatureClaim], rules: Iterable[NormativeRul
         lines.append(f"| {markdown_cell(claim.feature)} | {claim.tier} | {claim.status} | {evidence} |")
     lines.extend([
         "",
+        "## Semantic Sub-Rule Evidence",
+        "",
+        "This table expands broad Core v1 feature claims into the specific semantic cases that are easiest to over-map accidentally. Each row points to a concrete test filter or smoke command rather than only a broad crate-level family.",
+        "",
+        "| Area | Sub-rule | Evidence |",
+        "| ---- | -------- | -------- |",
+    ])
+    for subrule in SEMANTIC_SUBRULE_EVIDENCE:
+        evidence = "<br>".join(f"`{test}`" for test in subrule.tests) if subrule.tests else "missing"
+        lines.append(
+            f"| {markdown_cell(subrule.area)} | {markdown_cell(subrule.rule)} | {evidence} |"
+        )
+    lines.extend([
+        "",
         "## Current Validation Evidence",
         "",
         "These commands are the exact post-remediation checks used to validate the current strategic roadmap closure:",
@@ -365,6 +535,9 @@ def render_markdown(claims: Iterable[FeatureClaim], rules: Iterable[NormativeRul
 def render_json(claims: Iterable[FeatureClaim], rules: Iterable[NormativeRule]) -> str:
     payload = {
         "feature_claims": [dataclasses.asdict(claim) for claim in claims],
+        "semantic_subrules": [
+            dataclasses.asdict(subrule) for subrule in SEMANTIC_SUBRULE_EVIDENCE
+        ],
         "normative_rules": [dataclasses.asdict(rule) for rule in rules],
     }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
@@ -391,6 +564,14 @@ def main() -> int:
         if missing_must:
             joined = ", ".join(missing_must)
             raise SystemExit(f"missing conformance evidence for MUST feature(s): {joined}")
+        missing_subrules = [
+            f"{subrule.area}: {subrule.rule}"
+            for subrule in SEMANTIC_SUBRULE_EVIDENCE
+            if not subrule.tests
+        ]
+        if missing_subrules:
+            joined = ", ".join(missing_subrules)
+            raise SystemExit(f"missing semantic sub-rule evidence: {joined}")
         needs_mapping = [rule.rule_id for rule in rules if rule.status == "needs-mapping"]
         if needs_mapping:
             joined = ", ".join(needs_mapping)
