@@ -97,9 +97,9 @@ impl<'a> TypeLevelEvaluator<'a> {
         }
         let subtype = self.expect_type(&args[0])?;
         let supertype = self.expect_type(&args[1])?;
-        Ok(TypeLevelValue::Bool(semantic_type_is_assignable(
-            self.node, self.nodes, &supertype, &subtype,
-        )))
+        Ok(TypeLevelValue::Bool(
+            self.context.semantic_type_is_assignable(self.node, &supertype, &subtype),
+        ))
     }
 
     fn evaluate_key_of(
@@ -401,6 +401,43 @@ mod tests {
         let nodes = vec![node.clone()];
         let context = CheckerContext::new(&nodes, ImportFallback::Unknown, None);
         let ty = lower_type_text_or_name("TypeIf[IsSubtype[int, object], str, bytes]");
+        let mut evaluator = TypeLevelEvaluator::new(&context, &node, &nodes);
+
+        let result = evaluator.evaluate_type(&ty);
+
+        assert_eq!(result, Ok(TypeLevelValue::Type(SemanticType::Name(String::from("str")))));
+    }
+
+    #[test]
+    fn type_if_is_subtype_honors_strict_nulls_option() {
+        let node = empty_node();
+        let nodes = vec![node.clone()];
+        let context = CheckerContext::new_with_bound_surface_facts_and_options(
+            &nodes,
+            None,
+            None,
+            CheckerOptions { strict_nulls: false, ..CheckerOptions::default() },
+        );
+        let ty = lower_type_text_or_name("TypeIf[IsSubtype[None, int], str, bytes]");
+        let mut evaluator = TypeLevelEvaluator::new(&context, &node, &nodes);
+
+        let result = evaluator.evaluate_type(&ty);
+
+        assert_eq!(result, Ok(TypeLevelValue::Type(SemanticType::Name(String::from("str")))));
+    }
+
+    #[test]
+    fn type_if_is_subtype_honors_taint_option() {
+        let node = empty_node();
+        let nodes = vec![node.clone()];
+        let context = CheckerContext::new_with_bound_surface_facts_and_options(
+            &nodes,
+            None,
+            None,
+            CheckerOptions { experimental_taint: true, ..CheckerOptions::default() },
+        );
+        let ty =
+            lower_type_text_or_name("TypeIf[IsSubtype[Tainted[str, \"html\"], str], bytes, str]");
         let mut evaluator = TypeLevelEvaluator::new(&context, &node, &nodes);
 
         let result = evaluator.evaluate_type(&ty);

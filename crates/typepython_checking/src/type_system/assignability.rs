@@ -49,6 +49,7 @@ pub(super) fn semantic_type_matches_with_options(
     TypeRelationContext::with_options(node, nodes, options).matches(expected, actual)
 }
 
+#[cfg(test)]
 pub(super) fn semantic_type_is_assignable(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
