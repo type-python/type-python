@@ -167,6 +167,36 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
         self.assertEqual(command[extra_search_path_index + 1], str(build_dir))
         self.assertEqual(command[-1], str(build_dir))
 
+    def test_ty_command_includes_checker_support_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = pathlib.Path(tmp)
+            build_dir = project_dir / "checker-build"
+            (project_dir / "checker-support" / "typings").mkdir(parents=True)
+            (project_dir / "checker-support" / "vendor-stubs").mkdir()
+            build_dir.mkdir()
+
+            command = downstream_checker_smoke.checker_command(
+                "ty",
+                "strict",
+                "3.12",
+                build_dir,
+            )
+
+            search_paths = [
+                pathlib.Path(command[index + 1])
+                for index, value in enumerate(command)
+                if value == "--extra-search-path"
+            ]
+            self.assertEqual(
+                search_paths,
+                [
+                    build_dir,
+                    project_dir / "checker-support" / "typings",
+                    project_dir / "checker-support" / "vendor-stubs",
+                    project_dir / "checker-support",
+                ],
+            )
+
     def test_pyright_strict_config_preserves_strict_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = pathlib.Path(tmp)
