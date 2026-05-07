@@ -20,7 +20,7 @@ x[0]           # OK
 y: int = x     # OK
 ```
 
-When `typing.no_implicit_dynamic = true` (default), the compiler diagnoses implicit fallback to `dynamic`. You must write `dynamic` explicitly.
+When `typing.no_implicit_dynamic = true` (default), the compiler diagnoses Core v1 implicit parameter fallbacks to `dynamic`. Unannotated function and method parameters, plus lambda parameters without a contextual callable type, need explicit annotations or explicit `dynamic`.
 
 ### `unknown`
 

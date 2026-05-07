@@ -132,7 +132,7 @@ This is the largest category, covering all type checking rules.
 | `TPY4026` | warning       | Function calls a function with an effect row that the caller does not cover                                        |
 | `TPY4027` | error         | Restricted type-level alias cannot be evaluated to standard Python typing                                          |
 | `TPY4028` | error         | Tainted source result reaches a sink without a sanitizer                                                          |
-| `TPY4029` | error         | Implicit fallback to `dynamic` while `typing.no_implicit_dynamic` is enabled                                      |
+| `TPY4029` | error         | Implicit Core v1 parameter fallback to `dynamic` while `typing.no_implicit_dynamic` is enabled                    |
 | `TPY4101` | warning/error | Use of deprecated declaration                                                                                      |
 | `TPY7003` | error         | Framework adapter manifest is invalid                                                                             |
 
@@ -343,7 +343,7 @@ render_html(raw)  # TPY4028: tainted source result flows into sink
 
 #### TPY4029 -- Implicit dynamic fallback
 
-Raised when `typing.no_implicit_dynamic = true` and a TypePython source construct would fall back to `dynamic` without an explicit annotation.
+Raised when `typing.no_implicit_dynamic = true` and a Core v1 parameter position would fall back to `dynamic` without an explicit annotation. Core v1 requires this diagnostic for unannotated function and method parameters, excluding conventional receivers, and uncontextualized lambda parameters.
 
 ```python
 def parse(value) -> int:  # TPY4029: parameter falls back to dynamic

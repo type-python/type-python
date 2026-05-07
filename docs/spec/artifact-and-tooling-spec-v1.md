@@ -106,7 +106,7 @@ profile = null                                    # "library", "application", or
 strict = true                                    # Master strictness
 strict_nulls = true                              # None excluded from T
 imports = "unknown"                              # "unknown" or "dynamic"
-no_implicit_dynamic = true                      # Disallow implicit dynamic
+no_implicit_dynamic = true                      # Disallow Core v1 implicit dynamic parameters
 warn_unsafe = true                               # Warn on unsafe boundaries
 enable_sealed_exhaustiveness = true              # Check sealed exhaustiveness
 report_deprecated = "warning"                    # "ignore", "warning", or "error"
@@ -173,7 +173,7 @@ If `python_executable` is configured and its resolved Python major/minor version
 | `strict`                       | bool           | Master strictness switch                                                              |
 | `strict_nulls`                 | bool           | `None` excluded from `T` unless explicitly included                                   |
 | `imports`                      | string         | Default type for untyped imports: `unknown` or `dynamic`                              |
-| `no_implicit_dynamic`          | bool           | Diagnose silent fallback to `dynamic`                                                 |
+| `no_implicit_dynamic`          | bool           | Diagnose Core v1 implicit parameter fallback to `dynamic`                             |
 | `warn_unsafe`                  | bool           | Controls unsafe-boundary severity                                                     |
 | `enable_sealed_exhaustiveness` | bool           | Enable exhaustiveness checks for sealed match targets                                 |
 | `report_deprecated`            | string         | Severity for deprecated-symbol use: `ignore`, `warning`, or `error`                   |

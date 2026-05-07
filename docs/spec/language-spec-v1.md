@@ -390,7 +390,7 @@ A property name that is not a valid identifier (e.g., contains spaces) MUST be a
 - `dynamic` is assignable to and from every type.
 - Member access, calls, indexing, and arithmetic on `dynamic` are permitted without restriction.
 - Operations involving `dynamic` generally produce `dynamic`.
-- `no_implicit_dynamic = true` MUST diagnose any fallback to `dynamic` that was not explicit.
+- `no_implicit_dynamic = true` MUST diagnose Core v1 implicit parameter fallbacks to `dynamic`: function and method parameters that omit a type, excluding conventional `self` / `cls` positions, and lambda parameters without a contextual callable type. Broader fallback cases MAY be diagnosed by strict-mode, public-surface, or implementation-specific rules, but they are not part of the Core v1 `no_implicit_dynamic` compatibility floor.
 
 #### 8.1.2 `unknown`
 
@@ -1258,8 +1258,8 @@ Imported `typing.Any` is treated as `dynamic` by the checker.
 
 - If annotated: use the annotation
 - If unannotated: infer from the right-hand side expression after applying contextual typing and widening rules
-- If inference fails and `no_implicit_dynamic = true`: **diagnose**
-- Otherwise: MAY fall back to `dynamic`
+- If inference fails, strict mode SHOULD diagnose when it can produce a deterministic explanation
+- Otherwise: MAY fall back to `dynamic`; `no_implicit_dynamic = true` does not by itself require every failed assignment inference fallback to be diagnosed in Core v1
 
 **Assignment compatibility:**
 
@@ -1312,7 +1312,7 @@ All other left-hand-side expressions are invalid assignment targets and MUST be 
   - If the function body consists solely of a single `raise` statement or an unconditional call to a `Never`-returning function, the inferred return type is `Never`.
   - Otherwise, the inferred return type is the union of all contributed return types, after widening per Section 8.15.
   - If the function directly or indirectly references itself (mutual recursion) through unannotated return paths, the inferred return type for the cycle is `dynamic`. Adding an explicit return annotation to any function in the cycle breaks it.
-- If inferred return type contains `dynamic` and `no_implicit_dynamic = true`: **diagnose**
+- If inferred return type contains `dynamic`, strict mode SHOULD diagnose or require an explicit return annotation for exported surfaces. Core v1 does not require `no_implicit_dynamic = true` alone to diagnose every inferred-return `dynamic`.
 
 **Generic functions:**
 
