@@ -2836,6 +2836,58 @@ fn watched_file_change_invalidates_support_source_cache() {
 
 #[cfg(unix)]
 #[test]
+fn watched_file_change_ignores_irrelevant_python_without_python_probe() {
+    let root = env::temp_dir().join(format!(
+        "typepython-lsp-watched-irrelevant-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let probe = root.join("python-probe");
+    let probe_log = root.join("python-probe.log");
+    write_executable_script(
+        &probe,
+        &format!(
+            "#!/bin/sh\nprintf 'probe\\n' >> '{}'\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+            probe_log.display()
+        ),
+    );
+    let config = temp_workspace_with_config(
+        "watched_file_change_ignores_irrelevant_python_without_python_probe",
+        &format!(
+            "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"site-packages\"]\npython_executable = \"{}\"\n",
+            probe.display()
+        ),
+        &[("src/app/__init__.tpy", "def run() -> None:\n    pass\n")],
+    );
+    let _ = fs::remove_file(&probe_log);
+
+    let mut server = Server::new(config.clone());
+    server.publish_diagnostics().expect("initial diagnostics should publish");
+    let ignored_path = config.config_dir.join("scratch/ignored.py");
+    fs::create_dir_all(ignored_path.parent().expect("ignored path should have a parent"))
+        .expect("ignored parent directory should be created");
+    fs::write(&ignored_path, "pass\n").expect("ignored Python file should be written");
+    let ignored_uri = path_to_uri(&ignored_path);
+
+    server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"workspace/didChangeWatchedFiles",
+            "params": {"changes": [{"uri": ignored_uri, "type": 2}]}
+        }))
+        .expect("irrelevant watched file change should be ignored");
+
+    assert!(
+        !probe_log.exists(),
+        "irrelevant watched file changes must not probe Python type roots"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn did_open_background_mode_prewarms_support_index_cache() {
     let root = env::temp_dir().join(format!(
         "typepython-lsp-prewarm-support-index-{}",

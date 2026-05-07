@@ -19,6 +19,23 @@ impl SupportSourceCatalog {
             ))
         })
     }
+
+    fn path_may_be_known_support_source(&self, config: &ConfigHandle, path: &Path) -> bool {
+        if typepython_syntax::SourceKind::from_path(path).is_none() {
+            return false;
+        }
+        if let Some(index) = &self.index
+            && index.sources_by_module().values().flatten().any(|source| {
+                source.path == path || path.starts_with(&source.root)
+            })
+        {
+            return true;
+        }
+        config.config.resolution.type_roots.iter().any(|root| {
+            let root_path = config.resolve_relative_path(root);
+            path.starts_with(root_path)
+        })
+    }
 }
 
 fn project_collision_diagnostics(
@@ -174,7 +191,7 @@ impl IncrementalWorkspace {
         &mut self,
         path: &Path,
     ) -> Result<bool, LspError> {
-        if !self.path_may_be_support_source(path)? {
+        if !self.path_may_be_support_source(path) {
             return Ok(false);
         }
         self.support_catalog.index = None;
@@ -183,20 +200,11 @@ impl IncrementalWorkspace {
         Ok(true)
     }
 
-    fn path_may_be_support_source(&self, path: &Path) -> Result<bool, LspError> {
+    fn path_may_be_support_source(&self, path: &Path) -> bool {
         if self.support_documents.contains_key(path) || self.active_support_paths.contains(path) {
-            return Ok(true);
+            return true;
         }
-        if self.support_catalog.index.as_ref().is_some_and(|index| {
-            index.all_sources().into_iter().any(|source| source.path == path)
-        }) {
-            return Ok(true);
-        }
-        if typepython_syntax::SourceKind::from_path(path).is_none() {
-            return Ok(false);
-        }
-        let roots = typepython_project::configured_external_type_roots(&self.config)?;
-        Ok(roots.iter().any(|root| path.starts_with(&root.path)))
+        self.support_catalog.path_may_be_known_support_source(&self.config, path)
     }
 
     pub(super) fn project_source_for_path(
