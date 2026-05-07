@@ -1,0 +1,29 @@
+from typing import Literal, TypedDict
+
+
+class UserRecord(TypedDict):
+    id: int
+    name: str
+
+
+overload def coerce(value: int) -> int: ...
+overload def coerce(value: str) -> int: ...
+overload def coerce(value: bytes) -> int: ...
+
+
+def coerce(value: int | str | bytes) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, bytes):
+        return len(value)
+    return len(value)
+
+
+overload def select(user: UserRecord, field: Literal["id"]) -> int: ...
+overload def select(user: UserRecord, field: Literal["name"]) -> str: ...
+
+
+def select(user: UserRecord, field: Literal["id", "name"]) -> int | str:
+    if field == "id":
+        return user["id"]
+    return user["name"]

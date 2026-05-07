@@ -32,11 +32,36 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
         self.assertIn("namespace-package", matrix)
         self.assertIn("pep561-partial-stub-package", matrix)
         self.assertIn("ecosystem-patterns-package", matrix)
+        self.assertIn("sdk-client-package", matrix)
+        self.assertIn("overload-heavy-package", matrix)
         for case in matrix.values():
             fixture_dir = downstream_checker_smoke.FIXTURE_ROOT / case.name
             self.assertTrue(fixture_dir.is_dir(), fixture_dir)
             self.assertGreater(len(case.targets), 0)
             self.assertGreater(len(case.profiles), 0)
+
+    def test_ecosystem_corpus_categories_are_mapped_to_fixtures(self) -> None:
+        matrix = downstream_checker_smoke.load_fixture_matrix()
+        payload = json.loads(downstream_checker_smoke.MATRIX_PATH.read_text(encoding="utf-8"))
+        corpus = payload.get("ecosystem_corpus", {}).get("baseline_categories", {})
+
+        expected_categories = {
+            "attrs_dataclasses_heavy",
+            "pydantic_v2_heavy",
+            "fastapi_route_structure",
+            "sqlalchemy_typing_heavy",
+            "protocol_paramspec_heavy",
+            "typeddict_sdk_client",
+            "namespace_package",
+            "partial_stub_package",
+            "large_py_typed_package",
+            "overload_heavy_package",
+        }
+        self.assertEqual(set(corpus), expected_categories)
+        for category, fixture_names in corpus.items():
+            self.assertGreater(len(fixture_names), 0, category)
+            for fixture_name in fixture_names:
+                self.assertIn(fixture_name, matrix, category)
 
     def test_matrix_has_release_target_coverage(self) -> None:
         matrix = downstream_checker_smoke.load_fixture_matrix()

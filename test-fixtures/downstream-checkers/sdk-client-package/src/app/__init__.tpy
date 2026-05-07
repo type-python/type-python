@@ -1,0 +1,39 @@
+from typing import Literal, TypedDict, cast
+
+
+class ErrorInfo(TypedDict):
+    code: str
+    message: str
+
+
+class UserRecord(TypedDict):
+    id: int
+    name: str
+    status: Literal["active", "disabled"]
+    email: str | None
+
+
+class ListUsersResponse(TypedDict):
+    items: list[UserRecord]
+    next_cursor: str | None
+
+
+typealias UserPatch = Partial[UserRecord]
+typealias PublicUser = Pick[UserRecord, Literal["id", "name", "status"]]
+
+
+class Client:
+    def get_user(self, user_id: int) -> UserRecord:
+        return cast(UserRecord, {"id": user_id, "name": "", "status": "active", "email": None})
+
+    def list_users(self, cursor: str | None) -> ListUsersResponse:
+        return cast(ListUsersResponse, {"items": [], "next_cursor": cursor})
+
+
+def fetch_public_user(client: Client, user_id: int) -> PublicUser:
+    user: UserRecord = client.get_user(user_id)
+    return {"id": user["id"], "name": user["name"], "status": user["status"]}
+
+
+def apply_patch(user: UserRecord, patch: UserPatch) -> UserRecord:
+    return {"id": user["id"], "name": user["name"], "status": user["status"], "email": user["email"]}

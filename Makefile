@@ -7,7 +7,7 @@ FUZZ_SMOKE_SECONDS ?= 30
 FUZZ_LONG_SECONDS ?= 300
 COVERAGE_MIN_LINES ?= 20
 
-.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers roadmap-demo-smoke coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare perf-smoke package-check beta-release-gate snapshot-review docs ci bump-version
+.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers roadmap-demo-smoke coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare perf-smoke package-check quickstart-smoke beta-release-gate snapshot-review docs ci bump-version
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -80,7 +80,15 @@ package-check:
 	$(PYTHON) -m build --sdist --wheel
 	$(PYTHON) -m twine check dist/*
 
-beta-release-gate: fmt-check lint test test-cli-verification test-downstream-checkers roadmap-demo-smoke perf-smoke fuzz-smoke package-check stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts
+quickstart-smoke: package-check
+	tmpdir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$tmpdir"' EXIT; \
+	$(PYTHON) -m venv "$$tmpdir/venv"; \
+	"$$tmpdir/venv/bin/python" -m pip install --upgrade pip; \
+	"$$tmpdir/venv/bin/python" -m pip install --force-reinstall dist/*.whl; \
+	"$$tmpdir/venv/bin/python" scripts/quickstart_smoke.py
+
+beta-release-gate: fmt-check lint test test-cli-verification test-downstream-checkers roadmap-demo-smoke perf-smoke fuzz-smoke package-check quickstart-smoke stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts
 
 bump-version:
 	@test -n "$(VERSION)" || (echo "Usage: make bump-version VERSION=0.0.8" && exit 1)

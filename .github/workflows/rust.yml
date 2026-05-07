@@ -30,8 +30,8 @@ jobs:
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Test Fast Workspace Suite
-        run: 'cargo test --workspace -- --skip tests::verification::'
+      - name: Test Workspace Suite
+        run: cargo test --workspace
 
       - name: Bench compile check
         run: cargo bench --workspace --no-run

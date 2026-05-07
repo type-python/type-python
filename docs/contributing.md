@@ -340,6 +340,7 @@ The first fuzz targets cover parser entrypoints, `TypeExpr` parsing/rendering, a
 | `make fuzz-long`                  | `cargo +nightly fuzz run ... -max_total_time=300`                                               | Run longer fuzz targets locally       |
 | `make docs`                       | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`                                   | Generate rustdoc                      |
 | `make package-check`              | `python3 -m build --sdist --wheel` + `python3 -m twine check dist/*`                           | Validate Python package artifacts     |
+| `make quickstart-smoke`           | build wheel + install into a temporary venv + `scripts/quickstart_smoke.py`                    | Validate installed CLI workflow       |
 | `make bump-version VERSION=0.0.8` | `python3 scripts/bump_version.py 0.0.8`                                                        | Sync Rust and Python package versions |
 | `make ci`                         | `fmt-check` + `lint` + `test-fast` + `test-cli-verification` + `repo-contracts` + `bench-check` + `package-check` | Repository validation target          |
 
@@ -409,7 +410,7 @@ Linux wheel publishing uses the `manylinux2014` image through `cibuildwheel`, wh
 
 GitHub Actions runs on every push to `main` and every PR:
 
-1. **workspace-fast** -- format, lint, `cargo test --workspace -- --skip tests::verification::`, bench compile check, downstream checker smoke, and Python package validation
+1. **workspace-fast** -- format, lint, `cargo test --workspace`, bench compile check, downstream checker smoke, and Python package validation
 2. **cli-verification** -- `cargo test -p typepython-cli tests::verification::`
 
 Together these jobs cover the repository validation path that `make ci` approximates locally.
@@ -417,8 +418,9 @@ Together these jobs cover the repository validation path that `make ci` approxim
 The downstream checker smoke suite currently covers:
 
 - `basic-package`, `standard-typing-package`, and `compat-package` across Python 3.10 through 3.14
-- `rich-package`, `dual-emit-package`, task decorators, Pydantic-like shapes, FastAPI-like routes, and negative consumers
-- `typeshed-heavy-package`, `namespace-package`, `pep561-partial-stub-package`, and `ecosystem-patterns-package` for typeshed-heavy imports, implicit namespace packages, PEP 561 typed-package and partial-stub metadata, and attrs/SQLAlchemy/Django-style ecosystem patterns
+- `rich-package`, `dual-emit-package`, `overload-heavy-package`, task decorators, Pydantic-like shapes, FastAPI-like routes, overload-heavy APIs, and negative consumers
+- `typeshed-heavy-package`, `namespace-package`, `pep561-partial-stub-package`, `sdk-client-package`, and `ecosystem-patterns-package` for typeshed-heavy imports, implicit namespace packages, PEP 561 typed-package and partial-stub metadata, TypedDict-heavy SDK clients, and attrs/SQLAlchemy/Django-style ecosystem patterns
+- `ecosystem_corpus.baseline_categories` in `test-fixtures/downstream-checkers/matrix.json`, which keeps the v1 corpus categories machine-checkable
 - strict downstream profiles for mypy, pyright, basedpyright, and ty by default; pyright-family configs focus on type portability rather than lint-only diagnostics
 - emitted fragment assertions before external checkers run, including non-`app/__init__.pyi` namespace package stubs
 - checker disagreement allowlists with `allowlist_reason` and a non-expired `allowlist_expires` date

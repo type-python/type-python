@@ -114,7 +114,14 @@ The downstream checker matrix is the Beta baseline for emitted artifacts. It cov
 packages, standard typing/TypedDict transforms, Python 3.10 through 3.14 target lowering, Pydantic-like
 shapes, FastAPI-like routes, task decorator transforms, native/compat emit styles, sync/async dual
 emit, typeshed-heavy imports, implicit namespace packages, PEP 561 typed-package and partial-stub
-metadata, attrs/SQLAlchemy/Django-style framework patterns, and negative consumer cases.
+metadata, attrs/SQLAlchemy/Django-style framework patterns, TypedDict-heavy SDK clients,
+overload-heavy APIs, and negative consumer cases.
+
+The matrix carries an `ecosystem_corpus.baseline_categories` map so the v1 corpus obligation stays
+machine-checkable. The categories cover attrs/dataclass-heavy code, Pydantic v2-style models,
+FastAPI route/dependency structures, SQLAlchemy-style mapped attributes, Protocol/ParamSpec-heavy
+APIs, TypedDict-heavy SDK clients, namespace packages, partial stubs, large `py.typed` package
+surfaces, and overload-heavy APIs.
 
 Known checker disagreements must stay explicit in `test-fixtures/downstream-checkers/matrix.json`
 with `allowlist_reason` and a non-expired `allowlist_expires` date. The smoke runner rejects expired

@@ -167,6 +167,9 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("beta-release-gate", workflow)
         self.assertIn("require-beta-release-gate", read_text(".github/workflows/publish.yml"))
         self.assertIn("beta-release-gate:", makefile)
+        self.assertIn("quickstart-smoke:", makefile)
+        self.assertIn("quickstart-smoke", makefile.split("beta-release-gate:", 1)[1])
+        self.assertIn("run: cargo test --workspace", workflow)
 
     def test_feature_status_contracts_match_marketing_claims(self) -> None:
         readme = read_text("README.md")
@@ -333,6 +336,9 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("typeshed-heavy imports", beta)
         self.assertIn("implicit namespace packages", beta)
         self.assertIn("partial-stub metadata", normalized_beta)
+        self.assertIn("TypedDict-heavy SDK clients", beta)
+        self.assertIn("overload-heavy APIs", beta)
+        self.assertIn("ecosystem_corpus.baseline_categories", beta)
         self.assertIn("allowlist_expires", beta)
 
         for fixture_name in (
@@ -340,6 +346,8 @@ class RepoContractsTests(unittest.TestCase):
             "namespace-package",
             "pep561-partial-stub-package",
             "ecosystem-patterns-package",
+            "sdk-client-package",
+            "overload-heavy-package",
         ):
             self.assertIn(fixture_name, contributing)
 

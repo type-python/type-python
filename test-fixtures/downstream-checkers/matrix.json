@@ -1,4 +1,18 @@
 {
+  "ecosystem_corpus": {
+    "baseline_categories": {
+      "attrs_dataclasses_heavy": ["ecosystem-patterns-package"],
+      "pydantic_v2_heavy": ["pydantic-like-package", "negative-pydantic-strictness-package"],
+      "fastapi_route_structure": ["fastapi-like-package"],
+      "sqlalchemy_typing_heavy": ["ecosystem-patterns-package"],
+      "protocol_paramspec_heavy": ["standard-typing-package", "typeshed-heavy-package", "toy-task-package"],
+      "typeddict_sdk_client": ["sdk-client-package"],
+      "namespace_package": ["namespace-package"],
+      "partial_stub_package": ["pep561-partial-stub-package"],
+      "large_py_typed_package": ["typeshed-heavy-package", "pep561-partial-stub-package"],
+      "overload_heavy_package": ["rich-package", "overload-heavy-package"]
+    }
+  },
   "fixtures": [
     {
       "name": "basic-package",
@@ -185,6 +199,34 @@
           "class QuerySet:",
           "class Manager:",
           "def load_item(sku: str, manager: Manager) -> InventoryItem: ..."
+        ]
+      }
+    },
+    {
+      "name": "sdk-client-package",
+      "targets": ["3.12"],
+      "expected_stub_fragments": {
+        "3.12": [
+          "class ErrorInfo(TypedDict):",
+          "class UserRecord(TypedDict):",
+          "class ListUsersResponse(TypedDict):",
+          "class UserPatch(TypedDict):",
+          "class PublicUser(TypedDict):",
+          "def fetch_public_user(client: Client, user_id: int) -> PublicUser: ..."
+        ]
+      }
+    },
+    {
+      "name": "overload-heavy-package",
+      "targets": ["3.12"],
+      "expected_stub_fragments": {
+        "3.12": [
+          "@overload",
+          "def coerce(value: int) -> int: ...",
+          "def coerce(value: str) -> int: ...",
+          "def coerce(value: bytes) -> int: ...",
+          "def select(user: UserRecord, field: Literal[\"id\"]) -> int: ...",
+          "def select(user: UserRecord, field: Literal[\"name\"]) -> str: ..."
         ]
       }
     },
