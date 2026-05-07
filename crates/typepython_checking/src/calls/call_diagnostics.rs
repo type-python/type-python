@@ -298,7 +298,13 @@ pub(super) fn direct_source_function_arity_diagnostic_with_context(
     let expected_positional_arg_types =
         expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
     let (positional_types, variadic_starred_types) =
-        expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
+        expanded_positional_arg_types_with_options(
+            node,
+            nodes,
+            call,
+            &expected_positional_arg_types,
+            context.assignability_options(),
+        );
     if !has_variadic
         && (positional_types.len() > positional_params.len() || !variadic_starred_types.is_empty())
     {
@@ -400,8 +406,13 @@ pub(super) fn direct_source_function_keyword_diagnostics_with_context(
         || unpack_shape.as_ref().is_some_and(|shape| shape.extra_items.is_some());
     let expected_positional_arg_types =
         expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
-    let (positional_types, _) =
-        expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
+    let (positional_types, _) = expanded_positional_arg_types_with_options(
+        node,
+        nodes,
+        call,
+        &expected_positional_arg_types,
+        context.assignability_options(),
+    );
     let keyword_expansions = resolved_keyword_expansions_with_context(context, node, nodes, call);
     let mut diagnostics = call.keyword_names
         .iter()
@@ -633,10 +644,22 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         .into_iter()
         .flat_map(|result| result.diagnostics)
     }));
-    let resolved_keyword_arg_types =
-        resolved_keyword_arg_semantic_types(node, nodes, call, &expected_keyword_arg_types);
+    let options = context.assignability_options();
+    let resolved_keyword_arg_types = resolved_keyword_arg_semantic_types_with_options(
+        node,
+        nodes,
+        call,
+        &expected_keyword_arg_types,
+        options,
+    );
     let (expanded_arg_types, variadic_starred_types) =
-        expanded_positional_arg_semantic_types(node, nodes, call, &expected_positional_arg_types);
+        expanded_positional_arg_semantic_types_with_options(
+            node,
+            nodes,
+            call,
+            &expected_positional_arg_types,
+            options,
+        );
     let keyword_expansions = resolved_keyword_expansions_with_context(context, node, nodes, call);
     let param_types = signature
         .iter()
@@ -672,7 +695,7 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         node,
         nodes,
         call,
-        context.assignability_options(),
+        options,
         &expanded_arg_types,
         &resolved_keyword_arg_types,
         &param_types,
@@ -686,14 +709,37 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
     diagnostics
 }
 
+#[allow(dead_code)]
 pub(super) fn expanded_positional_arg_types(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     expected_types: &[Option<String>],
 ) -> (Vec<String>, Vec<String>) {
+    expanded_positional_arg_types_with_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn expanded_positional_arg_types_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
+    options: AssignabilityOptions,
+) -> (Vec<String>, Vec<String>) {
     let (positional_types, variadic_starred_types) =
-        expanded_positional_arg_semantic_types(node, nodes, call, expected_types);
+        expanded_positional_arg_semantic_types_with_options(
+            node,
+            nodes,
+            call,
+            expected_types,
+            options,
+        );
     let positional_types =
         positional_types.into_iter().map(|ty| diagnostic_type_text(&ty)).collect::<Vec<_>>();
     let variadic_starred_types = variadic_starred_types
@@ -703,13 +749,31 @@ pub(super) fn expanded_positional_arg_types(
     (positional_types, variadic_starred_types)
 }
 
+#[allow(dead_code)]
 pub(super) fn expanded_positional_arg_semantic_types(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     expected_types: &[Option<String>],
 ) -> (Vec<SemanticType>, Vec<SemanticType>) {
-    let mut positional_types = resolved_call_arg_semantic_types(node, nodes, call, expected_types);
+    expanded_positional_arg_semantic_types_with_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn expanded_positional_arg_semantic_types_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
+    options: AssignabilityOptions,
+) -> (Vec<SemanticType>, Vec<SemanticType>) {
+    let mut positional_types =
+        resolved_call_arg_semantic_types_with_options(node, nodes, call, expected_types, options);
     if positional_types.len() < call.arg_count {
         positional_types.extend(std::iter::repeat_n(
             SemanticType::Name(String::new()),
@@ -717,7 +781,7 @@ pub(super) fn expanded_positional_arg_semantic_types(
         ));
     }
     let mut variadic_starred_types = Vec::new();
-    for expansion in resolved_starred_positional_expansions(node, nodes, call) {
+    for expansion in resolved_starred_positional_expansions_with_options(node, nodes, call, options) {
         match expansion {
             PositionalExpansion::Fixed(types) => positional_types.extend(
                 types
@@ -730,14 +794,37 @@ pub(super) fn expanded_positional_arg_semantic_types(
     (positional_types, variadic_starred_types)
 }
 
+#[allow(dead_code)]
 pub(super) fn expanded_positional_arg_semantic_types_with_expected_semantic(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     expected_types: &[Option<SemanticType>],
 ) -> (Vec<SemanticType>, Vec<SemanticType>) {
+    expanded_positional_arg_semantic_types_with_expected_semantic_and_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn expanded_positional_arg_semantic_types_with_expected_semantic_and_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<SemanticType>],
+    options: AssignabilityOptions,
+) -> (Vec<SemanticType>, Vec<SemanticType>) {
     let mut positional_types =
-        resolved_call_arg_semantic_types_with_expected_semantic(node, nodes, call, expected_types);
+        resolved_call_arg_semantic_types_with_expected_semantic_and_options(
+            node,
+            nodes,
+            call,
+            expected_types,
+            options,
+        );
     if positional_types.len() < call.arg_count {
         positional_types.extend(std::iter::repeat_n(
             SemanticType::Name(String::new()),
@@ -745,7 +832,7 @@ pub(super) fn expanded_positional_arg_semantic_types_with_expected_semantic(
         ));
     }
     let mut variadic_starred_types = Vec::new();
-    for expansion in resolved_starred_positional_expansions(node, nodes, call) {
+    for expansion in resolved_starred_positional_expansions_with_options(node, nodes, call, options) {
         match expansion {
             PositionalExpansion::Fixed(types) => positional_types.extend(
                 types
@@ -758,13 +845,30 @@ pub(super) fn expanded_positional_arg_semantic_types_with_expected_semantic(
     (positional_types, variadic_starred_types)
 }
 
+#[allow(dead_code)]
 pub(super) fn resolved_call_arg_semantic_types(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     expected_types: &[Option<String>],
 ) -> Vec<SemanticType> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    resolved_call_arg_semantic_types_with_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn resolved_call_arg_semantic_types_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
+    options: AssignabilityOptions,
+) -> Vec<SemanticType> {
+    let context = checker_context_for_assignability_options(nodes, options);
     let arg_types = call.positional_arg_type_texts();
     if call.arg_values.is_empty() {
         return arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
@@ -783,8 +887,8 @@ pub(super) fn resolved_call_arg_semantic_types(
             )
             .map(|result| result.actual_type)
             .or_else(|| {
-                resolve_direct_expression_semantic_type_from_metadata(
-                    node, nodes, None, None, None, call.line, metadata,
+                resolve_direct_expression_semantic_type_from_metadata_with_options(
+                    node, nodes, None, None, None, call.line, metadata, options,
                 )
             })
             .unwrap_or_else(|| {
@@ -797,13 +901,30 @@ pub(super) fn resolved_call_arg_semantic_types(
         .collect()
 }
 
+#[allow(dead_code)]
 pub(super) fn resolved_call_arg_semantic_types_with_expected_semantic(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     expected_types: &[Option<SemanticType>],
 ) -> Vec<SemanticType> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    resolved_call_arg_semantic_types_with_expected_semantic_and_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn resolved_call_arg_semantic_types_with_expected_semantic_and_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<SemanticType>],
+    options: AssignabilityOptions,
+) -> Vec<SemanticType> {
+    let context = checker_context_for_assignability_options(nodes, options);
     let arg_types = call.positional_arg_type_texts();
     if call.arg_values.is_empty() {
         return arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
@@ -822,8 +943,8 @@ pub(super) fn resolved_call_arg_semantic_types_with_expected_semantic(
             )
             .map(|result| result.actual_type)
             .or_else(|| {
-                resolve_direct_expression_semantic_type_from_metadata(
-                    node, nodes, None, None, None, call.line, metadata,
+                resolve_direct_expression_semantic_type_from_metadata_with_options(
+                    node, nodes, None, None, None, call.line, metadata, options,
                 )
             })
             .unwrap_or_else(|| {
@@ -836,13 +957,30 @@ pub(super) fn resolved_call_arg_semantic_types_with_expected_semantic(
         .collect()
 }
 
+#[allow(dead_code)]
 pub(super) fn resolved_keyword_arg_semantic_types(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     expected_types: &[Option<String>],
 ) -> Vec<SemanticType> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    resolved_keyword_arg_semantic_types_with_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn resolved_keyword_arg_semantic_types_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
+    options: AssignabilityOptions,
+) -> Vec<SemanticType> {
+    let context = checker_context_for_assignability_options(nodes, options);
     let keyword_arg_types = call.keyword_arg_type_texts();
     if call.keyword_arg_values.is_empty() {
         return keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
@@ -861,8 +999,8 @@ pub(super) fn resolved_keyword_arg_semantic_types(
             )
             .map(|result| result.actual_type)
             .or_else(|| {
-                resolve_direct_expression_semantic_type_from_metadata(
-                    node, nodes, None, None, None, call.line, metadata,
+                resolve_direct_expression_semantic_type_from_metadata_with_options(
+                    node, nodes, None, None, None, call.line, metadata, options,
                 )
             })
             .unwrap_or_else(|| {
@@ -875,13 +1013,30 @@ pub(super) fn resolved_keyword_arg_semantic_types(
         .collect()
 }
 
+#[allow(dead_code)]
 pub(super) fn resolved_keyword_arg_semantic_types_with_expected_semantic(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     expected_types: &[Option<SemanticType>],
 ) -> Vec<SemanticType> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    resolved_keyword_arg_semantic_types_with_expected_semantic_and_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn resolved_keyword_arg_semantic_types_with_expected_semantic_and_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<SemanticType>],
+    options: AssignabilityOptions,
+) -> Vec<SemanticType> {
+    let context = checker_context_for_assignability_options(nodes, options);
     let keyword_arg_types = call.keyword_arg_type_texts();
     if call.keyword_arg_values.is_empty() {
         return keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
@@ -900,8 +1055,8 @@ pub(super) fn resolved_keyword_arg_semantic_types_with_expected_semantic(
             )
             .map(|result| result.actual_type)
             .or_else(|| {
-                resolve_direct_expression_semantic_type_from_metadata(
-                    node, nodes, None, None, None, call.line, metadata,
+                resolve_direct_expression_semantic_type_from_metadata_with_options(
+                    node, nodes, None, None, None, call.line, metadata, options,
                 )
             })
             .unwrap_or_else(|| {
@@ -1544,11 +1699,12 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
         .take(call.arg_count)
         .map(|field| field.semantic_annotation())
         .collect::<Vec<_>>();
-    let positional_arg_types = resolved_call_arg_semantic_types_with_expected_semantic(
+    let positional_arg_types = resolved_call_arg_semantic_types_with_expected_semantic_and_options(
         node,
         nodes,
         call,
         &positional_expected_types,
+        options,
     );
     let mut diagnostics = positional_fields
         .iter()
@@ -1592,8 +1748,13 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
                 .and_then(|field| field.semantic_annotation())
         })
         .collect::<Vec<_>>();
-    let keyword_arg_types =
-        resolved_keyword_arg_semantic_types_with_expected_semantic(node, nodes, call, &keyword_expected_types);
+    let keyword_arg_types = resolved_keyword_arg_semantic_types_with_expected_semantic_and_options(
+        node,
+        nodes,
+        call,
+        &keyword_expected_types,
+        options,
+    );
     for ((keyword, arg_ty), expected_ty) in call
         .keyword_names
         .iter()

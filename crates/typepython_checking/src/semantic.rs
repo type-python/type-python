@@ -982,7 +982,8 @@ pub(super) fn call_signature_params_are_applicable_with_options(
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
         .collect::<Vec<_>>();
     let has_variadic = params.iter().any(|param| param.variadic);
-    let starred_positional = resolved_starred_positional_expansions(node, nodes, call);
+    let starred_positional =
+        resolved_starred_positional_expansions_with_options(node, nodes, call, options);
     let expected_positional_arg_types =
         expected_positional_arg_semantic_types_from_params(params, call.arg_count);
     let expected_keyword_arg_types =
@@ -1013,20 +1014,23 @@ pub(super) fn call_signature_params_are_applicable_with_options(
     }) {
         return false;
     }
-    let resolved_keyword_arg_types = resolved_keyword_arg_semantic_types_with_expected_semantic(
-        node,
-        nodes,
-        call,
-        &expected_keyword_arg_types,
-    )
-    .into_iter()
-    .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
-    .collect::<Vec<_>>();
-    let mut positional_types = resolved_call_arg_semantic_types_with_expected_semantic(
+    let resolved_keyword_arg_types =
+        resolved_keyword_arg_semantic_types_with_expected_semantic_and_options(
+            node,
+            nodes,
+            call,
+            &expected_keyword_arg_types,
+            options,
+        )
+        .into_iter()
+        .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
+        .collect::<Vec<_>>();
+    let mut positional_types = resolved_call_arg_semantic_types_with_expected_semantic_and_options(
         node,
         nodes,
         call,
         &expected_positional_arg_types,
+        options,
     )
     .into_iter()
     .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
@@ -1047,7 +1051,7 @@ pub(super) fn call_signature_params_are_applicable_with_options(
     }
     let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
     let accepts_extra_keywords = params.iter().any(|param| param.keyword_variadic);
-    let keyword_expansions = resolved_keyword_expansions(node, nodes, call);
+    let keyword_expansions = resolved_keyword_expansions_with_context(&context, node, nodes, call);
     if call.keyword_names.iter().any(|keyword| {
         !params.iter().any(|param| param.name == **keyword && !param.positional_only)
             && !accepts_extra_keywords
@@ -1194,7 +1198,7 @@ pub(super) fn call_signature_params_are_applicable_with_options(
     positional_ok && keyword_ok
 }
 
-fn checker_context_for_assignability_options<'a>(
+pub(crate) fn checker_context_for_assignability_options<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
     options: AssignabilityOptions,
 ) -> CheckerContext<'a> {
@@ -1265,10 +1269,25 @@ pub(super) enum KeywordExpansion {
     Mapping(SemanticType),
 }
 
+#[allow(dead_code)]
 pub(super) fn resolved_starred_positional_expansions(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
+) -> Vec<PositionalExpansion> {
+    resolved_starred_positional_expansions_with_options(
+        node,
+        nodes,
+        call,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn resolved_starred_positional_expansions_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    options: AssignabilityOptions,
 ) -> Vec<PositionalExpansion> {
     let mut expansions = Vec::new();
     let starred_arg_types = call.starred_arg_type_texts();
@@ -1278,8 +1297,8 @@ pub(super) fn resolved_starred_positional_expansions(
             .starred_arg_values
             .get(index)
             .and_then(|metadata| {
-                resolve_direct_expression_semantic_type_from_metadata(
-                    node, nodes, None, None, None, call.line, metadata,
+                resolve_direct_expression_semantic_type_from_metadata_with_options(
+                    node, nodes, None, None, None, call.line, metadata, options,
                 )
             })
             .or_else(|| {
@@ -1316,6 +1335,7 @@ pub(super) fn parse_positional_expansion(value_type: &SemanticType) -> Option<Po
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn resolved_keyword_expansions(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -1339,8 +1359,15 @@ pub(super) fn resolved_keyword_expansions_with_context(
             .keyword_expansion_values
             .get(index)
             .and_then(|metadata| {
-                resolve_direct_expression_semantic_type_from_metadata(
-                    node, nodes, None, None, None, call.line, metadata,
+                resolve_direct_expression_semantic_type_from_metadata_with_options(
+                    node,
+                    nodes,
+                    None,
+                    None,
+                    None,
+                    call.line,
+                    metadata,
+                    context.assignability_options(),
                 )
             })
             .or_else(|| {
@@ -1777,7 +1804,7 @@ pub(super) fn resolve_contextual_return_type(
 ) -> ContextualReturnTypeResult {
     let metadata = direct_expr_metadata_from_return_site(return_site);
     if let Some(lambda) = metadata.value_lambda.as_deref()
-        && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type(
+        && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type_with_options(
             node,
             nodes,
             None,
@@ -1786,6 +1813,7 @@ pub(super) fn resolve_contextual_return_type(
             lambda,
             Some(expected),
             None,
+            context.assignability_options(),
         )
     {
         return ContextualReturnTypeResult {
@@ -1922,7 +1950,7 @@ pub(super) fn resolve_contextual_yield_type(
     let metadata = direct_expr_metadata_from_yield_site(yield_site);
     if !yield_site.is_yield_from {
         if let Some(lambda) = metadata.value_lambda.as_deref()
-            && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type(
+            && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type_with_options(
                 node,
                 nodes,
                 None,
@@ -1931,6 +1959,7 @@ pub(super) fn resolve_contextual_yield_type(
                 lambda,
                 Some(expected),
                 None,
+                context.assignability_options(),
             )
         {
             return ContextualYieldTypeResult {
@@ -2069,6 +2098,7 @@ pub(super) fn direct_yield_type_diagnostics(
 }
 
 pub(super) fn for_loop_target_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -2076,7 +2106,7 @@ pub(super) fn for_loop_target_diagnostics(
         .iter()
         .filter(|for_loop| !for_loop.target_names.is_empty())
         .filter_map(|for_loop| {
-            let iter_type = resolve_direct_expression_semantic_type_from_metadata(
+            let iter_type = resolve_direct_expression_semantic_type_from_metadata_with_options(
                 node,
                 nodes,
                 None,
@@ -2084,6 +2114,7 @@ pub(super) fn for_loop_target_diagnostics(
                 for_loop.owner_type_name.as_deref(),
                 for_loop.line,
                 for_loop.iter_metadata().as_ref()?,
+                context.assignability_options(),
             )?;
             let element_type = unwrap_for_iterable_semantic_type(&iter_type)?;
             let tuple_elements = unpacked_fixed_tuple_semantic_elements(&element_type)?;
@@ -2127,6 +2158,7 @@ pub(super) fn for_loop_target_diagnostics(
 }
 
 pub(super) fn destructuring_assignment_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -2135,7 +2167,7 @@ pub(super) fn destructuring_assignment_diagnostics(
         .filter(|assignment| assignment.destructuring_index == Some(0))
         .filter_map(|assignment| {
             let target_names = assignment.destructuring_target_names.as_ref()?;
-            let actual = resolve_direct_expression_semantic_type_from_metadata(
+            let actual = resolve_direct_expression_semantic_type_from_metadata_with_options(
                 node,
                 nodes,
                 None,
@@ -2143,6 +2175,7 @@ pub(super) fn destructuring_assignment_diagnostics(
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
                 assignment.value_metadata().as_ref()?,
+                context.assignability_options(),
             )?;
             let tuple_elements = unpacked_fixed_tuple_semantic_elements(&actual)?;
             (tuple_elements.len() != target_names.len()).then(|| {
@@ -2184,38 +2217,46 @@ pub(super) fn destructuring_assignment_diagnostics(
 }
 
 pub(super) fn with_statement_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
     node.with_statements
         .iter()
         .filter(|with_site| {
-            resolve_with_target_semantic_type_for_signature(node, nodes, None, with_site).is_none()
+            resolve_with_target_semantic_type_for_signature_with_options(
+                node,
+                nodes,
+                None,
+                with_site,
+                context.assignability_options(),
+            )
+            .is_none()
         })
         .map(|with_site| {
-                Diagnostic::error(
-                    "TPY4001",
-                    match (&with_site.owner_type_name, &with_site.owner_name) {
-                        (Some(owner_type_name), Some(owner_name)) => format!(
-                            "type `{}` in module `{}` uses `with` target `{}` with an expression that lacks compatible `__enter__`/`__exit__` members in `{}`",
-                            owner_type_name,
-                            node.module_path.display(),
-                            display_with_target_name(with_site),
-                            owner_name,
-                        ),
-                        (None, Some(owner_name)) => format!(
-                            "function `{}` in module `{}` uses `with` target `{}` with an expression that lacks compatible `__enter__`/`__exit__` members",
-                            owner_name,
-                            node.module_path.display(),
-                            display_with_target_name(with_site),
-                        ),
-                        _ => format!(
-                            "module `{}` uses `with` target `{}` with an expression that lacks compatible `__enter__`/`__exit__` members",
-                            node.module_path.display(),
-                            display_with_target_name(with_site),
-                        ),
-                    },
-                )
+            Diagnostic::error(
+                "TPY4001",
+                match (&with_site.owner_type_name, &with_site.owner_name) {
+                    (Some(owner_type_name), Some(owner_name)) => format!(
+                        "type `{}` in module `{}` uses `with` target `{}` with an expression that lacks compatible `__enter__`/`__exit__` members in `{}`",
+                        owner_type_name,
+                        node.module_path.display(),
+                        display_with_target_name(with_site),
+                        owner_name,
+                    ),
+                    (None, Some(owner_name)) => format!(
+                        "function `{}` in module `{}` uses `with` target `{}` with an expression that lacks compatible `__enter__`/`__exit__` members",
+                        owner_name,
+                        node.module_path.display(),
+                        display_with_target_name(with_site),
+                    ),
+                    _ => format!(
+                        "module `{}` uses `with` target `{}` with an expression that lacks compatible `__enter__`/`__exit__` members",
+                        node.module_path.display(),
+                        display_with_target_name(with_site),
+                    ),
+                },
+            )
         })
         .collect()
 }

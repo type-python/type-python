@@ -246,7 +246,7 @@ pub(super) fn simple_name_augmented_assignment_diagnostics(
                     },
                 ));
             }
-            let expected = resolve_current_augmented_assignment_target_semantic_type(
+            let expected = resolve_current_augmented_assignment_target_semantic_type_with_options(
                 node,
                 nodes,
                 None,
@@ -254,6 +254,7 @@ pub(super) fn simple_name_augmented_assignment_diagnostics(
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
                 &assignment.name,
+                context.assignability_options(),
             )?;
             let actual = resolve_augmented_assignment_result_semantic_type(
                 context,
@@ -354,6 +355,7 @@ pub(super) fn is_final_annotation_text(annotation: &str) -> bool {
         || annotation.starts_with("typing.Final[")
 }
 
+#[allow(dead_code)]
 pub(super) fn resolve_current_augmented_assignment_target_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -362,6 +364,29 @@ pub(super) fn resolve_current_augmented_assignment_target_semantic_type(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     value_name: &str,
+) -> Option<SemanticType> {
+    resolve_current_augmented_assignment_target_semantic_type_with_options(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+        AssignabilityOptions::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_current_augmented_assignment_target_semantic_type_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+    options: AssignabilityOptions,
 ) -> Option<SemanticType> {
     if let Some(param_type) = resolve_scope_param_semantic_type(
         node,
@@ -373,7 +398,7 @@ pub(super) fn resolve_current_augmented_assignment_target_semantic_type(
     }
 
     match current_owner_name {
-        Some(owner_name) => resolve_local_assignment_reference_semantic_type(
+        Some(owner_name) => resolve_local_assignment_reference_semantic_type_with_options(
             node,
             nodes,
             signature,
@@ -381,13 +406,15 @@ pub(super) fn resolve_current_augmented_assignment_target_semantic_type(
             current_owner_type_name,
             current_line,
             value_name,
+            options,
         ),
-        None => resolve_module_level_assignment_reference_semantic_type(
+        None => resolve_module_level_assignment_reference_semantic_type_with_options(
             node,
             nodes,
             signature,
             current_line,
             value_name,
+            options,
         ),
     }
 }
@@ -1264,7 +1291,7 @@ fn resolve_augmented_assignment_result_semantic_type(
     value: &typepython_syntax::DirectExprMetadata,
 ) -> Option<SemanticType> {
     let left = direct_expr_metadata_for_known_type(left_type);
-    resolve_direct_binop_semantic_type(
+    resolve_direct_binop_semantic_type_with_options(
         node,
         nodes,
         signature,
@@ -1274,6 +1301,7 @@ fn resolve_augmented_assignment_result_semantic_type(
         Some(&left),
         Some(value),
         operator.filter(|operator| !operator.is_empty()),
+        context.assignability_options(),
     )
     .or_else(|| {
         resolve_assignment_expression_semantic_type(
@@ -1707,12 +1735,14 @@ pub(super) fn subscript_assignment_type_diagnostics(
                             }
                         }
                         typepython_syntax::TypedDictMutationKind::AugmentedAssignment => {
-                            let Some(readable_type) = resolve_subscript_type_from_target_semantic_type(
+                            let Some(readable_type) =
+                                resolve_subscript_type_from_target_semantic_type_with_options(
                                 node,
                                 nodes,
                                 &owner_type,
                                 site.key.as_deref(),
                                 None,
+                                context.assignability_options(),
                             ) else {
                                 return Some(
                                     Diagnostic::error(

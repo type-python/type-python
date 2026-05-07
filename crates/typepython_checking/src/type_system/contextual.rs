@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -34,7 +35,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_options
     options: AssignabilityOptions,
 ) -> Option<SemanticType> {
     if let Some(lambda) = metadata.value_lambda.as_deref() {
-        return resolve_contextual_lambda_callable_semantic_type(
+        return resolve_contextual_lambda_callable_semantic_type_with_options(
             node,
             nodes,
             current_owner_name,
@@ -43,9 +44,11 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_options
             lambda,
             signature,
             None,
+            options,
         );
     }
-    if let Some(collection_type) = resolve_direct_collection_literal_semantic_type_from_metadata(
+    if let Some(collection_type) =
+        resolve_direct_collection_literal_semantic_type_from_metadata_with_options(
         node,
         nodes,
         signature,
@@ -53,6 +56,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_options
         current_owner_type_name,
         current_line,
         metadata,
+        options,
     ) {
         return Some(collection_type);
     }
@@ -103,6 +107,7 @@ pub(super) fn direct_metadata_value_semantic_type(
     metadata.value_type_expr.clone().map(lower_type_expr)
 }
 
+#[allow(dead_code)]
 pub(super) fn resolve_direct_collection_literal_semantic_type_from_metadata(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -112,8 +117,31 @@ pub(super) fn resolve_direct_collection_literal_semantic_type_from_metadata(
     current_line: usize,
     metadata: &typepython_syntax::DirectExprMetadata,
 ) -> Option<SemanticType> {
+    resolve_direct_collection_literal_semantic_type_from_metadata_with_options(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        metadata,
+        AssignabilityOptions::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_direct_collection_literal_semantic_type_from_metadata_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    options: AssignabilityOptions,
+) -> Option<SemanticType> {
     let resolve_nested = |metadata: &typepython_syntax::DirectExprMetadata| {
-        resolve_direct_expression_semantic_type_from_metadata(
+        resolve_direct_expression_semantic_type_from_metadata_with_options(
             node,
             nodes,
             signature,
@@ -121,6 +149,7 @@ pub(super) fn resolve_direct_collection_literal_semantic_type_from_metadata(
             current_owner_type_name,
             current_line,
             metadata,
+            options,
         )
         .unwrap_or_else(|| SemanticType::Name(String::from("Any")))
     };
@@ -701,8 +730,12 @@ pub(super) fn callable_assignment_result(
         params.into_iter().map(|param| lower_type_text_or_name(&param)).collect::<Vec<_>>()
     });
     let expected_return = lower_type_text_or_name(&expected_return);
-    let (actual_params, actual_return) =
-        resolve_callable_assignment_semantic_signature(node, nodes, assignment)?;
+    let (actual_params, actual_return) = resolve_callable_assignment_semantic_signature_with_options(
+        node,
+        nodes,
+        assignment,
+        assignability_options,
+    )?;
 
     let params_match = expected_params.as_ref().is_none_or(|expected_params| {
         expected_params.len() == actual_params.len()
@@ -772,14 +805,29 @@ fn format_semantic_assignment_signature(
     })
 }
 
+#[allow(dead_code)]
 pub(super) fn resolve_callable_assignment_semantic_signature(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     assignment: &typepython_binding::AssignmentSite,
 ) -> Option<(Vec<SemanticType>, SemanticType)> {
+    resolve_callable_assignment_semantic_signature_with_options(
+        node,
+        nodes,
+        assignment,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn resolve_callable_assignment_semantic_signature_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    assignment: &typepython_binding::AssignmentSite,
+    options: AssignabilityOptions,
+) -> Option<(Vec<SemanticType>, SemanticType)> {
     if let Some(lambda) = assignment.value_lambda.as_deref() {
-    let expected = normalized_assignment_annotation(assignment.annotation_text()?)?;
-        return resolve_contextual_lambda_callable_semantic_signature(
+        let expected = normalized_assignment_annotation(assignment.annotation_text()?)?;
+        return resolve_contextual_lambda_callable_semantic_signature_with_options(
             node,
             nodes,
             assignment.owner_name.as_deref(),
@@ -788,6 +836,7 @@ pub(super) fn resolve_callable_assignment_semantic_signature(
             lambda,
             Some(expected),
             None,
+            options,
         );
     }
 
@@ -800,13 +849,20 @@ pub(super) fn resolve_callable_assignment_semantic_signature(
             .into_iter()
             .map(|param| param.annotation_or_dynamic())
             .collect::<Vec<_>>();
-        let actual_return = resolve_direct_callable_return_semantic_type(node, nodes, value_name)?;
+        let actual_return = resolve_direct_callable_return_semantic_type_for_line_with_options(
+            node,
+            nodes,
+            value_name,
+            assignment.line,
+            options,
+        )
+        .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, value_name))?;
         return Some((actual_params, actual_return));
     }
 
     let owner_name = metadata.value_member_owner_name.as_deref()?;
     let member_name = metadata.value_member_name.as_deref()?;
-    resolve_direct_member_callable_semantic_signature(
+    resolve_direct_member_callable_semantic_signature_with_options(
         node,
         nodes,
         assignment.owner_name.as_deref(),
@@ -815,6 +871,7 @@ pub(super) fn resolve_callable_assignment_semantic_signature(
         owner_name,
         member_name,
         metadata.value_member_through_instance,
+        options,
     )
 }
 
@@ -822,6 +879,7 @@ pub(super) fn resolve_callable_assignment_semantic_signature(
     clippy::too_many_arguments,
     reason = "member callable resolution needs the current scope and member context"
 )]
+#[allow(dead_code)]
 pub(super) fn resolve_direct_member_callable_semantic_signature(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -832,8 +890,43 @@ pub(super) fn resolve_direct_member_callable_semantic_signature(
     member_name: &str,
     through_instance: bool,
 ) -> Option<(Vec<SemanticType>, SemanticType)> {
+    resolve_direct_member_callable_semantic_signature_with_options(
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        owner_name,
+        member_name,
+        through_instance,
+        AssignabilityOptions::default(),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "member callable resolution needs the current scope and member context"
+)]
+pub(super) fn resolve_direct_member_callable_semantic_signature_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    owner_name: &str,
+    member_name: &str,
+    through_instance: bool,
+    options: AssignabilityOptions,
+) -> Option<(Vec<SemanticType>, SemanticType)> {
     let owner_type = if through_instance {
-        resolve_direct_callable_return_semantic_type(node, nodes, owner_name)
+        resolve_direct_callable_return_semantic_type_for_line_with_options(
+            node,
+            nodes,
+            owner_name,
+            current_line,
+            options,
+        )
+        .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, owner_name))
             .or_else(|| Some(lower_type_text_or_name(owner_name)))
     } else {
         resolve_direct_name_reference_semantic_type(
@@ -897,6 +990,7 @@ pub(super) fn resolve_direct_member_callable_semantic_signature(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 pub(super) fn resolve_contextual_lambda_callable_semantic_signature(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -906,6 +1000,31 @@ pub(super) fn resolve_contextual_lambda_callable_semantic_signature(
     lambda: &typepython_syntax::LambdaMetadata,
     expected: Option<&str>,
     outer_bindings: Option<&BTreeMap<String, SemanticType>>,
+) -> Option<(Vec<SemanticType>, SemanticType)> {
+    resolve_contextual_lambda_callable_semantic_signature_with_options(
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        lambda,
+        expected,
+        outer_bindings,
+        AssignabilityOptions::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_contextual_lambda_callable_semantic_signature_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    lambda: &typepython_syntax::LambdaMetadata,
+    expected: Option<&str>,
+    outer_bindings: Option<&BTreeMap<String, SemanticType>>,
+    options: AssignabilityOptions,
 ) -> Option<(Vec<SemanticType>, SemanticType)> {
     let expected_params = expected
         .and_then(parse_callable_annotation)
@@ -940,7 +1059,7 @@ pub(super) fn resolve_contextual_lambda_callable_semantic_signature(
     local_bindings.extend(
         lambda.params.iter().map(|param| param.name.clone()).zip(param_types.iter().cloned()),
     );
-    let actual_return = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+    let actual_return = resolve_direct_expression_semantic_type_from_metadata_with_bindings_with_options(
         node,
         nodes,
         None,
@@ -949,11 +1068,13 @@ pub(super) fn resolve_contextual_lambda_callable_semantic_signature(
         current_line,
         &lambda.body,
         &local_bindings,
+        options,
     )?;
     Some((param_types, actual_return))
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 pub(super) fn resolve_contextual_lambda_callable_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -964,7 +1085,7 @@ pub(super) fn resolve_contextual_lambda_callable_semantic_type(
     expected: Option<&str>,
     outer_bindings: Option<&BTreeMap<String, SemanticType>>,
 ) -> Option<SemanticType> {
-    let (param_types, return_type) = resolve_contextual_lambda_callable_semantic_signature(
+    resolve_contextual_lambda_callable_semantic_type_with_options(
         node,
         nodes,
         current_owner_name,
@@ -973,6 +1094,32 @@ pub(super) fn resolve_contextual_lambda_callable_semantic_type(
         lambda,
         expected,
         outer_bindings,
+        AssignabilityOptions::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_contextual_lambda_callable_semantic_type_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    lambda: &typepython_syntax::LambdaMetadata,
+    expected: Option<&str>,
+    outer_bindings: Option<&BTreeMap<String, SemanticType>>,
+    options: AssignabilityOptions,
+) -> Option<SemanticType> {
+    let (param_types, return_type) = resolve_contextual_lambda_callable_semantic_signature_with_options(
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        lambda,
+        expected,
+        outer_bindings,
+        options,
     )?;
     Some(SemanticType::Callable {
         params: SemanticCallableParams::ParamList(param_types),
@@ -1089,7 +1236,7 @@ fn resolve_contextual_collection_literal_semantic_type_for_expected(
     visiting: &mut BTreeSet<String>,
 ) -> Option<ContextualCallArgSemanticResult> {
     let resolve_fallback = |metadata: &typepython_syntax::DirectExprMetadata| {
-        resolve_direct_expression_semantic_type_from_metadata(
+        resolve_direct_expression_semantic_type_from_metadata_with_options(
             node,
             nodes,
             signature,
@@ -1097,6 +1244,7 @@ fn resolve_contextual_collection_literal_semantic_type_for_expected(
             current_owner_type_name,
             current_line,
             metadata,
+            context.assignability_options(),
         )
     };
 
@@ -1344,7 +1492,7 @@ pub(super) fn resolve_contextual_call_arg_semantic_type_with_context(
     expected: Option<&str>,
 ) -> Option<ContextualCallArgSemanticResult> {
     if let Some(lambda) = metadata.value_lambda.as_deref()
-        && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type(
+        && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type_with_options(
             node,
             nodes,
             None,
@@ -1353,6 +1501,7 @@ pub(super) fn resolve_contextual_call_arg_semantic_type_with_context(
             lambda,
             expected,
             None,
+            context.assignability_options(),
         )
     {
         return Some(ContextualCallArgSemanticResult { actual_type, diagnostics: Vec::new() });
@@ -1393,7 +1542,7 @@ pub(super) fn resolve_contextual_call_arg_semantic_type_with_expected_semantic(
 ) -> Option<ContextualCallArgSemanticResult> {
     let expected_text = expected.map(diagnostic_type_text);
     if let Some(lambda) = metadata.value_lambda.as_deref()
-        && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type(
+        && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type_with_options(
             node,
             nodes,
             None,
@@ -1402,6 +1551,7 @@ pub(super) fn resolve_contextual_call_arg_semantic_type_with_expected_semantic(
             lambda,
             expected_text.as_deref(),
             None,
+            context.assignability_options(),
         )
     {
         return Some(ContextualCallArgSemanticResult { actual_type, diagnostics: Vec::new() });

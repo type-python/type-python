@@ -414,7 +414,7 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
                 .value_metadata
                 .as_ref()
                 .and_then(|metadata| {
-                    resolve_direct_expression_semantic_type_from_metadata(
+                    resolve_direct_expression_semantic_type_from_metadata_with_options(
                         class_node,
                         nodes,
                         None,
@@ -422,6 +422,7 @@ pub(super) fn resolve_framework_transform_class_shape_from_decl_with_context(
                         Some(&class_decl.name),
                         field.line,
                         metadata,
+                        context.assignability_options(),
                     )
                 })
                 .is_some_and(|value_type| {
@@ -596,7 +597,7 @@ pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
                 .value_metadata
                 .as_ref()
                 .and_then(|metadata| {
-                    resolve_direct_expression_semantic_type_from_metadata(
+                    resolve_direct_expression_semantic_type_from_metadata_with_options(
                         class_node,
                         nodes,
                         None,
@@ -604,6 +605,7 @@ pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
                         Some(&class_decl.name),
                         field.line,
                         metadata,
+                        context.assignability_options(),
                     )
                 })
                 .is_some_and(|value_type| {

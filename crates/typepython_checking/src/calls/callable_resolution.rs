@@ -1612,7 +1612,7 @@ pub(super) fn resolve_direct_callable_return_semantic_type_for_line_with_options
     }
     if let Some(callable_type) =
         resolve_decorated_function_callable_semantic_type_with_context(
-            &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+            &checker_context_for_assignability_options(nodes, options),
             node,
             nodes,
             callee,

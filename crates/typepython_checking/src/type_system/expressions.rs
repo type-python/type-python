@@ -1,4 +1,5 @@
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 pub(super) fn resolve_direct_boolop_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -11,11 +12,40 @@ pub(super) fn resolve_direct_boolop_semantic_type(
     guard: Option<&typepython_binding::GuardConditionSite>,
     operator: Option<&str>,
 ) -> Option<SemanticType> {
+    resolve_direct_boolop_semantic_type_with_options(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        left,
+        right,
+        guard,
+        operator,
+        AssignabilityOptions::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_direct_boolop_semantic_type_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    left: Option<&typepython_syntax::DirectExprMetadata>,
+    right: Option<&typepython_syntax::DirectExprMetadata>,
+    guard: Option<&typepython_binding::GuardConditionSite>,
+    operator: Option<&str>,
+    options: AssignabilityOptions,
+) -> Option<SemanticType> {
     let operator = operator?;
     if operator != "and" && operator != "or" {
         return None;
     }
-    let left_type = resolve_direct_expression_semantic_type_from_metadata(
+    let left_type = resolve_direct_expression_semantic_type_from_metadata_with_options(
         node,
         nodes,
         signature,
@@ -23,6 +53,7 @@ pub(super) fn resolve_direct_boolop_semantic_type(
         current_owner_type_name,
         current_line,
         left?,
+        options,
     )?;
     let right_type = if let Some(guard) = guard {
         let base_bindings = resolve_guard_scope_semantic_bindings(
@@ -42,7 +73,7 @@ pub(super) fn resolve_direct_boolop_semantic_type(
             guard,
             operator == "and",
         );
-        resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+        resolve_direct_expression_semantic_type_from_metadata_with_bindings_with_options(
             node,
             nodes,
             signature,
@@ -51,9 +82,10 @@ pub(super) fn resolve_direct_boolop_semantic_type(
             current_line,
             right?,
             &narrowed_bindings,
+            options,
         )?
     } else {
-        resolve_direct_expression_semantic_type_from_metadata(
+        resolve_direct_expression_semantic_type_from_metadata_with_options(
             node,
             nodes,
             signature,
@@ -61,12 +93,14 @@ pub(super) fn resolve_direct_boolop_semantic_type(
             current_owner_type_name,
             current_line,
             right?,
+            options,
         )?
     };
     Some(join_semantic_type_candidates(vec![left_type, right_type]))
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 pub(super) fn resolve_direct_binop_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -78,8 +112,35 @@ pub(super) fn resolve_direct_binop_semantic_type(
     right: Option<&typepython_syntax::DirectExprMetadata>,
     operator: Option<&str>,
 ) -> Option<SemanticType> {
+    resolve_direct_binop_semantic_type_with_options(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        left,
+        right,
+        operator,
+        AssignabilityOptions::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_direct_binop_semantic_type_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    left: Option<&typepython_syntax::DirectExprMetadata>,
+    right: Option<&typepython_syntax::DirectExprMetadata>,
+    operator: Option<&str>,
+    options: AssignabilityOptions,
+) -> Option<SemanticType> {
     let operator = operator?;
-    let left_type = resolve_direct_expression_semantic_type_from_metadata(
+    let left_type = resolve_direct_expression_semantic_type_from_metadata_with_options(
         node,
         nodes,
         signature,
@@ -87,8 +148,9 @@ pub(super) fn resolve_direct_binop_semantic_type(
         current_owner_type_name,
         current_line,
         left?,
+        options,
     )?;
-    let right_type = resolve_direct_expression_semantic_type_from_metadata(
+    let right_type = resolve_direct_expression_semantic_type_from_metadata_with_options(
         node,
         nodes,
         signature,
@@ -96,6 +158,7 @@ pub(super) fn resolve_direct_binop_semantic_type(
         current_owner_type_name,
         current_line,
         right?,
+        options,
     )?;
     resolve_binop_result_semantic_type(&left_type, &right_type, operator)
 }
@@ -173,6 +236,7 @@ pub(super) fn join_numeric_result_semantic_type(
     clippy::too_many_arguments,
     reason = "subscript resolution needs the same expression context as other direct expression forms"
 )]
+#[allow(dead_code)]
 pub(super) fn resolve_direct_subscript_reference_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -185,7 +249,39 @@ pub(super) fn resolve_direct_subscript_reference_semantic_type(
     string_key: Option<&str>,
     index_text: Option<&str>,
 ) -> Option<SemanticType> {
-    let target_type = resolve_direct_expression_semantic_type_from_metadata(
+    resolve_direct_subscript_reference_semantic_type_with_options(
+        node,
+        nodes,
+        signature,
+        _exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        target,
+        string_key,
+        index_text,
+        AssignabilityOptions::default(),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "subscript resolution needs the same expression context as other direct expression forms"
+)]
+pub(super) fn resolve_direct_subscript_reference_semantic_type_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    _exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    target: &typepython_syntax::DirectExprMetadata,
+    string_key: Option<&str>,
+    index_text: Option<&str>,
+    options: AssignabilityOptions,
+) -> Option<SemanticType> {
+    let target_type = resolve_direct_expression_semantic_type_from_metadata_with_options(
         node,
         nodes,
         signature,
@@ -193,10 +289,19 @@ pub(super) fn resolve_direct_subscript_reference_semantic_type(
         current_owner_type_name,
         current_line,
         target,
+        options,
     )?;
-    resolve_subscript_type_from_target_semantic_type(node, nodes, &target_type, string_key, index_text)
+    resolve_subscript_type_from_target_semantic_type_with_options(
+        node,
+        nodes,
+        &target_type,
+        string_key,
+        index_text,
+        options,
+    )
 }
 
+#[allow(dead_code)]
 pub(super) fn resolve_subscript_type_from_target_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -204,7 +309,25 @@ pub(super) fn resolve_subscript_type_from_target_semantic_type(
     string_key: Option<&str>,
     index_text: Option<&str>,
 ) -> Option<SemanticType> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    resolve_subscript_type_from_target_semantic_type_with_options(
+        node,
+        nodes,
+        target_type,
+        string_key,
+        index_text,
+        AssignabilityOptions::default(),
+    )
+}
+
+pub(super) fn resolve_subscript_type_from_target_semantic_type_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    target_type: &SemanticType,
+    string_key: Option<&str>,
+    index_text: Option<&str>,
+    options: AssignabilityOptions,
+) -> Option<SemanticType> {
+    let context = checker_context_for_assignability_options(nodes, options);
     resolve_subscript_type_from_target_semantic_type_with_context(
         &context,
         node,
@@ -350,6 +473,7 @@ pub(super) fn resolve_scope_param_semantic_type(
     clippy::too_many_arguments,
     reason = "semantic expression resolution mirrors the direct expression metadata shape"
 )]
+#[allow(dead_code)]
 pub(super) fn resolve_direct_expression_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -466,7 +590,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
         })
         .or_else(|| {
             value_name.and_then(|value_name| {
-                resolve_direct_name_reference_semantic_type(
+                resolve_direct_name_reference_semantic_type_with_options(
                     node,
                     nodes,
                     signature,
@@ -475,6 +599,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                     current_owner_type_name,
                     current_line,
                     value_name,
+                    options,
                 )
             })
         })
@@ -518,7 +643,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
         })
         .or_else(|| {
             value_subscript_target.and_then(|target| {
-                resolve_direct_subscript_reference_semantic_type(
+                resolve_direct_subscript_reference_semantic_type_with_options(
                     node,
                     nodes,
                     signature,
@@ -529,6 +654,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                     target,
                     value_subscript_string_key,
                     value_subscript_index,
+                    options,
                 )
             })
         })
@@ -551,7 +677,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                 let false_bindings =
                     apply_guard_to_local_semantic_bindings(node, nodes, &base_bindings, guard, false);
                 return Some(join_semantic_type_candidates(vec![
-                    resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+                    resolve_direct_expression_semantic_type_from_metadata_with_bindings_with_options(
                         node,
                         nodes,
                         signature,
@@ -560,8 +686,9 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                         current_line,
                         true_branch,
                         &true_bindings,
+                        options,
                     )?,
-                    resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+                    resolve_direct_expression_semantic_type_from_metadata_with_bindings_with_options(
                         node,
                         nodes,
                         signature,
@@ -570,11 +697,12 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                         current_line,
                         false_branch,
                         &false_bindings,
+                        options,
                     )?,
                 ]));
             }
             Some(join_semantic_type_candidates(vec![
-                resolve_direct_expression_semantic_type_from_metadata(
+                resolve_direct_expression_semantic_type_from_metadata_with_options(
                     node,
                     nodes,
                     signature,
@@ -582,8 +710,9 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                     current_owner_type_name,
                     current_line,
                     true_branch,
+                    options,
                 )?,
-                resolve_direct_expression_semantic_type_from_metadata(
+                resolve_direct_expression_semantic_type_from_metadata_with_options(
                     node,
                     nodes,
                     signature,
@@ -591,11 +720,12 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                     current_owner_type_name,
                     current_line,
                     false_branch,
+                    options,
                 )?,
             ]))
         })
         .or_else(|| {
-            resolve_direct_boolop_semantic_type(
+            resolve_direct_boolop_semantic_type_with_options(
                 node,
                 nodes,
                 signature,
@@ -606,10 +736,11 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                 value_bool_right,
                 value_if_guard,
                 value_binop_operator,
+                options,
             )
         })
         .or_else(|| {
-            resolve_direct_binop_semantic_type(
+            resolve_direct_binop_semantic_type_with_options(
                 node,
                 nodes,
                 signature,
@@ -619,6 +750,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                 value_binop_left,
                 value_binop_right,
                 value_binop_operator,
+                options,
             )
         })?;
 
@@ -643,7 +775,35 @@ pub(super) fn resolve_direct_name_reference_semantic_type(
     current_line: usize,
     value_name: &str,
 ) -> Option<SemanticType> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    resolve_direct_name_reference_semantic_type_with_options(
+        node,
+        nodes,
+        signature,
+        exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+        AssignabilityOptions::default(),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "name reference resolution needs scope and source-position context"
+)]
+pub(super) fn resolve_direct_name_reference_semantic_type_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+    options: AssignabilityOptions,
+) -> Option<SemanticType> {
+    let context = checker_context_for_assignability_options(nodes, options);
     resolve_direct_name_reference_semantic_type_with_context(
         &context,
         node,
@@ -1047,7 +1207,7 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         return Some(exception_type);
     }
 
-    if let Some(loop_type) = resolve_for_loop_target_semantic_type(
+    if let Some(loop_type) = resolve_for_loop_target_semantic_type_with_options(
         node,
         nodes,
         signature,
@@ -1055,11 +1215,12 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         current_owner_type_name,
         current_line,
         value_name,
+        context.assignability_options(),
     ) {
         return Some(loop_type);
     }
 
-    if let Some(with_type) = resolve_with_target_name_semantic_type(
+    if let Some(with_type) = resolve_with_target_name_semantic_type_with_options(
         node,
         nodes,
         signature,
@@ -1067,11 +1228,12 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         current_owner_type_name,
         current_line,
         value_name,
+        context.assignability_options(),
     ) {
         return Some(with_type);
     }
 
-    if let Some(local_type) = resolve_local_assignment_reference_semantic_type(
+    if let Some(local_type) = resolve_local_assignment_reference_semantic_type_with_options(
         node,
         nodes,
         signature,
@@ -1079,17 +1241,19 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         current_owner_type_name,
         current_line,
         value_name,
+        context.assignability_options(),
     ) {
         return Some(local_type);
     }
 
     if current_owner_name.is_none()
-        && let Some(module_type) = resolve_module_level_assignment_reference_semantic_type(
+        && let Some(module_type) = resolve_module_level_assignment_reference_semantic_type_with_options(
             node,
             nodes,
             signature,
             current_line,
             value_name,
+            context.assignability_options(),
         ) {
             return Some(module_type);
         }

@@ -1549,9 +1549,12 @@ fn collect_node_semantic_diagnostics(
     push_diagnostics(diagnostics, direct_method_call_diagnostics(context, node, context.nodes));
     push_diagnostics(diagnostics, direct_return_type_diagnostics(context, node, context.nodes));
     push_diagnostics(diagnostics, direct_yield_type_diagnostics(context, node, context.nodes));
-    push_diagnostics(diagnostics, for_loop_target_diagnostics(node, context.nodes));
-    push_diagnostics(diagnostics, destructuring_assignment_diagnostics(node, context.nodes));
-    push_diagnostics(diagnostics, with_statement_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, for_loop_target_diagnostics(context, node, context.nodes));
+    push_diagnostics(
+        diagnostics,
+        destructuring_assignment_diagnostics(context, node, context.nodes),
+    );
+    push_diagnostics(diagnostics, with_statement_diagnostics(context, node, context.nodes));
 }
 
 fn collect_node_call_diagnostics(

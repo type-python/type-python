@@ -785,19 +785,21 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed_with_options(
     let expected_positional_arg_types =
         expected_positional_arg_semantic_types_from_signature_sites(signature, call.arg_count);
     let (positional_types, variadic_starred_types) =
-        expanded_positional_arg_semantic_types_with_expected_semantic(
+        expanded_positional_arg_semantic_types_with_expected_semantic_and_options(
             node,
             nodes,
             call,
             &expected_positional_arg_types,
+            options,
         );
     let expected_keyword_arg_types =
         expected_keyword_arg_semantic_types_from_signature_sites(signature, &call.keyword_names);
-    let keyword_arg_types = resolved_keyword_arg_semantic_types_with_expected_semantic(
+    let keyword_arg_types = resolved_keyword_arg_semantic_types_with_expected_semantic_and_options(
         node,
         nodes,
         call,
         &expected_keyword_arg_types,
+        options,
     );
     let mut positional_index = 0;
 
@@ -871,19 +873,21 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
     let expected_positional_arg_types =
         expected_positional_arg_semantic_types_from_semantic_params(params, call.arg_count);
     let (positional_types, variadic_starred_types) =
-        expanded_positional_arg_semantic_types_with_expected_semantic(
+        expanded_positional_arg_semantic_types_with_expected_semantic_and_options(
             node,
             nodes,
             call,
             &expected_positional_arg_types,
+            options,
         );
     let expected_keyword_arg_types =
         expected_keyword_arg_semantic_types_from_semantic_params(params, &call.keyword_names);
-    let keyword_arg_types = resolved_keyword_arg_semantic_types_with_expected_semantic(
+    let keyword_arg_types = resolved_keyword_arg_semantic_types_with_expected_semantic_and_options(
         node,
         nodes,
         call,
         &expected_keyword_arg_types,
+        options,
     );
     let mut positional_index = 0;
 

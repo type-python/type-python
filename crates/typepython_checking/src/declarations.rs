@@ -538,7 +538,8 @@ pub(super) fn sealed_match_exhaustiveness_diagnostics(
                 return None;
             }
 
-            let subject_type = resolve_match_subject_semantic_type(node, nodes, match_site)?;
+            let subject_type =
+                resolve_match_subject_semantic_type_with_context(context, node, nodes, match_site)?;
             let (sealed_node, sealed_decl) =
                 resolve_sealed_root(nodes, node, &render_semantic_type(&subject_type))?;
             let sealed_closure = collect_sealed_descendants(sealed_node, &sealed_decl.name);
@@ -612,7 +613,8 @@ pub(super) fn enum_match_exhaustiveness_diagnostics(
                 return None;
             }
 
-            let subject_type = resolve_match_subject_semantic_type(node, nodes, match_site)?;
+            let subject_type =
+                resolve_match_subject_semantic_type_with_context(context, node, nodes, match_site)?;
             let enum_type = resolve_match_subject_enum_type(&subject_type);
             let (enum_node, enum_decl) = resolve_direct_base(nodes, node, &enum_type)?;
             if !is_enum_like_class(nodes, enum_node, enum_decl)
@@ -696,7 +698,8 @@ pub(super) fn literal_match_exhaustiveness_diagnostics(
                 return None;
             }
 
-            let subject_type = resolve_match_subject_semantic_type(node, nodes, match_site)?;
+            let subject_type =
+                resolve_match_subject_semantic_type_with_context(context, node, nodes, match_site)?;
             let mut literals = literal_match_subject_values(&subject_type)?;
             literals.sort();
             literals.dedup();
@@ -820,13 +823,24 @@ pub(super) fn leading_space_count(line: &str) -> usize {
     line.chars().take_while(|character| *character == ' ').count()
 }
 
+#[allow(dead_code)]
 pub(super) fn resolve_match_subject_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     match_site: &typepython_binding::MatchSite,
 ) -> Option<SemanticType> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    resolve_match_subject_semantic_type_with_context(&context, node, nodes, match_site)
+}
+
+pub(super) fn resolve_match_subject_semantic_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    match_site: &typepython_binding::MatchSite,
+) -> Option<SemanticType> {
     match_site.subject_metadata().as_ref().and_then(|metadata| {
-        resolve_direct_expression_semantic_type_from_metadata(
+        resolve_direct_expression_semantic_type_from_metadata_with_options(
             node,
             nodes,
             None,
@@ -834,6 +848,7 @@ pub(super) fn resolve_match_subject_semantic_type(
             match_site.owner_type_name.as_deref(),
             match_site.line,
             metadata,
+            context.assignability_options(),
         )
     })
 }
