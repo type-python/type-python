@@ -1069,7 +1069,7 @@ Overload resolution proceeds after applicability filtering:
 | `not in`                      | `x not in container` | `bool`                                                                                          |
 | `is`, `is not`                | any                  | `bool`; participate in narrowing (Section 15)                                                   |
 
-Operations involving `dynamic` produce `dynamic`. Operations involving `unknown` produce `unknown` unless narrowed.
+Operations involving `dynamic` produce `dynamic`. Operations involving `unknown` MUST be diagnosed unless the `unknown` value has first been narrowed or explicitly cast to a type that supports the operation.
 
 Short-circuit boolean operators participate in flow analysis. The right-hand operand of `and` and `or` MUST be checked in the branch environment induced by the left-hand operand as defined in Section 15.
 
@@ -1081,7 +1081,8 @@ Dunder-protocol dispatch: For operator expressions on user-defined types, the ch
 
 - The element type of `xs` if `xs` is a generic subscriptable type
 - `dynamic` if `xs` is `dynamic`
-- `unknown` if indexing `unknown` or with an unknown key
+- an error if `xs` is `unknown` until it is narrowed or explicitly cast
+- `unknown` if a supported indexable type is accessed with a key whose value type is unknown and the implementation cannot refine the result further
 
 For a known `TypedDict` type `TD` indexed by a string-literal key:
 

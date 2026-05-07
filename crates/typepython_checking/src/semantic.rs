@@ -1414,6 +1414,7 @@ pub(super) fn direct_unknown_operation_diagnostics(
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
+    let mut seen_expression_operations = std::collections::BTreeSet::new();
 
     for access in &node.member_accesses {
         if name_is_unknown_boundary(context, node, nodes, &access.owner_name) {
@@ -1493,7 +1494,469 @@ pub(super) fn direct_unknown_operation_diagnostics(
         }
     }
 
+    for assignment in &node.assignments {
+        if let Some(metadata) = assignment.value_metadata() {
+            collect_unknown_direct_expression_operation_diagnostics(
+                context,
+                node,
+                nodes,
+                assignment.owner_name.as_deref(),
+                assignment.owner_type_name.as_deref(),
+                assignment.line,
+                &metadata,
+                &mut diagnostics,
+                &mut seen_expression_operations,
+            );
+        }
+    }
+    for return_site in &node.returns {
+        if let Some(metadata) = return_site.value_metadata() {
+            collect_unknown_direct_expression_operation_diagnostics(
+                context,
+                node,
+                nodes,
+                Some(return_site.owner_name.as_str()),
+                return_site.owner_type_name.as_deref(),
+                return_site.line,
+                &metadata,
+                &mut diagnostics,
+                &mut seen_expression_operations,
+            );
+        }
+    }
+    for yield_site in &node.yields {
+        if let Some(metadata) = yield_site.value_metadata() {
+            collect_unknown_direct_expression_operation_diagnostics(
+                context,
+                node,
+                nodes,
+                Some(yield_site.owner_name.as_str()),
+                yield_site.owner_type_name.as_deref(),
+                yield_site.line,
+                &metadata,
+                &mut diagnostics,
+                &mut seen_expression_operations,
+            );
+        }
+    }
+    for call in &node.calls {
+        for metadata in call
+            .arg_values
+            .iter()
+            .chain(call.starred_arg_values.iter())
+            .chain(call.keyword_arg_values.iter())
+            .chain(call.keyword_expansion_values.iter())
+        {
+            collect_unknown_direct_expression_operation_diagnostics(
+                context,
+                node,
+                nodes,
+                None,
+                None,
+                call.line,
+                metadata,
+                &mut diagnostics,
+                &mut seen_expression_operations,
+            );
+        }
+    }
+    for call in &node.method_calls {
+        for metadata in call
+            .arg_values
+            .iter()
+            .chain(call.starred_arg_values.iter())
+            .chain(call.keyword_arg_values.iter())
+            .chain(call.keyword_expansion_values.iter())
+        {
+            collect_unknown_direct_expression_operation_diagnostics(
+                context,
+                node,
+                nodes,
+                call.current_owner_name.as_deref(),
+                call.current_owner_type_name.as_deref(),
+                call.line,
+                metadata,
+                &mut diagnostics,
+                &mut seen_expression_operations,
+            );
+        }
+    }
+    for match_site in &node.matches {
+        if let Some(metadata) = match_site.subject_metadata() {
+            collect_unknown_direct_expression_operation_diagnostics(
+                context,
+                node,
+                nodes,
+                match_site.owner_name.as_deref(),
+                match_site.owner_type_name.as_deref(),
+                match_site.line,
+                &metadata,
+                &mut diagnostics,
+                &mut seen_expression_operations,
+            );
+        }
+    }
+    for for_site in &node.for_loops {
+        if let Some(metadata) = for_site.iter_metadata() {
+            collect_unknown_direct_expression_operation_diagnostics(
+                context,
+                node,
+                nodes,
+                for_site.owner_name.as_deref(),
+                for_site.owner_type_name.as_deref(),
+                for_site.line,
+                &metadata,
+                &mut diagnostics,
+                &mut seen_expression_operations,
+            );
+        }
+    }
+    for with_site in &node.with_statements {
+        if let Some(metadata) = with_site.context_metadata() {
+            collect_unknown_direct_expression_operation_diagnostics(
+                context,
+                node,
+                nodes,
+                with_site.owner_name.as_deref(),
+                with_site.owner_type_name.as_deref(),
+                with_site.line,
+                &metadata,
+                &mut diagnostics,
+                &mut seen_expression_operations,
+            );
+        }
+    }
+
     diagnostics
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_unknown_direct_expression_operation_diagnostics(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    diagnostics: &mut Vec<Diagnostic>,
+    seen: &mut std::collections::BTreeSet<String>,
+) {
+    if let Some(target) = metadata.value_subscript_target.as_deref() {
+        if direct_expr_metadata_resolves_to_unknown(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            target,
+        ) {
+            let label = direct_expr_operation_label(target);
+            push_unique_unknown_operation_diagnostic(
+                diagnostics,
+                seen,
+                format!("subscript:{line}:{label}"),
+                format!(
+                    "subscript access in module `{}` is unsupported because `{}` has type `unknown`",
+                    node.module_path.display(),
+                    label,
+                ),
+            );
+        }
+        collect_unknown_direct_expression_operation_diagnostics(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            target,
+            diagnostics,
+            seen,
+        );
+    }
+
+    if let Some(operator) = metadata.value_binop_operator.as_deref() {
+        for (side, operand) in [
+            ("left", metadata.value_binop_left.as_deref()),
+            ("right", metadata.value_binop_right.as_deref()),
+        ] {
+            if let Some(operand) = operand
+                && direct_expr_metadata_resolves_to_unknown(
+                    context,
+                    node,
+                    nodes,
+                    current_owner_name,
+                    current_owner_type_name,
+                    line,
+                    operand,
+                )
+            {
+                let label = direct_expr_operation_label(operand);
+                push_unique_unknown_operation_diagnostic(
+                    diagnostics,
+                    seen,
+                    format!("binop:{line}:{operator}:{side}:{label}"),
+                    format!(
+                        "binary operation `{}` in module `{}` is unsupported because the {} operand `{}` has type `unknown`",
+                        operator,
+                        node.module_path.display(),
+                        side,
+                        label,
+                    ),
+                );
+            }
+        }
+    }
+
+    for child in [
+        metadata.value_if_true.as_deref(),
+        metadata.value_if_false.as_deref(),
+        metadata.value_bool_left.as_deref(),
+        metadata.value_bool_right.as_deref(),
+        metadata.value_binop_left.as_deref(),
+        metadata.value_binop_right.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        collect_unknown_direct_expression_operation_diagnostics(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            child,
+            diagnostics,
+            seen,
+        );
+    }
+
+    if let Some(lambda) = metadata.value_lambda.as_deref() {
+        collect_unknown_direct_expression_operation_diagnostics(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            &lambda.body,
+            diagnostics,
+            seen,
+        );
+    }
+    for comprehension in [
+        metadata.value_list_comprehension.as_deref(),
+        metadata.value_generator_comprehension.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        for clause in &comprehension.clauses {
+            collect_unknown_direct_expression_operation_diagnostics(
+                context,
+                node,
+                nodes,
+                current_owner_name,
+                current_owner_type_name,
+                line,
+                &clause.iter,
+                diagnostics,
+                seen,
+            );
+        }
+        if let Some(key) = comprehension.key.as_deref() {
+            collect_unknown_direct_expression_operation_diagnostics(
+                context,
+                node,
+                nodes,
+                current_owner_name,
+                current_owner_type_name,
+                line,
+                key,
+                diagnostics,
+                seen,
+            );
+        }
+        collect_unknown_direct_expression_operation_diagnostics(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            &comprehension.element,
+            diagnostics,
+            seen,
+        );
+    }
+    for element in metadata
+        .value_list_elements
+        .iter()
+        .flatten()
+        .chain(metadata.value_set_elements.iter().flatten())
+    {
+        collect_unknown_direct_expression_operation_diagnostics(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            element,
+            diagnostics,
+            seen,
+        );
+    }
+    if let Some(entries) = metadata.value_dict_entries.as_ref() {
+        for entry in entries {
+            if let Some(key) = entry.key_value.as_deref() {
+                collect_unknown_direct_expression_operation_diagnostics(
+                    context,
+                    node,
+                    nodes,
+                    current_owner_name,
+                    current_owner_type_name,
+                    line,
+                    key,
+                    diagnostics,
+                    seen,
+                );
+            }
+            collect_unknown_direct_expression_operation_diagnostics(
+                context,
+                node,
+                nodes,
+                current_owner_name,
+                current_owner_type_name,
+                line,
+                &entry.value,
+                diagnostics,
+                seen,
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn direct_expr_metadata_resolves_to_unknown(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+) -> bool {
+    if let Some(name) = metadata.value_name.as_deref() {
+        return name_is_unknown_boundary_with_context(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            name,
+        ) || resolve_direct_name_reference_semantic_type_with_context(
+            context,
+            node,
+            nodes,
+            None,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            name,
+        )
+        .is_some_and(|resolved| semantic_type_is_unknown(&resolved));
+    }
+    if let Some(callee) = metadata.value_callee.as_deref() {
+        return resolve_direct_callable_return_semantic_type_for_line_with_context(
+            context, node, nodes, callee, line,
+        )
+        .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, callee))
+        .is_some_and(|resolved| semantic_type_is_unknown(&resolved))
+            || metadata.rendered_value_type().is_some_and(|rendered| {
+                semantic_type_is_unknown(&lower_type_text_or_name(&rendered))
+            });
+    }
+    if let Some(owner_name) = metadata.value_member_owner_name.as_deref()
+        && let Some(member_name) = metadata.value_member_name.as_deref()
+    {
+        return resolve_direct_member_reference_semantic_type_with_options(
+            node,
+            nodes,
+            None,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            owner_name,
+            member_name,
+            metadata.value_member_through_instance,
+            context.assignability_options(),
+        )
+        .is_some_and(|resolved| semantic_type_is_unknown(&resolved));
+    }
+    if let Some(owner_name) = metadata.value_method_owner_name.as_deref()
+        && let Some(method_name) = metadata.value_method_name.as_deref()
+    {
+        return resolve_direct_method_return_semantic_type(
+            node,
+            nodes,
+            None,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            owner_name,
+            method_name,
+            metadata.value_method_through_instance,
+            context.assignability_options(),
+        )
+        .is_some_and(|resolved| semantic_type_is_unknown(&resolved));
+    }
+    if let Some(rendered) = metadata.rendered_value_type() {
+        return semantic_type_is_unknown(&lower_type_text_or_name(&rendered));
+    }
+    false
+}
+
+fn semantic_type_is_unknown(ty: &SemanticType) -> bool {
+    matches!(ty.strip_annotated(), SemanticType::Name(name) if name == "unknown")
+}
+
+fn direct_expr_operation_label(metadata: &typepython_syntax::DirectExprMetadata) -> String {
+    if let Some(name) = metadata.value_name.as_deref() {
+        return name.to_owned();
+    }
+    if let Some(callee) = metadata.value_callee.as_deref() {
+        return callee.to_owned();
+    }
+    if let Some(owner) = metadata.value_member_owner_name.as_deref()
+        && let Some(member) = metadata.value_member_name.as_deref()
+    {
+        return format!("{owner}.{member}");
+    }
+    if let Some(owner) = metadata.value_method_owner_name.as_deref()
+        && let Some(method) = metadata.value_method_name.as_deref()
+    {
+        return format!("{owner}.{method}()");
+    }
+    String::from("expression")
+}
+
+fn push_unique_unknown_operation_diagnostic(
+    diagnostics: &mut Vec<Diagnostic>,
+    seen: &mut std::collections::BTreeSet<String>,
+    key: String,
+    message: String,
+) {
+    if seen.insert(key) {
+        diagnostics.push(Diagnostic::error("TPY4003", message));
+    }
 }
 
 pub(super) fn plain_dataclass_field_specifier_call(

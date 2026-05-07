@@ -2561,6 +2561,45 @@ fn parse_retains_ifexp_metadata() {
 }
 
 #[test]
+fn parse_retains_unannotated_assignment_subscript_metadata() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("subscript.py"),
+        kind: SourceKind::Python,
+        logical_module: String::new(),
+        text: String::from("item = get_value()[0]\n"),
+    });
+
+    assert!(tree.diagnostics.is_empty());
+    let [SyntaxStatement::Value(statement)] = tree.statements.as_slice() else {
+        panic!("expected value statement");
+    };
+    let target =
+        statement.value_subscript_target.as_deref().expect("subscript target should be retained");
+    assert_eq!(target.value_callee.as_deref(), Some("get_value"));
+    assert_eq!(statement.value_subscript_index.as_deref(), Some("0"));
+}
+
+#[test]
+fn parse_retains_unannotated_assignment_binop_metadata() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("binop.py"),
+        kind: SourceKind::Python,
+        logical_module: String::new(),
+        text: String::from("value = get_value() + 1\n"),
+    });
+
+    assert!(tree.diagnostics.is_empty());
+    let [SyntaxStatement::Value(statement)] = tree.statements.as_slice() else {
+        panic!("expected value statement");
+    };
+    assert_eq!(statement.value_binop_operator.as_deref(), Some("+"));
+    let left = statement.value_binop_left.as_deref().expect("left operand should be retained");
+    let right = statement.value_binop_right.as_deref().expect("right operand should be retained");
+    assert_eq!(left.value_callee.as_deref(), Some("get_value"));
+    assert_eq!(right.rendered_value_type().as_deref(), Some("int"));
+}
+
+#[test]
 fn parse_retains_ifexp_guard_metadata() {
     let tree = parse(SourceFile {
         path: PathBuf::from("ifexp-guard.py"),

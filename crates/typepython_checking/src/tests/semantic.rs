@@ -381,6 +381,54 @@ fn check_accepts_unknown_after_explicit_cast() {
 }
 
 #[test]
+fn check_reports_unknown_subscript_from_real_parse_pipeline() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "item = get_value()[0]\n\n",
+        "def run() -> None:\n",
+        "    value: unknown = get_value()\n",
+        "    other = value[0]\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("subscript access"), "{rendered}");
+    assert!(rendered.contains("`get_value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("`value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_arithmetic_from_real_parse_pipeline() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "left = get_value() + 1\n",
+        "right = 1 + get_value()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("binary operation `+`"), "{rendered}");
+    assert!(rendered.contains("left operand `get_value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("right operand `get_value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_unknown_subscript_and_arithmetic_after_explicit_cast() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import cast\n\n",
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "item = cast(list, get_value())[0]\n",
+        "left: int = cast(int, get_value()) + 1\n",
+        "right: int = 1 + cast(int, get_value())\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_empty_tail_paramspec_call() {
     let result = check_temp_typepython_source(
         "from typing import Callable, ParamSpec\n\nP = ParamSpec(\"P\")\n\ndef invoke(cb: Callable[P, int]) -> int:\n    return cb()\n",
