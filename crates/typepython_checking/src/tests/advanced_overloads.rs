@@ -366,7 +366,10 @@ fn check_accepts_direct_overloaded_none_argument_when_strict_nulls_is_disabled()
             "result: str = parse(None)\n",
         ),
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -453,7 +456,10 @@ fn check_rejects_tainted_overloaded_call_argument_when_taint_is_enabled() {
             "result: int = render(raw)\n",
         ),
         ParseOptions::default(),
-        crate::CheckerOptions { experimental_taint: true, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            experimental_taint: true,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     let rendered = result.diagnostics.as_text();

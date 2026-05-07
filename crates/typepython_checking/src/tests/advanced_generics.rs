@@ -410,7 +410,7 @@ fn check_paramspec_shape_inference_uses_context_decorated_metadata() {
         &graph.nodes,
         None,
         Some(&bound_surface_facts),
-        crate::CheckerOptions::default(),
+        crate::CheckerOptions::permissive_test_default(),
     );
     let mut actual_value = crate::synthetic_direct_expr_metadata("Callable[[str], str]");
     actual_value.value_name = Some(String::from("takes_str"));

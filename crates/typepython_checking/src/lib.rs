@@ -150,6 +150,18 @@ pub struct CheckerOptions {
 
 impl Default for CheckerOptions {
     fn default() -> Self {
+        Self::core_project_default()
+    }
+}
+
+impl CheckerOptions {
+    #[must_use]
+    pub fn core_project_default() -> Self {
+        Self::from_typing_config(&TypingConfig::default())
+    }
+
+    #[must_use]
+    pub fn permissive_test_default() -> Self {
         Self {
             require_explicit_overrides: false,
             enable_sealed_exhaustiveness: true,
@@ -166,9 +178,7 @@ impl Default for CheckerOptions {
             experimental_framework_adapters: false,
         }
     }
-}
 
-impl CheckerOptions {
     #[must_use]
     pub fn from_typing_config(config: &TypingConfig) -> Self {
         Self {
@@ -326,7 +336,7 @@ impl<'a> CheckerContext<'a> {
             nodes,
             source_overrides,
             bound_surface_facts,
-            CheckerOptions { import_fallback, strict, ..CheckerOptions::default() },
+            CheckerOptions { import_fallback, strict, ..CheckerOptions::permissive_test_default() },
         )
     }
 
@@ -523,7 +533,7 @@ fn binding_surface_facts_by_module(
 /// Runs the checker over the module graph.
 #[must_use]
 pub fn check(graph: &ModuleGraph) -> CheckResult {
-    check_with_checker_options(graph, CheckerOptions::default())
+    check_with_checker_options(graph, CheckerOptions::core_project_default())
 }
 
 /// Runs the checker with the caller-controlled option surface used by the CLI and tests.
@@ -546,7 +556,7 @@ pub fn check_with_options(
             strict,
             warn_unsafe,
             import_fallback,
-            ..CheckerOptions::default()
+            ..CheckerOptions::permissive_test_default()
         },
         None,
     )
@@ -585,7 +595,7 @@ pub fn check_with_binding_metadata(
             strict,
             warn_unsafe,
             import_fallback,
-            ..CheckerOptions::default()
+            ..CheckerOptions::permissive_test_default()
         },
         source_overrides,
     )
@@ -623,7 +633,7 @@ pub fn semantic_incremental_state_with_binding_metadata(
     semantic_incremental_state_with_binding_metadata_and_options(
         graph,
         bindings,
-        CheckerOptions::default().with_import_fallback(import_fallback),
+        CheckerOptions::core_project_default().with_import_fallback(import_fallback),
         source_overrides,
         stdlib_snapshot,
         metadata,
@@ -669,7 +679,7 @@ pub fn semantic_incremental_state_with_reused_summaries(
     semantic_incremental_state_with_reused_summaries_and_options(
         graph,
         bindings,
-        CheckerOptions::default().with_import_fallback(import_fallback),
+        CheckerOptions::core_project_default().with_import_fallback(import_fallback),
         source_overrides,
         previous_summaries,
         summary_rebuild_modules,
@@ -747,7 +757,7 @@ pub fn check_with_source_overrides(
             strict,
             warn_unsafe,
             import_fallback,
-            ..CheckerOptions::default()
+            ..CheckerOptions::permissive_test_default()
         },
         source_overrides,
     )
@@ -792,7 +802,7 @@ pub fn check_modules_with_source_overrides(
             strict,
             warn_unsafe,
             import_fallback,
-            ..CheckerOptions::default()
+            ..CheckerOptions::permissive_test_default()
         },
         source_overrides,
     )

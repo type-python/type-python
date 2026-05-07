@@ -92,7 +92,7 @@ pub(super) fn resolve_direct_member_reference_semantic_type_with_options(
             None,
             CheckerOptions {
                 experimental_framework_adapters: true,
-                ..CheckerOptions::default()
+                ..CheckerOptions::permissive_test_default()
             },
         );
         return framework_generated_member_semantic_type_with_context(

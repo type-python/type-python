@@ -4,7 +4,10 @@ fn check_temp_typepython_source_with_taint(source_text: &str) -> crate::CheckRes
     check_temp_typepython_source_with_checker_options(
         source_text,
         ParseOptions::default(),
-        crate::CheckerOptions { experimental_taint: true, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            experimental_taint: true,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     )
 }
 
@@ -131,7 +134,10 @@ fn check_rejects_tainted_module_member_call_argument_when_taint_is_enabled() {
     let result = check_two_module_typepython_sources_with_checker_options(
         "def consume(value: str) -> None:\n    ...\n",
         concat!("import lib\n\n", "raw: Tainted[str, \"html\"]\n", "lib.consume(raw)\n",),
-        crate::CheckerOptions { experimental_taint: true, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            experimental_taint: true,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     let rendered = result.diagnostics.as_text();

@@ -416,7 +416,7 @@ mod tests {
             &nodes,
             None,
             None,
-            CheckerOptions { strict_nulls: false, ..CheckerOptions::default() },
+            CheckerOptions { strict_nulls: false, ..CheckerOptions::permissive_test_default() },
         );
         let ty = lower_type_text_or_name("TypeIf[IsSubtype[None, int], str, bytes]");
         let mut evaluator = TypeLevelEvaluator::new(&context, &node, &nodes);
@@ -434,7 +434,10 @@ mod tests {
             &nodes,
             None,
             None,
-            CheckerOptions { experimental_taint: true, ..CheckerOptions::default() },
+            CheckerOptions {
+                experimental_taint: true,
+                ..CheckerOptions::permissive_test_default()
+            },
         );
         let ty =
             lower_type_text_or_name("TypeIf[IsSubtype[Tainted[str, \"html\"], str], bytes, str]");

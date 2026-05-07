@@ -4,7 +4,7 @@ fn check_validator_source(source: &str) -> crate::CheckResult {
     check_temp_typepython_source_with_checker_options(
         source,
         ParseOptions::default(),
-        crate::CheckerOptions::default()
+        crate::CheckerOptions::permissive_test_default()
             .with_experimental_features(false, false, true)
             .with_framework_adapters(true),
     )

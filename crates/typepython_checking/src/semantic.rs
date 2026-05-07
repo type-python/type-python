@@ -1210,7 +1210,7 @@ pub(crate) fn checker_context_for_assignability_options<'a>(
             strict_nulls: options.strict_nulls,
             experimental_taint: options.taint,
             experimental_framework_adapters: options.framework_adapters,
-            ..CheckerOptions::default()
+            ..CheckerOptions::permissive_test_default()
         },
     )
 }

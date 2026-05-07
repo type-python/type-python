@@ -4,7 +4,7 @@ fn check_temp_typepython_framework_source(source_text: &str) -> crate::CheckResu
     check_temp_typepython_source_with_checker_options(
         source_text,
         ParseOptions::default(),
-        crate::CheckerOptions::default().with_framework_adapters(true),
+        crate::CheckerOptions::permissive_test_default().with_framework_adapters(true),
     )
 }
 
@@ -47,7 +47,7 @@ fn check_decorated_callable_transform_honors_strict_nulls_option() {
         crate::CheckerOptions {
             strict: true,
             strict_nulls: false,
-            ..crate::CheckerOptions::default()
+            ..crate::CheckerOptions::permissive_test_default()
         },
     );
 
@@ -99,7 +99,7 @@ fn check_callable_assignment_uses_decorated_member_params() {
         &graph.nodes,
         None,
         Some(&bound_surface_facts),
-        crate::CheckerOptions::default(),
+        crate::CheckerOptions::permissive_test_default(),
     );
     let assignment = typepython_binding::AssignmentSite {
         name: String::from("handler"),
@@ -443,7 +443,10 @@ fn check_accepts_dataclass_transform_constructor_none_when_strict_nulls_is_disab
     let result = check_temp_typepython_source_with_checker_options(
         "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    age: int\n\nuser: User = User(None)\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     let rendered = result.diagnostics.as_text();
@@ -455,7 +458,10 @@ fn check_rejects_dataclass_transform_constructor_tainted_keyword_when_taint_is_e
     let result = check_temp_typepython_source_with_checker_options(
         "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nraw: Tainted[str, \"html\"]\nuser: User = User(name=raw)\n",
         ParseOptions::default(),
-        crate::CheckerOptions { experimental_taint: true, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            experimental_taint: true,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     let rendered = result.diagnostics.as_text();

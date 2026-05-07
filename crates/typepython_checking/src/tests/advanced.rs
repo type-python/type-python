@@ -12080,7 +12080,10 @@ fn check_accepts_none_union_member_access_when_strict_nulls_is_disabled() {
 
     let result = crate::check_with_checker_options(
         &normalize_test_graph(&graph),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());

@@ -20,7 +20,10 @@ use crate::{
 pub fn collect_effective_callable_stub_overrides(
     graph: &ModuleGraph,
 ) -> Vec<EffectiveCallableStubOverride> {
-    collect_effective_callable_stub_overrides_with_options(graph, CheckerOptions::default())
+    collect_effective_callable_stub_overrides_with_options(
+        graph,
+        CheckerOptions::core_project_default(),
+    )
 }
 
 #[must_use]
@@ -80,7 +83,10 @@ pub fn collect_effective_callable_stub_overrides_with_options(
 pub fn collect_effective_value_stub_overrides(
     graph: &ModuleGraph,
 ) -> Vec<EffectiveValueStubOverride> {
-    collect_effective_value_stub_overrides_with_options(graph, CheckerOptions::default())
+    collect_effective_value_stub_overrides_with_options(
+        graph,
+        CheckerOptions::core_project_default(),
+    )
 }
 
 #[must_use]
@@ -170,7 +176,7 @@ fn is_computed_field_decorator_name(name: &str) -> bool {
 
 #[must_use]
 pub fn collect_synthetic_value_stubs(graph: &ModuleGraph) -> Vec<SyntheticValueStub> {
-    collect_synthetic_value_stubs_with_options(graph, CheckerOptions::default())
+    collect_synthetic_value_stubs_with_options(graph, CheckerOptions::core_project_default())
 }
 
 #[must_use]
@@ -241,7 +247,7 @@ fn generated_class_value_stubs(
 
 #[must_use]
 pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMethodStub> {
-    collect_synthetic_method_stubs_with_options(graph, CheckerOptions::default())
+    collect_synthetic_method_stubs_with_options(graph, CheckerOptions::core_project_default())
 }
 
 #[must_use]

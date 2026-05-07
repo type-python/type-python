@@ -11,7 +11,7 @@ fn check_temp_typepython_source_with_effect_rows(
             strict,
             experimental_effect_rows: true,
             experimental_framework_adapters: true,
-            ..crate::CheckerOptions::default()
+            ..crate::CheckerOptions::permissive_test_default()
         },
     )
 }
@@ -24,13 +24,13 @@ fn check_temp_typepython_source_with_taint(source_text: &str, strict: bool) -> c
             strict,
             experimental_taint: true,
             experimental_framework_adapters: true,
-            ..crate::CheckerOptions::default()
+            ..crate::CheckerOptions::permissive_test_default()
         },
     )
 }
 
 fn framework_adapters_check_options() -> crate::CheckerOptions {
-    crate::CheckerOptions::default().with_framework_adapters(true)
+    crate::CheckerOptions::permissive_test_default().with_framework_adapters(true)
 }
 
 #[test]
@@ -44,7 +44,10 @@ fn check_reports_implicit_dynamic_function_and_method_params_when_enabled() {
             "        return item\n",
         ),
         ParseOptions::default(),
-        crate::CheckerOptions { no_implicit_dynamic: true, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            no_implicit_dynamic: true,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     let rendered = result.diagnostics.as_text();
@@ -59,7 +62,10 @@ fn check_accepts_explicit_dynamic_when_no_implicit_dynamic_is_enabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "def parse(value: dynamic) -> dynamic:\n    return value\n",
         ParseOptions::default(),
-        crate::CheckerOptions { no_implicit_dynamic: true, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            no_implicit_dynamic: true,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -70,7 +76,10 @@ fn check_reports_uncontextualized_lambda_param_when_no_implicit_dynamic_is_enabl
     let result = check_temp_typepython_source_with_checker_options(
         "handler = lambda value: value\n",
         ParseOptions::default(),
-        crate::CheckerOptions { no_implicit_dynamic: true, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            no_implicit_dynamic: true,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     let rendered = result.diagnostics.as_text();
@@ -84,7 +93,10 @@ fn check_accepts_contextual_lambda_param_when_no_implicit_dynamic_is_enabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "from typing import Callable\n\nhandler: Callable[[int], int] = lambda value: value\n",
         ParseOptions::default(),
-        crate::CheckerOptions { no_implicit_dynamic: true, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            no_implicit_dynamic: true,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -104,7 +116,10 @@ fn check_accepts_none_assignment_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "value: int = None\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -115,7 +130,10 @@ fn check_accepts_none_call_argument_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "def takes(value: int) -> None:\n    pass\n\ntakes(None)\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -126,7 +144,10 @@ fn check_accepts_none_module_member_call_argument_when_strict_nulls_is_disabled(
     let result = check_two_module_typepython_sources_with_checker_options(
         "def takes(value: int) -> None:\n    pass\n",
         "import lib\n\nlib.takes(None)\n",
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -137,7 +158,10 @@ fn check_accepts_none_return_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "def build() -> int:\n    return None\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -154,7 +178,10 @@ fn check_accepts_none_contextual_typed_dict_return_when_strict_nulls_is_disabled
             "    return {\"body\": None}\n",
         ),
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -165,7 +192,10 @@ fn check_accepts_callable_none_return_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "from typing import Callable\n\nhandler: Callable[[int], int] = lambda value: None\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -176,7 +206,10 @@ fn check_accepts_override_none_return_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "class Base:\n    def value(self) -> int:\n        return 1\n\nclass Child(Base):\n    def value(self) -> None:\n        return None\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -187,7 +220,10 @@ fn check_accepts_protocol_none_value_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "from typing import Protocol\n\nclass HasValue(Protocol):\n    value: int\n\nclass Model(HasValue):\n    value: None = None\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -198,7 +234,10 @@ fn check_accepts_structural_protocol_none_value_when_strict_nulls_is_disabled() 
     let result = check_temp_typepython_source_with_checker_options(
         "from typing import Protocol\n\nclass HasValue(Protocol):\n    value: int\n\nclass Model:\n    value: None = None\n\nmodel: HasValue = Model()\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -209,7 +248,10 @@ fn check_accepts_bounded_generic_none_argument_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "def first[T: int](value: T) -> T:\n    return value\n\nresult: int = first(None)\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -220,7 +262,10 @@ fn check_accepts_bounded_generic_method_none_argument_when_strict_nulls_is_disab
     let result = check_temp_typepython_source_with_checker_options(
         "class Service:\n    def first[T: int](self, value: T) -> T:\n        return value\n\nresult: int = Service().first(None)\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -231,7 +276,10 @@ fn check_rejects_none_literal_assignment_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "from typing import Literal\n\nvalue: Literal[1] = None\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     let rendered = result.diagnostics.as_text();
@@ -243,7 +291,10 @@ fn check_rejects_none_literal_union_assignment_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         "from typing import Literal\n\nvalue: Literal[1] | Literal[2] = None\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     let rendered = result.diagnostics.as_text();
@@ -255,7 +306,10 @@ fn check_accepts_none_mixed_literal_union_assignment_when_strict_nulls_is_disabl
     let result = check_temp_typepython_source_with_checker_options(
         "from typing import Literal\n\nvalue: int | Literal[1] = None\n",
         ParseOptions::default(),
-        crate::CheckerOptions { strict_nulls: false, ..crate::CheckerOptions::default() },
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
     );
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());

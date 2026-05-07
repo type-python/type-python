@@ -24,6 +24,24 @@ macro_rules! declaration {
 
 pub(super) static TEMP_SOURCE_ROOT_ID: AtomicU64 = AtomicU64::new(0);
 
+#[test]
+fn checker_options_split_core_project_and_permissive_defaults() {
+    let core = crate::CheckerOptions::core_project_default();
+    assert_eq!(crate::CheckerOptions::default(), core);
+    assert!(core.strict);
+    assert!(core.strict_nulls);
+    assert!(core.no_implicit_dynamic);
+    assert!(core.warn_unsafe);
+    assert_eq!(core.import_fallback, ImportFallback::Unknown);
+
+    let permissive = crate::CheckerOptions::permissive_test_default();
+    assert!(!permissive.strict);
+    assert!(permissive.strict_nulls);
+    assert!(!permissive.no_implicit_dynamic);
+    assert!(!permissive.warn_unsafe);
+    assert_eq!(permissive.import_fallback, ImportFallback::Unknown);
+}
+
 pub(super) fn callable_metadata(signature_text: &str) -> DeclarationMetadata {
     let callable = super::parse_direct_callable_declaration(signature_text)
         .unwrap_or_else(|| panic!("test callable signature should parse: {signature_text}"));
@@ -66,7 +84,10 @@ pub(super) fn normalize_test_graph(graph: &ModuleGraph) -> ModuleGraph {
 }
 
 pub(super) fn check(graph: &ModuleGraph) -> crate::CheckResult {
-    super::check(&normalize_test_graph(graph))
+    super::check_with_checker_options(
+        &normalize_test_graph(graph),
+        crate::CheckerOptions::permissive_test_default(),
+    )
 }
 
 pub(super) fn check_with_options(
@@ -142,7 +163,7 @@ pub(super) fn check_with_experimental_binding_metadata(
             strict,
             warn_unsafe,
             import_fallback,
-            ..crate::CheckerOptions::default()
+            ..crate::CheckerOptions::permissive_test_default()
         }
         .with_experimental_features(true, true, true)
         .with_sync_async_dual_emit(true)
@@ -200,7 +221,7 @@ pub(super) fn check_with_experimental_source_overrides(
             strict,
             warn_unsafe,
             import_fallback,
-            ..crate::CheckerOptions::default()
+            ..crate::CheckerOptions::permissive_test_default()
         }
         .with_experimental_features(true, true, true)
         .with_sync_async_dual_emit(true)
@@ -238,7 +259,7 @@ pub(super) fn semantic_incremental_state_with_experimental_binding_metadata(
     super::semantic_incremental_state_with_binding_metadata_and_options(
         &normalize_test_graph(graph),
         bindings,
-        crate::CheckerOptions::default()
+        crate::CheckerOptions::permissive_test_default()
             .with_import_fallback(import_fallback)
             .with_experimental_features(true, true, true)
             .with_sync_async_dual_emit(true)
@@ -442,7 +463,7 @@ pub(super) fn check_temp_typepython_source_with_experimental_check_options(
             strict,
             warn_unsafe,
             import_fallback: ImportFallback::Unknown,
-            ..crate::CheckerOptions::default()
+            ..crate::CheckerOptions::permissive_test_default()
         }
         .with_experimental_features(true, true, true)
         .with_sync_async_dual_emit(true)
