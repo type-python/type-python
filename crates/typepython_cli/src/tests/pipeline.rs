@@ -1057,6 +1057,53 @@ fn run_pipeline_invalidates_cache_when_analysis_python_changes() {
     assert_eq!(lowered_modules, 1);
 }
 
+#[cfg(unix)]
+#[test]
+fn run_pipeline_skips_support_probe_without_external_imports() {
+    let project_dir = temp_project_dir("run_pipeline_skips_support_probe_without_external_imports");
+    let (probe_log, support_snapshot) = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join("site-packages/demo"))
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("site-packages/demo/__init__.pyi"), "value: int\n")
+            .expect("test setup should succeed");
+        let probe = project_dir.join("python-probe");
+        let probe_log = project_dir.join("probe.log");
+        write_executable_script(
+            &probe,
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$2\" >> \"{}\"\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+                probe_log.display()
+            ),
+        );
+        fs::write(
+            project_dir.join("typepython.toml"),
+            format!(
+                "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\npython_executable = \"{}\"\n",
+                project_dir.join("site-packages").display(),
+                probe.display()
+            ),
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        fs::write(&probe_log, "").expect("probe log should reset after config validation");
+
+        let snapshot = run_pipeline(&config).expect("test setup should succeed");
+        let probe_log_contents = fs::read_to_string(&probe_log).unwrap_or_default();
+        let support_snapshot = snapshot.incremental.metadata.support_snapshot;
+        remove_temp_project_dir(&project_dir);
+        (probe_log_contents, support_snapshot)
+    };
+
+    assert_eq!(support_snapshot, None);
+    assert!(
+        probe_log.trim().is_empty(),
+        "pipeline should not probe external support roots without external imports; got {probe_log:?}"
+    );
+}
+
 #[test]
 fn run_pipeline_invalidates_cache_when_runtime_validators_change() {
     let (lowered_modules, runtime_source) = {

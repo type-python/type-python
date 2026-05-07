@@ -5,6 +5,7 @@ pub(super) struct PreparedPipelineSyntax {
     pub(super) source_paths: Vec<PathBuf>,
     pub(super) syntax_trees: Vec<typepython_syntax::SyntaxTree>,
     pub(super) all_syntax_trees: Vec<typepython_syntax::SyntaxTree>,
+    pub(super) has_support_syntax: bool,
 }
 
 pub(crate) fn load_syntax_trees(
@@ -62,9 +63,10 @@ pub(super) fn prepare_pipeline_syntax(
             syntax_trees.clone()
         };
     let checking_support_syntax = load_support_syntax_trees(config, &all_syntax_trees)?;
+    let has_support_syntax = !checking_support_syntax.is_empty();
     all_syntax_trees.extend(checking_support_syntax);
 
-    Ok(PreparedPipelineSyntax { source_paths, syntax_trees, all_syntax_trees })
+    Ok(PreparedPipelineSyntax { source_paths, syntax_trees, all_syntax_trees, has_support_syntax })
 }
 
 fn load_support_syntax_trees(

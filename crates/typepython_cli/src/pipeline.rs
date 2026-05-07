@@ -522,11 +522,16 @@ fn analyze_pipeline_state(
     let analysis_python = config.analysis_python().to_string();
     let stdlib_snapshot = Some(bundled_stdlib_snapshot_identity(&analysis_python)?);
     let checker_options = CheckerOptions::from_config(&config.config);
+    let support_snapshot = if prepared.has_support_syntax {
+        Some(support_source_snapshot_identity(config, &analysis_python)?)
+    } else {
+        None
+    };
     let snapshot_metadata = SnapshotMetadata {
         target_python: Some(target_python),
         analysis_python: Some(analysis_python.clone()),
         emit_style: Some(config.config.emit.emit_style.to_string()),
-        support_snapshot: Some(support_source_snapshot_identity(config, &analysis_python)?),
+        support_snapshot,
         experimental_effect_rows: checker_options.experimental_effect_rows,
         experimental_taint: checker_options.experimental_taint,
         experimental_validator_witnesses: checker_options.experimental_validator_witnesses,
