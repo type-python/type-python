@@ -66,6 +66,32 @@ class EditorIntegrationTests(unittest.TestCase):
         self.assertIn("typepython.restartServer", extension)
         self.assertIn("stopServer", extension)
         self.assertIn("restartServer", extension)
+        self.assertIn("let restartQueue = Promise.resolve();", extension)
+        self.assertIn("restartQueue = restartQueue", extension)
+        self.assertIn(".then(() => startServer(context, explicit))", extension)
+        self.assertIn("return restartQueue", extension)
+        self.assertIn("await restartServer(context, true);", extension)
+        self.assertIn("await restartServer(context);", extension)
+        self.assertIn("let traceOutputChannel;", extension)
+        self.assertIn("if (!traceOutputChannel)", extension)
+        self.assertIn(
+            'traceOutputChannel = vscode.window.createOutputChannel("TypePython Trace")',
+            extension,
+        )
+        self.assertEqual(
+            extension.count('vscode.window.createOutputChannel("TypePython Trace")'),
+            1,
+        )
+        self.assertIn("let documentFileWatcher;", extension)
+        self.assertIn(
+            'documentFileWatcher = vscode.workspace.createFileSystemWatcher("**/*.{tpy,py,pyi}")',
+            extension,
+        )
+        self.assertEqual(
+            extension.count('vscode.workspace.createFileSystemWatcher("**/*.{tpy,py,pyi}")'),
+            1,
+        )
+        self.assertNotIn("context.subscriptions.push(languageClient)", extension)
         self.assertIn("createFileSystemWatcher", extension)
         self.assertIn("onDidCreate", extension)
         self.assertIn("onDidDelete", extension)

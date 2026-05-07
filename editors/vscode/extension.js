@@ -4,6 +4,9 @@ const path = require("path");
 const { LanguageClient, TransportKind, Trace } = require("vscode-languageclient/node");
 
 let client;
+let traceOutputChannel;
+let documentFileWatcher;
+let restartQueue = Promise.resolve();
 
 function extensionConfig() {
   return vscode.workspace.getConfiguration("typepython");
@@ -76,6 +79,22 @@ function serverTrace() {
   }
 }
 
+function traceChannel(context) {
+  if (!traceOutputChannel) {
+    traceOutputChannel = vscode.window.createOutputChannel("TypePython Trace");
+    context.subscriptions.push(traceOutputChannel);
+  }
+  return traceOutputChannel;
+}
+
+function lspDocumentFileWatcher(context) {
+  if (!documentFileWatcher) {
+    documentFileWatcher = vscode.workspace.createFileSystemWatcher("**/*.{tpy,py,pyi}");
+    context.subscriptions.push(documentFileWatcher);
+  }
+  return documentFileWatcher;
+}
+
 function buildClient(context) {
   const serverOptions = {
     command: binaryPath(),
@@ -94,9 +113,9 @@ function buildClient(context) {
       { scheme: "file", language: "python" }
     ],
     outputChannelName: "TypePython",
-    traceOutputChannel: vscode.window.createOutputChannel("TypePython Trace"),
+    traceOutputChannel: traceChannel(context),
     synchronize: {
-      fileEvents: vscode.workspace.createFileSystemWatcher("**/*.{tpy,py,pyi}")
+      fileEvents: lspDocumentFileWatcher(context)
     }
   };
 
@@ -107,16 +126,15 @@ function buildClient(context) {
     clientOptions
   );
   languageClient.setTrace(serverTrace());
-  context.subscriptions.push(languageClient);
   return languageClient;
 }
 
 async function stopServer() {
-  if (!client) {
-    return;
-  }
   const runningClient = client;
   client = undefined;
+  if (!runningClient) {
+    return;
+  }
   await runningClient.stop();
 }
 
@@ -130,11 +148,17 @@ async function startServer(context, explicit = false) {
     }
     return;
   }
-  if (client) {
-    await stopServer();
+  await stopServer();
+  const nextClient = buildClient(context);
+  client = nextClient;
+  try {
+    await nextClient.start();
+  } catch (error) {
+    if (client === nextClient) {
+      client = undefined;
+    }
+    throw error;
   }
-  client = buildClient(context);
-  await client.start();
 }
 
 function reportServerStartError(error) {
@@ -143,7 +167,11 @@ function reportServerStartError(error) {
 }
 
 function restartServer(context, explicit = false) {
-  startServer(context, explicit).catch(reportServerStartError);
+  restartQueue = restartQueue
+    .catch(() => undefined)
+    .then(() => startServer(context, explicit))
+    .catch(reportServerStartError);
+  return restartQueue;
 }
 
 function registerProjectConfigWatchers(context) {
@@ -175,19 +203,28 @@ function registerConfigurationWatchers(context) {
 async function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand("typepython.restartServer", async () => {
-      await startServer(context, true);
+      await restartServer(context, true);
     })
   );
   registerProjectConfigWatchers(context);
   registerConfigurationWatchers(context);
-  await startServer(context);
+  await restartServer(context);
 }
 
 function deactivate() {
-  if (!client) {
-    return undefined;
-  }
-  return client.stop();
+  return restartQueue
+    .catch(() => undefined)
+    .then(() => stopServer())
+    .then(() => {
+      if (documentFileWatcher) {
+        documentFileWatcher.dispose();
+        documentFileWatcher = undefined;
+      }
+      if (traceOutputChannel) {
+        traceOutputChannel.dispose();
+        traceOutputChannel = undefined;
+      }
+    });
 }
 
 module.exports = {
