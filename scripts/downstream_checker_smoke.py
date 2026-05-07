@@ -300,7 +300,9 @@ def checker_command(
         python_override = os.environ.get("TYPEPYTHON_DOWNSTREAM_TY_PYTHON")
         if python_override:
             command.extend(["--python", python_override])
-        command.extend(["--python-version", target, str(build_dir)])
+        command.extend(
+            ["--python-version", target, "--extra-search-path", str(build_dir), str(build_dir)]
+        )
         return command
     raise SystemExit(f"unsupported downstream checker `{checker}`")
 
