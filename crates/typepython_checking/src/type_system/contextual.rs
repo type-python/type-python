@@ -869,12 +869,12 @@ pub(super) fn resolve_callable_assignment_semantic_signature_with_context(
             .into_iter()
             .map(|param| param.annotation_or_dynamic())
             .collect::<Vec<_>>();
-        let actual_return = resolve_direct_callable_return_semantic_type_for_line_with_options(
+        let actual_return = resolve_direct_callable_return_semantic_type_for_line_with_context(
+            context,
             node,
             nodes,
             value_name,
             assignment.line,
-            options,
         )
         .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, value_name))?;
         return Some((actual_params, actual_return));
@@ -882,7 +882,8 @@ pub(super) fn resolve_callable_assignment_semantic_signature_with_context(
 
     let owner_name = metadata.value_member_owner_name.as_deref()?;
     let member_name = metadata.value_member_name.as_deref()?;
-    resolve_direct_member_callable_semantic_signature_with_options(
+    resolve_direct_member_callable_semantic_signature_with_context(
+        context,
         node,
         nodes,
         assignment.owner_name.as_deref(),
@@ -891,7 +892,6 @@ pub(super) fn resolve_callable_assignment_semantic_signature_with_context(
         owner_name,
         member_name,
         metadata.value_member_through_instance,
-        options,
     )
 }
 
@@ -938,18 +938,48 @@ pub(super) fn resolve_direct_member_callable_semantic_signature_with_options(
     through_instance: bool,
     options: AssignabilityOptions,
 ) -> Option<(Vec<SemanticType>, SemanticType)> {
+    let context = checker_context_for_assignability_options(nodes, options);
+    resolve_direct_member_callable_semantic_signature_with_context(
+        &context,
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        owner_name,
+        member_name,
+        through_instance,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "member callable resolution needs the current scope and member context"
+)]
+pub(super) fn resolve_direct_member_callable_semantic_signature_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    owner_name: &str,
+    member_name: &str,
+    through_instance: bool,
+) -> Option<(Vec<SemanticType>, SemanticType)> {
     let owner_type = if through_instance {
-        resolve_direct_callable_return_semantic_type_for_line_with_options(
+        resolve_direct_callable_return_semantic_type_for_line_with_context(
+            context,
             node,
             nodes,
             owner_name,
             current_line,
-            options,
         )
         .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, owner_name))
-            .or_else(|| Some(lower_type_text_or_name(owner_name)))
+        .or_else(|| Some(lower_type_text_or_name(owner_name)))
     } else {
-        resolve_direct_name_reference_semantic_type(
+        resolve_direct_name_reference_semantic_type_with_context(
+            context,
             node,
             nodes,
             None,
@@ -971,7 +1001,7 @@ pub(super) fn resolve_direct_member_callable_semantic_signature_with_options(
 
     let (actual_params, actual_return) = if let Some(callable_type) =
         resolve_decorated_callable_semantic_type_for_declaration_with_context(
-            &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+            context,
             class_node,
             nodes,
             method,

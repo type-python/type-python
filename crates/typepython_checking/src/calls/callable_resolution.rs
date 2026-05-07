@@ -1591,6 +1591,20 @@ pub(super) fn resolve_direct_callable_return_semantic_type_for_line_with_options
     line: usize,
     options: AssignabilityOptions,
 ) -> Option<SemanticType> {
+    let context = checker_context_for_assignability_options(nodes, options);
+    resolve_direct_callable_return_semantic_type_for_line_with_context(
+        &context, node, nodes, callee, line,
+    )
+}
+
+pub(super) fn resolve_direct_callable_return_semantic_type_for_line_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+    line: usize,
+) -> Option<SemanticType> {
+    let options = context.assignability_options();
     let call = node
         .calls
         .iter()
@@ -1625,12 +1639,7 @@ pub(super) fn resolve_direct_callable_return_semantic_type_for_line_with_options
         };
     }
     if let Some(callable_type) =
-        resolve_decorated_function_callable_semantic_type_with_context(
-            &checker_context_for_assignability_options(nodes, options),
-            node,
-            nodes,
-            callee,
-        )
+        resolve_decorated_function_callable_semantic_type_with_context(context, node, nodes, callee)
     {
         return decorated_function_return_semantic_type_from_semantic_callable(&callable_type);
     }

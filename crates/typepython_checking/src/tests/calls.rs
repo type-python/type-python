@@ -72,6 +72,89 @@ fn check_callable_assignment_uses_decorated_function_params() {
 }
 
 #[test]
+fn check_callable_assignment_uses_decorated_member_params() {
+    let source_text = concat!(
+        "from typing import Callable, cast\n\n",
+        "def widen(fn: Callable[[object, str], str]) -> Callable[[object, object], str]:\n",
+        "    return cast(Callable[[object, object], str], fn)\n\n",
+        "class Worker:\n",
+        "    @widen\n",
+        "    def takes_str(self, value: str) -> str:\n",
+        "        return value\n\n",
+        "handler: Callable[[object], str] = Worker.takes_str\n",
+    );
+    let source = SourceFile {
+        path: PathBuf::from("virtual/app.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("app"),
+        text: source_text.to_owned(),
+    };
+    let tree = parse_with_options(source, ParseOptions::default());
+    let binding = bind(&tree);
+    let bound_surface_facts =
+        BTreeMap::from([(binding.module_key.clone(), binding.surface_facts.clone())]);
+    let graph = build(std::slice::from_ref(&binding));
+    let node = &graph.nodes[0];
+    let context = crate::CheckerContext::new_with_bound_surface_facts_and_options(
+        &graph.nodes,
+        None,
+        Some(&bound_surface_facts),
+        crate::CheckerOptions::default(),
+    );
+    let assignment = typepython_binding::AssignmentSite {
+        name: String::from("handler"),
+        destructuring_target_names: None,
+        destructuring_index: None,
+        annotation: Some(String::from("Callable[[object], str]")),
+        annotation_expr: None,
+        is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: Some(String::from("Worker")),
+        value_member_name: Some(String::from("takes_str")),
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None,
+        value: None,
+        owner_name: None,
+        owner_type_name: None,
+        line: 1,
+    };
+
+    assert!(
+        matches!(
+            crate::callable_assignment_result(
+                &context,
+                node,
+                &graph.nodes,
+                &assignment,
+                "Callable[[object], str]",
+            ),
+            Some(None)
+        ),
+        "decorated member callable signature should satisfy the assignment"
+    );
+}
+
+#[test]
 fn check_reports_positional_only_parameter_passed_as_keyword() {
     let result =
         check_temp_typepython_source("def takes(x: int, /):\n    return x\n\ntakes(x=1)\n");
