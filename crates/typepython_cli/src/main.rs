@@ -11,7 +11,7 @@ mod type_health;
 mod verification;
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     env, fs,
     path::{Path, PathBuf},
     process::ExitCode,
@@ -24,7 +24,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use notify::{Config as NotifyConfig, RecommendedWatcher, Watcher};
+use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use tracing_subscriber::EnvFilter;
 use typepython_config::{
@@ -236,16 +236,18 @@ fn run_build(args: RunArgs) -> Result<ExitCode> {
 
 fn run_watch(args: RunArgs) -> Result<ExitCode> {
     let config = load_project(args.project.as_ref())?;
-    let watch_targets = watch_targets(&config);
-    let mut last_exit = run_watch_rebuild(
-        args.project.as_ref(),
+    let initial_watch_targets = watch_targets(&config);
+    let debounce_ms = config.config.watch.debounce_ms;
+    let initial_rebuild = run_watch_rebuild_with_config(
+        config,
         args.format,
         vec![format!(
             "watching {} path(s) with {}ms debounce",
-            watch_targets.len(),
-            config.config.watch.debounce_ms
+            initial_watch_targets.len(),
+            debounce_ms
         )],
     )?;
+    let mut last_exit = initial_rebuild.exit_code;
 
     let (sender, receiver) = mpsc::channel();
     let mut watcher = RecommendedWatcher::new(
@@ -256,13 +258,14 @@ fn run_watch(args: RunArgs) -> Result<ExitCode> {
     )
     .context("unable to start filesystem watcher")?;
 
-    for (path, mode) in &watch_targets {
-        watcher
-            .watch(path, *mode)
-            .with_context(|| format!("unable to watch {}", path.display()))?;
-    }
+    let mut active_watch_targets = BTreeMap::new();
+    apply_watch_targets(
+        &mut watcher,
+        &mut active_watch_targets,
+        watch_targets(&initial_rebuild.config),
+    )?;
 
-    let debounce = Duration::from_millis(config.config.watch.debounce_ms);
+    let mut debounce = Duration::from_millis(initial_rebuild.config.config.watch.debounce_ms);
     loop {
         let mut changed_paths = BTreeSet::new();
         match receiver.recv() {
@@ -288,7 +291,20 @@ fn run_watch(args: RunArgs) -> Result<ExitCode> {
             args.format,
             vec![format_watch_rebuild_note(&changed_paths)],
         ) {
-            Ok(exit) => exit,
+            Ok(rebuild) => {
+                let exit_code = rebuild.exit_code;
+                if let Err(error) = apply_watch_targets(
+                    &mut watcher,
+                    &mut active_watch_targets,
+                    watch_targets(&rebuild.config),
+                ) {
+                    eprintln!("watch reconfiguration failed: {error:#}");
+                    ExitCode::from(2)
+                } else {
+                    debounce = Duration::from_millis(rebuild.config.config.watch.debounce_ms);
+                    exit_code
+                }
+            }
             Err(error) => {
                 eprintln!("watch rebuild failed: {error:#}");
                 ExitCode::from(2)
@@ -297,13 +313,80 @@ fn run_watch(args: RunArgs) -> Result<ExitCode> {
     }
 }
 
+#[derive(Debug)]
+struct WatchRebuildResult {
+    exit_code: ExitCode,
+    config: ConfigHandle,
+}
+
 fn run_watch_rebuild(
     project: Option<&PathBuf>,
     format: OutputFormat,
     notes: Vec<String>,
-) -> Result<ExitCode> {
+) -> Result<WatchRebuildResult> {
     let config = load_project(project)?;
-    run_build_like_command(&config, format, "watch", notes)
+    run_watch_rebuild_with_config(config, format, notes)
+}
+
+fn run_watch_rebuild_with_config(
+    config: ConfigHandle,
+    format: OutputFormat,
+    notes: Vec<String>,
+) -> Result<WatchRebuildResult> {
+    let exit_code = run_build_like_command(&config, format, "watch", notes)?;
+    Ok(WatchRebuildResult { exit_code, config })
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
+struct WatchTargetUpdatePlan {
+    unwatch: Vec<PathBuf>,
+    watch: Vec<(PathBuf, RecursiveMode)>,
+}
+
+fn plan_watch_target_update(
+    active_targets: &BTreeMap<PathBuf, RecursiveMode>,
+    desired_targets: &[(PathBuf, RecursiveMode)],
+) -> WatchTargetUpdatePlan {
+    let desired_targets = desired_targets.iter().cloned().collect::<BTreeMap<_, _>>();
+    let mut plan = WatchTargetUpdatePlan::default();
+
+    for (path, active_mode) in active_targets {
+        if !matches!(desired_targets.get(path), Some(desired_mode) if desired_mode == active_mode) {
+            plan.unwatch.push(path.clone());
+        }
+    }
+
+    for (path, desired_mode) in desired_targets {
+        if !matches!(active_targets.get(&path), Some(active_mode) if active_mode == &desired_mode) {
+            plan.watch.push((path, desired_mode));
+        }
+    }
+
+    plan
+}
+
+fn apply_watch_targets(
+    watcher: &mut RecommendedWatcher,
+    active_targets: &mut BTreeMap<PathBuf, RecursiveMode>,
+    desired_targets: Vec<(PathBuf, RecursiveMode)>,
+) -> Result<()> {
+    let plan = plan_watch_target_update(active_targets, &desired_targets);
+
+    for path in plan.unwatch {
+        watcher
+            .unwatch(&path)
+            .with_context(|| format!("unable to stop watching {}", path.display()))?;
+        active_targets.remove(&path);
+    }
+
+    for (path, mode) in plan.watch {
+        watcher
+            .watch(&path, mode)
+            .with_context(|| format!("unable to watch {}", path.display()))?;
+        active_targets.insert(path, mode);
+    }
+
+    Ok(())
 }
 
 fn bytecode_path_for(runtime_path: &Path) -> Result<PathBuf> {

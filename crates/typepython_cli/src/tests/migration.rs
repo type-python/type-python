@@ -38,6 +38,31 @@ fn format_watch_rebuild_note_summarizes_changed_paths() {
 }
 
 #[test]
+fn plan_watch_target_update_adds_removes_and_reconfigures_modes() {
+    let active = BTreeMap::from([
+        (PathBuf::from("/repo/deleted"), RecursiveMode::Recursive),
+        (PathBuf::from("/repo/mode"), RecursiveMode::Recursive),
+        (PathBuf::from("/repo/stable"), RecursiveMode::Recursive),
+    ]);
+    let desired = vec![
+        (PathBuf::from("/repo/stable"), RecursiveMode::Recursive),
+        (PathBuf::from("/repo/new"), RecursiveMode::Recursive),
+        (PathBuf::from("/repo/mode"), RecursiveMode::NonRecursive),
+    ];
+
+    let plan = plan_watch_target_update(&active, &desired);
+
+    assert_eq!(plan.unwatch, vec![PathBuf::from("/repo/deleted"), PathBuf::from("/repo/mode")]);
+    assert_eq!(
+        plan.watch,
+        vec![
+            (PathBuf::from("/repo/mode"), RecursiveMode::NonRecursive),
+            (PathBuf::from("/repo/new"), RecursiveMode::Recursive),
+        ]
+    );
+}
+
+#[test]
 fn run_watch_rebuild_reloads_project_and_recovers_after_checker_failure() {
     let project_dir =
         temp_project_dir("run_watch_rebuild_reloads_project_and_recovers_after_checker_failure");
@@ -78,9 +103,58 @@ fn run_watch_rebuild_reloads_project_and_recovers_after_checker_failure() {
     };
     remove_temp_project_dir(&project_dir);
 
-    assert_eq!(result.0, ExitCode::SUCCESS);
-    assert_eq!(result.1, ExitCode::FAILURE);
-    assert_eq!(result.2, ExitCode::SUCCESS);
+    assert_eq!(result.0.exit_code, ExitCode::SUCCESS);
+    assert_eq!(result.1.exit_code, ExitCode::FAILURE);
+    assert_eq!(result.2.exit_code, ExitCode::SUCCESS);
+}
+
+#[test]
+fn run_watch_rebuild_returns_reloaded_config_for_watch_reconfiguration() {
+    let project_dir =
+        temp_project_dir("run_watch_rebuild_returns_reloaded_config_for_watch_reconfiguration");
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[watch]\ndebounce_ms = 40\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+
+        let first = run_watch_rebuild(
+            Some(&project_dir),
+            OutputFormat::Json,
+            vec![String::from("initial watch config")],
+        )
+        .expect("initial rebuild should run");
+
+        fs::create_dir_all(project_dir.join("generated")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\", \"generated\"]\n\n[watch]\ndebounce_ms = 125\n",
+        )
+        .expect("test setup should succeed");
+        let reloaded = run_watch_rebuild(
+            Some(&project_dir),
+            OutputFormat::Json,
+            vec![String::from("updated watch config")],
+        )
+        .expect("updated rebuild should run");
+        let reloaded_targets = watch_targets(&reloaded.config);
+
+        (first, reloaded, reloaded_targets)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(result.0.config.config.watch.debounce_ms, 40);
+    assert_eq!(result.1.config.config.watch.debounce_ms, 125);
+    assert!(
+        result
+            .2
+            .iter()
+            .any(|(path, mode)| path.ends_with("generated") && *mode == RecursiveMode::Recursive)
+    );
 }
 
 #[test]
