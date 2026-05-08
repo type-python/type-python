@@ -1485,20 +1485,48 @@ pub(super) fn direct_unknown_operation_diagnostics(
         }
     }
 
-    for call in &node.calls {
-        if plain_dataclass_field_specifier_call(context, node, &call.callee, call.line) {
-            continue;
+    let direct_call_context_sites = context.load_direct_call_context_sites(node);
+    if direct_call_context_sites.is_empty() {
+        for call in &node.calls {
+            if plain_dataclass_field_specifier_call(context, node, &call.callee, call.line) {
+                continue;
+            }
+            if name_is_unknown_boundary(context, node, nodes, &call.callee) {
+                diagnostics.push(Diagnostic::error(
+                    "TPY4003",
+                    format!(
+                        "call to `{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                        call.callee,
+                        node.module_path.display(),
+                        call.callee
+                    ),
+                ));
+            }
         }
-        if name_is_unknown_boundary(context, node, nodes, &call.callee) {
-            diagnostics.push(Diagnostic::error(
-                "TPY4003",
-                format!(
-                    "call to `{}` in module `{}` is unsupported because `{}` has type `unknown`",
-                    call.callee,
-                    node.module_path.display(),
-                    call.callee
-                ),
-            ));
+    } else {
+        for call in direct_call_context_sites {
+            if plain_dataclass_field_specifier_call(context, node, &call.callee, call.line) {
+                continue;
+            }
+            if name_is_unknown_boundary_with_context(
+                context,
+                node,
+                nodes,
+                call.owner_name.as_deref(),
+                call.owner_type_name.as_deref(),
+                call.line,
+                &call.callee,
+            ) {
+                diagnostics.push(Diagnostic::error(
+                    "TPY4003",
+                    format!(
+                        "call to `{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                        call.callee,
+                        node.module_path.display(),
+                        call.callee
+                    ),
+                ));
+            }
         }
     }
 
