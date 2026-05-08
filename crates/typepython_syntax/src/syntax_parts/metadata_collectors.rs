@@ -125,7 +125,7 @@ pub fn collect_direct_call_context_sites(source: &str) -> Vec<DirectCallContextS
 
 #[must_use]
 pub fn collect_expression_use_sites(source: &str) -> Vec<ExpressionUseSite> {
-    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let normalized = module_surface_metadata_parse_source(source);
     with_source_line_index(&normalized, || {
         let Ok(parsed) = parse_module(&normalized) else {
             return Vec::new();

@@ -506,6 +506,22 @@ fn check_reports_unknown_bare_expression_operations_from_real_parse_pipeline() {
 }
 
 #[test]
+fn check_reports_unknown_bare_expression_operations_after_typepython_surface_syntax() {
+    let result = check_temp_typepython_source(concat!(
+        "interface SupportsClose:\n",
+        "    def close(self) -> None: ...\n\n",
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "get_value()[0]\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("subscript access"), "{rendered}");
+    assert!(rendered.contains("`get_value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_guard_expression_operations_from_real_parse_pipeline() {
     let result = check_temp_typepython_source(concat!(
         "def get_value() -> unknown:\n",
