@@ -50,6 +50,7 @@ The following are DX v1 features:
 
 - `watch`
 - `lsp`
+- enum exhaustiveness diagnostics (implemented, non-stable DX)
 - enhanced diagnostics from Section 16.5
 - `typepython migrate --report`
 - migration-oriented stub generation workflows that do not affect authoritative public surfaces

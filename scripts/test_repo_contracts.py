@@ -198,6 +198,14 @@ class RepoContractsTests(unittest.TestCase):
             "| Sealed exhaustiveness | DX v1 | SHOULD | missing |",
             conformance,
         )
+        self.assertIn(
+            "| Enum exhaustiveness | DX v1 | SHOULD | `cargo test -p typepython-checking check_reports_non_exhaustive_enum_match`",
+            conformance,
+        )
+        self.assertNotIn(
+            "| Enum exhaustiveness | DX v1 | SHOULD | missing |",
+            conformance,
+        )
 
         why_not = markdown_section(readme, "Why not just mypy / pyright / PEP 695?")
         self.assertIn("`sealed class` + compiler-proved exhaustiveness", why_not)

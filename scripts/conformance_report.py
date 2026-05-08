@@ -292,6 +292,11 @@ TEST_EVIDENCE: dict[str, tuple[str, ...]] = {
     "Packaging artifact consistency rules for typed publication": ("cargo test -p typepython-cli tests::verification",),
     "`typepython verify` library publishability checks": ("cargo test -p typepython-cli tests::verification",),
     "Sealed exhaustiveness": ("cargo test -p typepython-checking sealed",),
+    "Enum exhaustiveness": (
+        "cargo test -p typepython-checking check_reports_non_exhaustive_enum_match",
+        "cargo test -p typepython-checking check_reports_non_exhaustive_enum_match_missing_member",
+        "cargo test -p typepython-checking check_accepts_enum_exhaustive_match",
+    ),
     "Runtime validator emission for selected data-class trust boundaries": (
         "cargo test -p typepython-emit write_runtime_outputs",
         "cargo test -p typepython-emit write_runtime_outputs_honors_named_validation_boundary_kinds",
