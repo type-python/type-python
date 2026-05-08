@@ -102,7 +102,7 @@ jobs:
         run: python scripts/industrial_perf_smoke.py --json-out perf/industrial-smoke.json
 
       - name: Upload industrial performance artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: industrial-performance-smoke
           path: perf/industrial-smoke.json
@@ -128,7 +128,7 @@ jobs:
         run: make coverage
 
       - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rust-coverage
           path: |
@@ -159,7 +159,7 @@ jobs:
 
       - name: Upload fuzz artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-smoke-${{ matrix.fuzz-target }}-artifacts
           path: fuzz/artifacts/
@@ -188,7 +188,7 @@ jobs:
 
       - name: Upload fuzz artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-long-${{ matrix.fuzz-target }}-artifacts
           path: fuzz/artifacts/
