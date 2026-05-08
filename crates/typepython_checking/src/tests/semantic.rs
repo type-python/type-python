@@ -748,6 +748,17 @@ fn check_accepts_unknown_identity_and_isinstance_guards() {
 }
 
 #[test]
+fn check_accepts_unknown_boolop_rhs_after_isinstance_narrowing() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(value: unknown) -> None:\n",
+        "    if isinstance(value, int) and value + 1:\n",
+        "        pass\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_unknown_subscript_and_arithmetic_after_explicit_cast() {
     let result = check_temp_typepython_source(concat!(
         "from typing import cast\n\n",

@@ -2770,6 +2770,9 @@ struct ExpressionUseSiteCollector<'source, 'sites> {
 
 impl<'source, 'sites, 'ast> visitor::Visitor<'ast> for ExpressionUseSiteCollector<'source, 'sites> {
     fn visit_expr(&mut self, expr: &'ast Expr) {
+        if self.visit_bool_op_expr(expr) {
+            return;
+        }
         if self.visit_comprehension_expr(expr) {
             return;
         }
@@ -2796,15 +2799,47 @@ impl ExpressionUseSiteCollector<'_, '_> {
     }
 
     fn visit_guard_expr(&mut self, expr: &Expr) {
-        self.push_expression_use_site(
-            expr,
-            synthetic_operation_metadata(
-                "truthiness",
-                extract_direct_expr_metadata(self.source, expr),
-                None,
-            ),
-        );
+        if !matches!(expr, Expr::BoolOp(_)) {
+            self.push_expression_use_site(
+                expr,
+                synthetic_operation_metadata(
+                    "truthiness",
+                    extract_direct_expr_metadata(self.source, expr),
+                    None,
+                ),
+            );
+        }
         self.visit_expr(expr);
+    }
+
+    fn visit_bool_op_expr(&mut self, expr: &Expr) -> bool {
+        let Expr::BoolOp(bool_op) = expr else {
+            return false;
+        };
+        let operator = match bool_op.op {
+            ruff_python_ast::BoolOp::And => "and",
+            ruff_python_ast::BoolOp::Or => "or",
+        };
+        let outer_suppressed_names = self.suppressed_names.clone();
+        for value in &bool_op.values {
+            self.push_expression_use_site(
+                value,
+                synthetic_operation_metadata(
+                    operator,
+                    extract_direct_expr_metadata(self.source, value),
+                    None,
+                ),
+            );
+            self.visit_expr(value);
+            let branch_true = matches!(bool_op.op, ruff_python_ast::BoolOp::And);
+            self.suppressed_names.extend(guard_unknown_suppressed_names(
+                self.source,
+                value,
+                branch_true,
+            ));
+        }
+        self.suppressed_names = outer_suppressed_names;
+        true
     }
 
     fn visit_comprehension_expr(&mut self, expr: &Expr) -> bool {
@@ -2849,6 +2884,48 @@ impl ExpressionUseSiteCollector<'_, '_> {
         self.visit_expr(element);
         self.suppressed_names = outer_suppressed_names;
     }
+}
+
+fn guard_unknown_suppressed_names(
+    source: &str,
+    expr: &Expr,
+    branch_true: bool,
+) -> std::collections::BTreeSet<String> {
+    extract_guard_condition(source, expr)
+        .map(|guard| guard_condition_unknown_suppressed_names(&guard, branch_true))
+        .unwrap_or_default()
+}
+
+fn guard_condition_unknown_suppressed_names(
+    guard: &GuardCondition,
+    branch_true: bool,
+) -> std::collections::BTreeSet<String> {
+    let mut names = std::collections::BTreeSet::new();
+    match guard {
+        GuardCondition::IsInstance { name, .. } if branch_true => {
+            names.insert(name.clone());
+        }
+        GuardCondition::IsNone { name, negated }
+            if (branch_true && !negated) || (!branch_true && *negated) =>
+        {
+            names.insert(name.clone());
+        }
+        GuardCondition::Not(inner) => {
+            names.extend(guard_condition_unknown_suppressed_names(inner, !branch_true));
+        }
+        GuardCondition::And(conditions) if branch_true => {
+            for condition in conditions {
+                names.extend(guard_condition_unknown_suppressed_names(condition, true));
+            }
+        }
+        GuardCondition::Or(conditions) if !branch_true => {
+            for condition in conditions {
+                names.extend(guard_condition_unknown_suppressed_names(condition, false));
+            }
+        }
+        _ => {}
+    }
+    names
 }
 
 fn expression_use_site_metadata(source: &str, expr: &Expr) -> Vec<DirectExprMetadata> {
