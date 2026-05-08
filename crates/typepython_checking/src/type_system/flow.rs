@@ -1045,6 +1045,7 @@ pub(super) fn resolve_local_assignment_reference_semantic_type_with_options(
     resolve_assignment_site_semantic_type_with_options(node, nodes, signature, assignment, options)
 }
 
+#[allow(dead_code)]
 pub(super) fn resolve_module_level_assignment_reference_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],

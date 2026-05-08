@@ -2776,6 +2776,9 @@ impl<'source, 'sites, 'ast> visitor::Visitor<'ast> for ExpressionUseSiteCollecto
         if self.visit_comprehension_expr(expr) {
             return;
         }
+        if self.visit_call_expr(expr) {
+            return;
+        }
 
         for value in expression_use_site_metadata(self.source, expr) {
             self.push_expression_use_site(expr, value);
@@ -2810,6 +2813,26 @@ impl ExpressionUseSiteCollector<'_, '_> {
             );
         }
         self.visit_expr(expr);
+    }
+
+    fn visit_call_expr(&mut self, expr: &Expr) -> bool {
+        let Expr::Call(call) = expr else {
+            return false;
+        };
+        if !matches!(call.func.as_ref(), Expr::Attribute(_)) {
+            return false;
+        }
+
+        for value in expression_use_site_metadata(self.source, expr) {
+            self.push_expression_use_site(expr, value);
+        }
+        for argument in &call.arguments.args {
+            self.visit_expr(argument);
+        }
+        for keyword in &call.arguments.keywords {
+            self.visit_expr(&keyword.value);
+        }
+        true
     }
 
     fn visit_bool_op_expr(&mut self, expr: &Expr) -> bool {
@@ -2930,6 +2953,8 @@ fn guard_condition_unknown_suppressed_names(
 
 fn expression_use_site_metadata(source: &str, expr: &Expr) -> Vec<DirectExprMetadata> {
     match expr {
+        Expr::Attribute(attribute) if attribute_is_runtime_inspection(attribute) => Vec::new(),
+        Expr::Attribute(_) | Expr::Call(_) => vec![extract_direct_expr_metadata(source, expr)],
         Expr::Subscript(_) | Expr::BinOp(_) => vec![extract_direct_expr_metadata(source, expr)],
         Expr::BoolOp(bool_op) => bool_op
             .values
@@ -2978,6 +3003,14 @@ fn expression_use_site_metadata(source: &str, expr: &Expr) -> Vec<DirectExprMeta
         )],
         _ => Vec::new(),
     }
+}
+
+fn attribute_is_runtime_inspection(attribute: &ruff_python_ast::ExprAttribute) -> bool {
+    matches!(attribute.attr.as_str(), "setter" | "deleter" | "getter")
+        || matches!(
+            (attribute.value.as_ref(), attribute.attr.as_str()),
+            (Expr::Name(name), "version_info" | "platform") if matches!(name.id.as_str(), "sys")
+        )
 }
 
 fn synthetic_operation_metadata(

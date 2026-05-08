@@ -1417,6 +1417,9 @@ pub(super) fn direct_unknown_operation_diagnostics(
     let mut seen_expression_operations = std::collections::BTreeSet::new();
 
     for access in &node.member_accesses {
+        if allowed_runtime_inspection_member(&access.owner_name, &access.member) {
+            continue;
+        }
         if name_is_unknown_boundary_with_context(
             context,
             node,
@@ -1426,6 +1429,10 @@ pub(super) fn direct_unknown_operation_diagnostics(
             access.line,
             &access.owner_name,
         ) {
+            let key = format!("member:{}:{}.{}", access.line, access.owner_name, access.member);
+            if !seen_expression_operations.insert(key) {
+                continue;
+            }
             let mut diagnostic = Diagnostic::error(
                 "TPY4003",
                 format!(
@@ -1460,6 +1467,10 @@ pub(super) fn direct_unknown_operation_diagnostics(
             call.line,
             &call.owner_name,
         ) {
+            let key = format!("method:{}:{}.{}", call.line, call.owner_name, call.method);
+            if !seen_expression_operations.insert(key) {
+                continue;
+            }
             let mut diagnostic = Diagnostic::error(
                 "TPY4003",
                 format!(
@@ -1492,19 +1503,17 @@ pub(super) fn direct_unknown_operation_diagnostics(
                 continue;
             }
             if name_is_unknown_boundary(context, node, nodes, &call.callee) {
-                diagnostics.push(Diagnostic::error(
-                    "TPY4003",
-                    format!(
-                        "call to `{}` in module `{}` is unsupported because `{}` has type `unknown`",
-                        call.callee,
-                        node.module_path.display(),
-                        call.callee
-                    ),
-                ));
+                push_unknown_direct_call_diagnostic(
+                    &mut diagnostics,
+                    &mut seen_expression_operations,
+                    node,
+                    call.line,
+                    &call.callee,
+                );
             }
         }
     } else {
-        for call in direct_call_context_sites {
+        for call in &direct_call_context_sites {
             if plain_dataclass_field_specifier_call(context, node, &call.callee, call.line) {
                 continue;
             }
@@ -1517,15 +1526,13 @@ pub(super) fn direct_unknown_operation_diagnostics(
                 call.line,
                 &call.callee,
             ) {
-                diagnostics.push(Diagnostic::error(
-                    "TPY4003",
-                    format!(
-                        "call to `{}` in module `{}` is unsupported because `{}` has type `unknown`",
-                        call.callee,
-                        node.module_path.display(),
-                        call.callee
-                    ),
-                ));
+                push_unknown_direct_call_diagnostic(
+                    &mut diagnostics,
+                    &mut seen_expression_operations,
+                    node,
+                    call.line,
+                    &call.callee,
+                );
             }
         }
     }
@@ -1576,6 +1583,9 @@ pub(super) fn direct_unknown_operation_diagnostics(
         }
     }
     for call in &node.calls {
+        let call_context = direct_call_context_sites
+            .iter()
+            .find(|site| site.line == call.line && site.callee == call.callee);
         for metadata in call
             .arg_values
             .iter()
@@ -1587,8 +1597,8 @@ pub(super) fn direct_unknown_operation_diagnostics(
                 context,
                 node,
                 nodes,
-                None,
-                None,
+                call_context.and_then(|site| site.owner_name.as_deref()),
+                call_context.and_then(|site| site.owner_type_name.as_deref()),
                 call.line,
                 metadata,
                 &mut diagnostics,
@@ -1662,6 +1672,40 @@ pub(super) fn direct_unknown_operation_diagnostics(
             );
         }
     }
+    for site in context.load_frozen_field_mutation_sites(node) {
+        if direct_expr_metadata_resolves_to_unknown(
+            context,
+            node,
+            nodes,
+            site.owner_name.as_deref(),
+            site.owner_type_name.as_deref(),
+            site.line,
+            &site.target,
+            &std::collections::BTreeSet::new(),
+        ) {
+            let label = direct_expr_operation_label(&site.target);
+            let operation = match site.kind {
+                typepython_syntax::FrozenFieldMutationKind::Assignment => "attribute assignment",
+                typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => {
+                    "augmented attribute assignment"
+                }
+                typepython_syntax::FrozenFieldMutationKind::Delete => "attribute deletion",
+            };
+            push_unique_unknown_operation_diagnostic(
+                &mut diagnostics,
+                &mut seen_expression_operations,
+                format!("member:{}:{}.{}", site.line, label, site.field_name),
+                format!(
+                    "{} `{}.{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                    operation,
+                    label,
+                    site.field_name,
+                    node.module_path.display(),
+                    label,
+                ),
+            );
+        }
+    }
     for expression_site in context.source_facts.expression_use_sites(node) {
         let suppressed_names = expression_site
             .suppressed_names
@@ -1725,6 +1769,77 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
     diagnostics: &mut Vec<Diagnostic>,
     seen: &mut std::collections::BTreeSet<String>,
 ) {
+    if let Some(callee) = metadata.value_callee.as_deref()
+        && !plain_dataclass_field_specifier_call(context, node, callee, line)
+        && name_is_unknown_boundary_with_context(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            callee,
+        )
+    {
+        push_unknown_direct_call_diagnostic(diagnostics, seen, node, line, callee);
+    }
+
+    if let Some(owner_name) = metadata.value_member_owner_name.as_deref()
+        && let Some(member_name) = metadata.value_member_name.as_deref()
+        && !allowed_runtime_inspection_member(owner_name, member_name)
+        && direct_operation_owner_resolves_to_unknown(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            owner_name,
+            metadata.value_member_through_instance,
+            suppressed_names,
+        )
+    {
+        push_unique_unknown_operation_diagnostic(
+            diagnostics,
+            seen,
+            format!("member:{line}:{owner_name}.{member_name}"),
+            format!(
+                "member access `{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                member_name,
+                node.module_path.display(),
+                owner_name,
+            ),
+        );
+    }
+
+    if let Some(owner_name) = metadata.value_method_owner_name.as_deref()
+        && let Some(method_name) = metadata.value_method_name.as_deref()
+        && direct_operation_owner_resolves_to_unknown(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            owner_name,
+            metadata.value_method_through_instance,
+            suppressed_names,
+        )
+    {
+        push_unique_unknown_operation_diagnostic(
+            diagnostics,
+            seen,
+            format!("method:{line}:{owner_name}.{method_name}"),
+            format!(
+                "method call `{}.{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                owner_name,
+                method_name,
+                node.module_path.display(),
+                owner_name,
+            ),
+        );
+    }
+
     if let Some(target) = metadata.value_subscript_target.as_deref() {
         if direct_expr_metadata_resolves_to_unknown(
             context,
@@ -1967,6 +2082,54 @@ fn direct_expr_operation_description(operator: &str, single_operand_operation: b
     }
 }
 
+fn allowed_runtime_inspection_member(owner_name: &str, member_name: &str) -> bool {
+    owner_name == "sys" && matches!(member_name, "version_info" | "platform")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn direct_operation_owner_resolves_to_unknown(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    line: usize,
+    owner_name: &str,
+    through_instance: bool,
+    suppressed_names: &std::collections::BTreeSet<String>,
+) -> bool {
+    if suppressed_names.contains(owner_name) {
+        return false;
+    }
+    if through_instance {
+        return resolve_direct_callable_return_semantic_type_for_line_with_context(
+            context, node, nodes, owner_name, line,
+        )
+        .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, owner_name))
+        .is_some_and(|resolved| semantic_type_is_unknown(&resolved));
+    }
+    name_is_unknown_boundary_with_context(
+        context,
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        line,
+        owner_name,
+    ) || resolve_direct_name_reference_semantic_type_with_context(
+        context,
+        node,
+        nodes,
+        None,
+        None,
+        current_owner_name,
+        current_owner_type_name,
+        line,
+        owner_name,
+    )
+    .is_some_and(|resolved| semantic_type_is_unknown(&resolved))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn direct_expr_metadata_resolves_to_unknown(
     context: &CheckerContext<'_>,
@@ -2090,6 +2253,26 @@ fn push_unique_unknown_operation_diagnostic(
     }
 }
 
+fn push_unknown_direct_call_diagnostic(
+    diagnostics: &mut Vec<Diagnostic>,
+    seen: &mut std::collections::BTreeSet<String>,
+    node: &typepython_graph::ModuleNode,
+    line: usize,
+    callee: &str,
+) {
+    push_unique_unknown_operation_diagnostic(
+        diagnostics,
+        seen,
+        format!("call:{line}:{callee}"),
+        format!(
+            "call to `{}` in module `{}` is unsupported because `{}` has type `unknown`",
+            callee,
+            node.module_path.display(),
+            callee
+        ),
+    );
+}
+
 pub(super) fn plain_dataclass_field_specifier_call(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -2172,6 +2355,115 @@ pub(super) fn name_is_unknown_boundary(
     name_is_unknown_boundary_with_context(context, node, nodes, None, None, usize::MAX, name)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn name_has_contextual_local_binding(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    line: usize,
+    name: &str,
+) -> bool {
+    if current_owner_name.is_none() {
+        return false;
+    }
+    resolve_scope_param_semantic_type(node, current_owner_name, current_owner_type_name, name)
+        .is_some()
+        || source_scope_param_semantic_type_with_context(
+            context,
+            node,
+            current_owner_name,
+            current_owner_type_name,
+            name,
+        )
+        .is_some()
+        || resolve_exception_binding_semantic_type(
+            node,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            name,
+        )
+        .is_some()
+        || resolve_for_loop_target_semantic_type_with_options(
+            node,
+            nodes,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            name,
+            context.assignability_options(),
+        )
+        .is_some()
+        || resolve_with_target_name_semantic_type_with_options(
+            node,
+            nodes,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            name,
+            context.assignability_options(),
+        )
+        .is_some()
+        || resolve_local_assignment_reference_semantic_type_with_options(
+            node,
+            nodes,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            name,
+            context.assignability_options(),
+        )
+        .is_some()
+}
+
+fn source_param_semantic_type(param: &typepython_syntax::DirectFunctionParamSite) -> SemanticType {
+    semantic_type_from_direct_param_site(param)
+        .unwrap_or_else(|| SemanticType::Name(String::from("dynamic")))
+}
+
+fn source_scope_param_semantic_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    name: &str,
+) -> Option<SemanticType> {
+    let owner_name = current_owner_name?;
+    let source_text = context.load_source_text(node)?;
+    let metadata = typepython_syntax::collect_module_surface_metadata(&source_text);
+    if let Some(owner_type_name) = current_owner_type_name {
+        return metadata
+            .direct_method_signatures
+            .iter()
+            .find(|signature| {
+                signature.owner_type_name == owner_type_name && signature.name == owner_name
+            })
+            .map(|signature| match signature.method_kind {
+                typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
+                    signature.params.as_slice()
+                }
+                typepython_syntax::MethodKind::Instance
+                | typepython_syntax::MethodKind::Class
+                | typepython_syntax::MethodKind::PropertySetter => {
+                    signature.params.get(1..).unwrap_or_default()
+                }
+            })
+            .and_then(|params| params.iter().find(|param| param.name == name))
+            .map(source_param_semantic_type);
+    }
+    metadata
+        .direct_function_signatures
+        .iter()
+        .find(|signature| signature.name == owner_name)
+        .and_then(|signature| signature.params.iter().find(|param| param.name == name))
+        .map(source_param_semantic_type)
+}
+
 pub(super) fn name_is_unknown_boundary_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -2183,7 +2475,26 @@ pub(super) fn name_is_unknown_boundary_with_context(
 ) -> bool {
     if resolve_typing_callable_signature(name).is_some()
         || resolve_builtin_return_type(name).is_some()
-        || matches!(name, "eval" | "exec" | "setattr" | "delattr")
+        || matches!(
+            name,
+            "eval" | "exec" | "setattr" | "delattr" | "isinstance" | "framework_transform"
+        )
+    {
+        return false;
+    }
+
+    let has_contextual_local_binding = name_has_contextual_local_binding(
+        context,
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        line,
+        name,
+    );
+    if !has_contextual_local_binding
+        && (resolve_direct_function(node, nodes, name).is_some()
+            || resolve_direct_base(nodes, node, name).is_some())
     {
         return false;
     }
@@ -2202,20 +2513,14 @@ pub(super) fn name_is_unknown_boundary_with_context(
         return semantic_type_is_unknown(&resolved);
     }
 
-    if resolve_direct_function(node, nodes, name).is_some()
-        || resolve_direct_base(nodes, node, name).is_some()
-        || resolve_module_level_assignment_reference_semantic_type(node, nodes, None, usize::MAX, name)
-            .is_some()
-        || node.declarations.iter().any(|declaration| {
-            declaration.owner.is_none()
-                && declaration.kind == DeclarationKind::Value
-                && declaration.name == name
-                && declaration_value_annotation_semantic_type(declaration).is_some_and(|annotation| {
-                    !matches!(annotation.strip_annotated(), SemanticType::Name(name) if name == "unknown")
-                })
-        })
-    {
-        return false;
+    if let Some(resolved) = source_scope_param_semantic_type_with_context(
+        context,
+        node,
+        current_owner_name,
+        current_owner_type_name,
+        name,
+    ) {
+        return semantic_type_is_unknown(&resolved);
     }
 
     if let Some((head, _)) = name.split_once('.')

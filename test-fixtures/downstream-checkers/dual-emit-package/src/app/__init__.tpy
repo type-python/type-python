@@ -9,18 +9,14 @@ class User:
     name: str
 
 
-class Response:
-    content: bytes
-
-
 class Client:
-    def get(self, path: str) -> Response:
-        return Response()
+    def get(self, path: str) -> bytes:
+        return b""
 
 
 class AsyncClient:
-    async def get(self, path: str) -> Response:
-        return Response()
+    async def get(self, path: str) -> bytes:
+        return b""
 
 
 def decode_user(payload: bytes) -> User:
@@ -29,5 +25,5 @@ def decode_user(payload: bytes) -> User:
 
 @dual_emit
 async def fetch_user(client: AsyncClient, user_id: str) -> User:
-    response = await client.get(f"/users/{user_id}")
-    return decode_user(response.content)
+    payload = await client.get(f"/users/{user_id}")
+    return decode_user(payload)

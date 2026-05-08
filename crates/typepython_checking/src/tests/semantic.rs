@@ -855,6 +855,69 @@ fn check_accepts_local_parameter_when_module_value_is_unknown() {
 }
 
 #[test]
+fn check_reports_unknown_member_and_method_expression_positions() {
+    let result = check_temp_typepython_source(concat!(
+        "def takes(value: object) -> None:\n",
+        "    ...\n\n",
+        "def run(value: unknown) -> object:\n",
+        "    takes(value.name)\n",
+        "    takes(value.method())\n",
+        "    return value.name\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `name`"), "{rendered}");
+    assert!(rendered.contains("method call `value.method`"), "{rendered}");
+    assert!(rendered.contains("`value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_typed_member_and_method_expression_positions() {
+    let result = check_temp_typepython_source(concat!(
+        "class Client:\n",
+        "    name: str\n",
+        "    def get(self) -> str:\n",
+        "        return self.name\n\n",
+        "def takes(value: object) -> None:\n",
+        "    ...\n\n",
+        "def run(client: Client) -> object:\n",
+        "    takes(client.name)\n",
+        "    takes(client.get())\n",
+        "    return client.name\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4003"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_builtin_iter_direct_call() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(items: list[int]) -> object:\n",
+        "    return iter(items)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4003"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_attribute_assignment_and_deletion() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(value: unknown) -> None:\n",
+        "    value.name = 1\n",
+        "    del value.name\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("attribute assignment `value.name`"), "{rendered}");
+    assert!(rendered.contains("attribute deletion `value.name`"), "{rendered}");
+    assert!(rendered.contains("`value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_unknown_subscript_and_arithmetic_after_explicit_cast() {
     let result = check_temp_typepython_source(concat!(
         "from typing import cast\n\n",
@@ -1332,6 +1395,7 @@ fn check_accepts_dual_emit_decorator_as_typepython_lowering_marker() {
 
     let rendered = result.diagnostics.as_text();
     assert!(!rendered.contains("TPY4001"), "{rendered}");
+    assert!(!rendered.contains("TPY4003"), "{rendered}");
 }
 
 #[test]
