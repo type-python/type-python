@@ -2248,6 +2248,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
             collect_expression_use_sites_from_statement_exprs(
                 source,
                 stmt,
+                line,
                 owner_name,
                 owner_type_name,
                 sites,
@@ -2398,16 +2399,18 @@ pub(super) fn collect_expression_use_sites_in_suite(
 fn collect_expression_use_sites_from_statement_exprs(
     source: &str,
     stmt: &Stmt,
+    line: usize,
     owner_name: Option<&str>,
     owner_type_name: Option<&str>,
     sites: &mut Vec<ExpressionUseSite>,
 ) {
     match stmt {
-        Stmt::Expr(expr) => collect_expression_use_sites_in_expr(
+        Stmt::Expr(expr) => collect_expression_use_sites_in_expr_with_line(
             source,
             &expr.value,
             owner_name,
             owner_type_name,
+            Some(line),
             sites,
         ),
         Stmt::FunctionDef(function) => {
@@ -2457,164 +2460,182 @@ fn collect_expression_use_sites_from_statement_exprs(
         }
         Stmt::Assign(assign) => {
             for target in &assign.targets {
-                collect_expression_use_sites_in_expr(
+                collect_expression_use_sites_in_expr_with_line(
                     source,
                     target,
                     owner_name,
                     owner_type_name,
+                    Some(line),
                     sites,
                 );
             }
-            collect_expression_use_sites_in_expr(
+            collect_expression_use_sites_in_expr_with_line(
                 source,
                 &assign.value,
                 owner_name,
                 owner_type_name,
+                Some(line),
                 sites,
             );
         }
         Stmt::AnnAssign(assign) => {
-            collect_expression_use_sites_in_expr(
+            collect_expression_use_sites_in_expr_with_line(
                 source,
                 &assign.target,
                 owner_name,
                 owner_type_name,
+                Some(line),
                 sites,
             );
             if let Some(value) = assign.value.as_deref() {
-                collect_expression_use_sites_in_expr(
+                collect_expression_use_sites_in_expr_with_line(
                     source,
                     value,
                     owner_name,
                     owner_type_name,
+                    Some(line),
                     sites,
                 );
             }
         }
         Stmt::AugAssign(assign) => {
-            collect_expression_use_sites_in_expr(
+            collect_expression_use_sites_in_expr_with_line(
                 source,
                 &assign.target,
                 owner_name,
                 owner_type_name,
+                Some(line),
                 sites,
             );
-            collect_expression_use_sites_in_expr(
+            collect_expression_use_sites_in_expr_with_line(
                 source,
                 &assign.value,
                 owner_name,
                 owner_type_name,
+                Some(line),
                 sites,
             );
         }
         Stmt::Return(return_stmt) => {
             if let Some(value) = return_stmt.value.as_deref() {
-                collect_expression_use_sites_in_expr(
+                collect_expression_use_sites_in_expr_with_line(
                     source,
                     value,
                     owner_name,
                     owner_type_name,
+                    Some(line),
                     sites,
                 );
             }
         }
-        Stmt::If(if_stmt) => collect_guard_expression_use_sites_in_expr(
+        Stmt::If(if_stmt) => collect_guard_expression_use_sites_in_expr_with_line(
             source,
             &if_stmt.test,
             owner_name,
             owner_type_name,
+            Some(line),
             sites,
         ),
         Stmt::Assert(assert_stmt) => {
-            collect_guard_expression_use_sites_in_expr(
+            collect_guard_expression_use_sites_in_expr_with_line(
                 source,
                 &assert_stmt.test,
                 owner_name,
                 owner_type_name,
+                Some(line),
                 sites,
             );
             if let Some(message) = assert_stmt.msg.as_deref() {
-                collect_expression_use_sites_in_expr(
+                collect_expression_use_sites_in_expr_with_line(
                     source,
                     message,
                     owner_name,
                     owner_type_name,
+                    Some(line),
                     sites,
                 );
             }
         }
-        Stmt::While(while_stmt) => collect_guard_expression_use_sites_in_expr(
+        Stmt::While(while_stmt) => collect_guard_expression_use_sites_in_expr_with_line(
             source,
             &while_stmt.test,
             owner_name,
             owner_type_name,
+            Some(line),
             sites,
         ),
         Stmt::Match(match_stmt) => {
-            collect_expression_use_sites_in_expr(
+            collect_expression_use_sites_in_expr_with_line(
                 source,
                 &match_stmt.subject,
                 owner_name,
                 owner_type_name,
+                Some(line),
                 sites,
             );
             for case in &match_stmt.cases {
                 if let Some(guard) = case.guard.as_deref() {
-                    collect_guard_expression_use_sites_in_expr(
+                    collect_guard_expression_use_sites_in_expr_with_line(
                         source,
                         guard,
                         owner_name,
                         owner_type_name,
+                        Some(offset_to_line_column(source, guard.range().start().to_usize()).0),
                         sites,
                     );
                 }
             }
         }
-        Stmt::For(for_stmt) => collect_expression_use_sites_in_expr(
+        Stmt::For(for_stmt) => collect_expression_use_sites_in_expr_with_line(
             source,
             &for_stmt.iter,
             owner_name,
             owner_type_name,
+            Some(line),
             sites,
         ),
         Stmt::With(with_stmt) => {
             for item in &with_stmt.items {
-                collect_expression_use_sites_in_expr(
+                collect_expression_use_sites_in_expr_with_line(
                     source,
                     &item.context_expr,
                     owner_name,
                     owner_type_name,
+                    Some(line),
                     sites,
                 );
             }
         }
         Stmt::Raise(raise_stmt) => {
             if let Some(exception) = raise_stmt.exc.as_deref() {
-                collect_expression_use_sites_in_expr(
+                collect_expression_use_sites_in_expr_with_line(
                     source,
                     exception,
                     owner_name,
                     owner_type_name,
+                    Some(line),
                     sites,
                 );
             }
             if let Some(cause) = raise_stmt.cause.as_deref() {
-                collect_expression_use_sites_in_expr(
+                collect_expression_use_sites_in_expr_with_line(
                     source,
                     cause,
                     owner_name,
                     owner_type_name,
+                    Some(line),
                     sites,
                 );
             }
         }
         Stmt::Delete(delete_stmt) => {
             for target in &delete_stmt.targets {
-                collect_expression_use_sites_in_expr(
+                collect_expression_use_sites_in_expr_with_line(
                     source,
                     target,
                     owner_name,
                     owner_type_name,
+                    Some(line),
                     sites,
                 );
             }
@@ -2683,11 +2704,12 @@ fn collect_expression_use_sites_in_parameter_default_exprs(
     }
 }
 
-fn collect_guard_expression_use_sites_in_expr(
+fn collect_guard_expression_use_sites_in_expr_with_line(
     source: &str,
     expr: &Expr,
     owner_name: Option<&str>,
     owner_type_name: Option<&str>,
+    line_override: Option<usize>,
     sites: &mut Vec<ExpressionUseSite>,
 ) {
     let mut collector = ExpressionUseSiteCollector {
@@ -2695,6 +2717,7 @@ fn collect_guard_expression_use_sites_in_expr(
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
         suppressed_names: std::collections::BTreeSet::new(),
+        line_override,
         sites,
     };
     collector.visit_guard_expr(expr);
@@ -2707,11 +2730,30 @@ fn collect_expression_use_sites_in_expr(
     owner_type_name: Option<&str>,
     sites: &mut Vec<ExpressionUseSite>,
 ) {
+    collect_expression_use_sites_in_expr_with_line(
+        source,
+        expr,
+        owner_name,
+        owner_type_name,
+        None,
+        sites,
+    );
+}
+
+fn collect_expression_use_sites_in_expr_with_line(
+    source: &str,
+    expr: &Expr,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    line_override: Option<usize>,
+    sites: &mut Vec<ExpressionUseSite>,
+) {
     let mut collector = ExpressionUseSiteCollector {
         source,
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
         suppressed_names: std::collections::BTreeSet::new(),
+        line_override,
         sites,
     };
     collector.visit_expr(expr);
@@ -2722,6 +2764,7 @@ struct ExpressionUseSiteCollector<'source, 'sites> {
     owner_name: Option<String>,
     owner_type_name: Option<String>,
     suppressed_names: std::collections::BTreeSet<String>,
+    line_override: Option<usize>,
     sites: &'sites mut Vec<ExpressionUseSite>,
 }
 
@@ -2746,7 +2789,9 @@ impl ExpressionUseSiteCollector<'_, '_> {
             owner_type_name: self.owner_type_name.clone(),
             suppressed_names: self.suppressed_names.iter().cloned().collect(),
             value,
-            line: offset_to_line_column(self.source, expr.range().start().to_usize()).0,
+            line: self.line_override.unwrap_or_else(|| {
+                offset_to_line_column(self.source, expr.range().start().to_usize()).0
+            }),
         });
     }
 

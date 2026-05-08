@@ -624,6 +624,26 @@ fn check_reports_unknown_call_argument_operations_with_local_context() {
 }
 
 #[test]
+fn check_deduplicates_unknown_multiline_expression_operations() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "def takes(value: object) -> None:\n",
+        "    ...\n\n",
+        "item = (\n",
+        "    get_value()[0]\n",
+        ")\n\n",
+        "takes(\n",
+        "    get_value()[0]\n",
+        ")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert_eq!(rendered.matches("subscript access").count(), 2, "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_truthiness_and_boolean_operations() {
     let result = check_temp_typepython_source(concat!(
         "def get_value() -> unknown:\n",
