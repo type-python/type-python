@@ -2356,14 +2356,77 @@ fn collect_expression_use_sites_from_statement_exprs(
             owner_type_name,
             sites,
         ),
-        Stmt::Assign(assign) => collect_expression_use_sites_in_expr(
-            source,
-            &assign.value,
-            owner_name,
-            owner_type_name,
-            sites,
-        ),
+        Stmt::FunctionDef(function) => {
+            collect_expression_use_sites_in_decorator_exprs(
+                source,
+                &function.decorator_list,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
+            collect_expression_use_sites_in_parameter_default_exprs(
+                source,
+                &function.parameters,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
+        }
+        Stmt::ClassDef(class_def) => {
+            collect_expression_use_sites_in_decorator_exprs(
+                source,
+                &class_def.decorator_list,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
+            if let Some(arguments) = class_def.arguments.as_ref() {
+                for argument in &arguments.args {
+                    collect_expression_use_sites_in_expr(
+                        source,
+                        argument,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+                for keyword in &arguments.keywords {
+                    collect_expression_use_sites_in_expr(
+                        source,
+                        &keyword.value,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+            }
+        }
+        Stmt::Assign(assign) => {
+            for target in &assign.targets {
+                collect_expression_use_sites_in_expr(
+                    source,
+                    target,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            collect_expression_use_sites_in_expr(
+                source,
+                &assign.value,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
+        }
         Stmt::AnnAssign(assign) => {
+            collect_expression_use_sites_in_expr(
+                source,
+                &assign.target,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
             if let Some(value) = assign.value.as_deref() {
                 collect_expression_use_sites_in_expr(
                     source,
@@ -2374,13 +2437,22 @@ fn collect_expression_use_sites_from_statement_exprs(
                 );
             }
         }
-        Stmt::AugAssign(assign) => collect_expression_use_sites_in_expr(
-            source,
-            &assign.value,
-            owner_name,
-            owner_type_name,
-            sites,
-        ),
+        Stmt::AugAssign(assign) => {
+            collect_expression_use_sites_in_expr(
+                source,
+                &assign.target,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
+            collect_expression_use_sites_in_expr(
+                source,
+                &assign.value,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
+        }
         Stmt::Return(return_stmt) => {
             if let Some(value) = return_stmt.value.as_deref() {
                 collect_expression_use_sites_in_expr(
@@ -2399,13 +2471,24 @@ fn collect_expression_use_sites_from_statement_exprs(
             owner_type_name,
             sites,
         ),
-        Stmt::Assert(assert_stmt) => collect_guard_expression_use_sites_in_expr(
-            source,
-            &assert_stmt.test,
-            owner_name,
-            owner_type_name,
-            sites,
-        ),
+        Stmt::Assert(assert_stmt) => {
+            collect_guard_expression_use_sites_in_expr(
+                source,
+                &assert_stmt.test,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
+            if let Some(message) = assert_stmt.msg.as_deref() {
+                collect_expression_use_sites_in_expr(
+                    source,
+                    message,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+        }
         Stmt::While(while_stmt) => collect_guard_expression_use_sites_in_expr(
             source,
             &while_stmt.test,
@@ -2438,7 +2521,98 @@ fn collect_expression_use_sites_from_statement_exprs(
                 );
             }
         }
+        Stmt::Raise(raise_stmt) => {
+            if let Some(exception) = raise_stmt.exc.as_deref() {
+                collect_expression_use_sites_in_expr(
+                    source,
+                    exception,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            if let Some(cause) = raise_stmt.cause.as_deref() {
+                collect_expression_use_sites_in_expr(
+                    source,
+                    cause,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+        }
+        Stmt::Delete(delete_stmt) => {
+            for target in &delete_stmt.targets {
+                collect_expression_use_sites_in_expr(
+                    source,
+                    target,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+        }
         _ => {}
+    }
+}
+
+fn collect_expression_use_sites_in_decorator_exprs(
+    source: &str,
+    decorators: &[ruff_python_ast::Decorator],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    sites: &mut Vec<ExpressionUseSite>,
+) {
+    for decorator in decorators {
+        collect_expression_use_sites_in_expr(
+            source,
+            &decorator.expression,
+            owner_name,
+            owner_type_name,
+            sites,
+        );
+    }
+}
+
+fn collect_expression_use_sites_in_parameter_default_exprs(
+    source: &str,
+    parameters: &ruff_python_ast::Parameters,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    sites: &mut Vec<ExpressionUseSite>,
+) {
+    for parameter in &parameters.posonlyargs {
+        if let Some(default) = parameter.default() {
+            collect_expression_use_sites_in_expr(
+                source,
+                default,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
+        }
+    }
+    for parameter in &parameters.args {
+        if let Some(default) = parameter.default() {
+            collect_expression_use_sites_in_expr(
+                source,
+                default,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
+        }
+    }
+    for parameter in &parameters.kwonlyargs {
+        if let Some(default) = parameter.default() {
+            collect_expression_use_sites_in_expr(
+                source,
+                default,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
+        }
     }
 }
 

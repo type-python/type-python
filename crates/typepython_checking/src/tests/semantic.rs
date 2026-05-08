@@ -541,6 +541,28 @@ fn check_reports_unknown_guard_expression_operations_from_real_parse_pipeline() 
 }
 
 #[test]
+fn check_reports_unknown_definition_header_and_raise_expression_operations() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "def decorator(value: object):\n",
+        "    def wrap(fn):\n",
+        "        return fn\n",
+        "    return wrap\n\n",
+        "@decorator(get_value()[0])\n",
+        "def decorated(default: object = get_value()[0]) -> None:\n",
+        "    raise get_value()[0]\n\n",
+        "class Derived(get_value()[0]):\n",
+        "    pass\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.matches("subscript access").count() >= 4, "{rendered}");
+    assert!(rendered.contains("`get_value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_call_argument_operations_with_local_context() {
     let result = check_temp_typepython_source(concat!(
         "def get_value() -> unknown:\n",
