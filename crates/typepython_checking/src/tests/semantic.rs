@@ -488,6 +488,20 @@ fn check_reports_unknown_arithmetic_from_real_parse_pipeline() {
 }
 
 #[test]
+fn check_reports_unknown_extended_binary_operator_text() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(value: unknown) -> None:\n",
+        "    _pow = value ** 2\n",
+        "    _bit = value | 1\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("binary operation `**`"), "{rendered}");
+    assert!(rendered.contains("binary operation `|`"), "{rendered}");
+    assert!(!rendered.contains("binary operation ``"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_bare_expression_operations_from_real_parse_pipeline() {
     let result = check_temp_typepython_source(concat!(
         "def get_value() -> unknown:\n",

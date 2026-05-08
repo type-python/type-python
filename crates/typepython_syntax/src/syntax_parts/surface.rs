@@ -974,15 +974,7 @@ pub struct TypedDictLiteralEntry {
 }
 
 pub(super) fn direct_operator_text(operator: ruff_python_ast::Operator) -> String {
-    match operator {
-        ruff_python_ast::Operator::Add => String::from("+"),
-        ruff_python_ast::Operator::Sub => String::from("-"),
-        ruff_python_ast::Operator::Mult => String::from("*"),
-        ruff_python_ast::Operator::Div => String::from("/"),
-        ruff_python_ast::Operator::FloorDiv => String::from("//"),
-        ruff_python_ast::Operator::Mod => String::from("%"),
-        _ => String::new(),
-    }
+    operator.as_str().to_owned()
 }
 
 /// TypedDict literal occurrence annotated with its target type.
