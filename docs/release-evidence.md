@@ -7,6 +7,13 @@ local evidence is a maintainer preflight, not a replacement for the CI matrix.
 
 ## 2026-05-08 macOS Local RC Preflight
 
+Scope:
+
+- This entry records a local RC preflight snapshot from 2026-05-08.
+- It is historical evidence and does not certify later commits on this branch.
+- Before publishing, rerun the release gate on the final release commit and record
+  the commit SHA with the retained CI `beta-release-gate` job.
+
 Environment:
 
 - Host: macOS 15.7.5 (24G624), Apple Silicon
