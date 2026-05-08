@@ -2392,21 +2392,21 @@ fn collect_expression_use_sites_from_statement_exprs(
                 );
             }
         }
-        Stmt::If(if_stmt) => collect_expression_use_sites_in_expr(
+        Stmt::If(if_stmt) => collect_guard_expression_use_sites_in_expr(
             source,
             &if_stmt.test,
             owner_name,
             owner_type_name,
             sites,
         ),
-        Stmt::Assert(assert_stmt) => collect_expression_use_sites_in_expr(
+        Stmt::Assert(assert_stmt) => collect_guard_expression_use_sites_in_expr(
             source,
             &assert_stmt.test,
             owner_name,
             owner_type_name,
             sites,
         ),
-        Stmt::While(while_stmt) => collect_expression_use_sites_in_expr(
+        Stmt::While(while_stmt) => collect_guard_expression_use_sites_in_expr(
             source,
             &while_stmt.test,
             owner_name,
@@ -2442,6 +2442,26 @@ fn collect_expression_use_sites_from_statement_exprs(
     }
 }
 
+fn collect_guard_expression_use_sites_in_expr(
+    source: &str,
+    expr: &Expr,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    sites: &mut Vec<ExpressionUseSite>,
+) {
+    sites.push(ExpressionUseSite {
+        owner_name: owner_name.map(str::to_owned),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        value: synthetic_operation_metadata(
+            "truthiness",
+            extract_direct_expr_metadata(source, expr),
+            None,
+        ),
+        line: offset_to_line_column(source, expr.range().start().to_usize()).0,
+    });
+    collect_expression_use_sites_in_expr(source, expr, owner_name, owner_type_name, sites);
+}
+
 fn collect_expression_use_sites_in_expr(
     source: &str,
     expr: &Expr,
@@ -2467,17 +2487,105 @@ struct ExpressionUseSiteCollector<'source, 'sites> {
 
 impl<'source, 'sites, 'ast> visitor::Visitor<'ast> for ExpressionUseSiteCollector<'source, 'sites> {
     fn visit_expr(&mut self, expr: &'ast Expr) {
-        if matches!(expr, Expr::Subscript(_) | Expr::BinOp(_)) {
+        for value in expression_use_site_metadata(self.source, expr) {
             self.sites.push(ExpressionUseSite {
                 owner_name: self.owner_name.clone(),
                 owner_type_name: self.owner_type_name.clone(),
-                value: extract_direct_expr_metadata(self.source, expr),
+                value,
                 line: offset_to_line_column(self.source, expr.range().start().to_usize()).0,
             });
         }
 
         visitor::walk_expr(self, expr);
     }
+}
+
+fn expression_use_site_metadata(source: &str, expr: &Expr) -> Vec<DirectExprMetadata> {
+    match expr {
+        Expr::Subscript(_) | Expr::BinOp(_) => vec![extract_direct_expr_metadata(source, expr)],
+        Expr::BoolOp(bool_op) => bool_op
+            .values
+            .iter()
+            .map(|value| {
+                synthetic_operation_metadata(
+                    match bool_op.op {
+                        ruff_python_ast::BoolOp::And => "and",
+                        ruff_python_ast::BoolOp::Or => "or",
+                    },
+                    extract_direct_expr_metadata(source, value),
+                    None,
+                )
+            })
+            .collect(),
+        Expr::UnaryOp(unary) => unary_operator_text(unary.op)
+            .map(|operator| {
+                vec![synthetic_operation_metadata(
+                    operator,
+                    extract_direct_expr_metadata(source, &unary.operand),
+                    None,
+                )]
+            })
+            .unwrap_or_default(),
+        Expr::Compare(compare) => compare
+            .ops
+            .iter()
+            .zip(compare.comparators.iter())
+            .scan(compare.left.as_ref(), |left, (operator, right)| {
+                let metadata = (!compare_operator_is_identity(*operator)).then(|| {
+                    synthetic_operation_metadata(
+                        compare_operator_text(*operator),
+                        extract_direct_expr_metadata(source, left),
+                        Some(extract_direct_expr_metadata(source, right)),
+                    )
+                });
+                *left = right;
+                Some(metadata)
+            })
+            .flatten()
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn synthetic_operation_metadata(
+    operator: impl Into<String>,
+    left: DirectExprMetadata,
+    right: Option<DirectExprMetadata>,
+) -> DirectExprMetadata {
+    DirectExprMetadata {
+        value_binop_left: Some(Box::new(left)),
+        value_binop_right: right.map(Box::new),
+        value_binop_operator: Some(operator.into()),
+        ..DirectExprMetadata::empty()
+    }
+}
+
+fn unary_operator_text(operator: ruff_python_ast::UnaryOp) -> Option<&'static str> {
+    match operator {
+        ruff_python_ast::UnaryOp::Not => Some("not"),
+        ruff_python_ast::UnaryOp::UAdd => Some("+"),
+        ruff_python_ast::UnaryOp::USub => Some("-"),
+        ruff_python_ast::UnaryOp::Invert => Some("~"),
+    }
+}
+
+fn compare_operator_text(operator: ruff_python_ast::CmpOp) -> &'static str {
+    match operator {
+        ruff_python_ast::CmpOp::Eq => "==",
+        ruff_python_ast::CmpOp::NotEq => "!=",
+        ruff_python_ast::CmpOp::Lt => "<",
+        ruff_python_ast::CmpOp::LtE => "<=",
+        ruff_python_ast::CmpOp::Gt => ">",
+        ruff_python_ast::CmpOp::GtE => ">=",
+        ruff_python_ast::CmpOp::In => "in",
+        ruff_python_ast::CmpOp::NotIn => "not in",
+        ruff_python_ast::CmpOp::Is => "is",
+        ruff_python_ast::CmpOp::IsNot => "is not",
+    }
+}
+
+fn compare_operator_is_identity(operator: ruff_python_ast::CmpOp) -> bool {
+    matches!(operator, ruff_python_ast::CmpOp::Is | ruff_python_ast::CmpOp::IsNot)
 }
 
 pub(super) fn collect_typed_dict_literal_sites_in_suite(

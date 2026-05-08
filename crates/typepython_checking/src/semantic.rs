@@ -1721,10 +1721,9 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
     }
 
     if let Some(operator) = metadata.value_binop_operator.as_deref() {
-        for (side, operand) in [
-            ("left", metadata.value_binop_left.as_deref()),
-            ("right", metadata.value_binop_right.as_deref()),
-        ] {
+        let single_operand_operation = direct_expr_operator_is_single_operand(operator)
+            || metadata.value_binop_right.is_none();
+        for (side, operand) in direct_expr_operator_operands(operator, metadata) {
             if let Some(operand) = operand
                 && direct_expr_metadata_resolves_to_unknown(
                     context,
@@ -1743,8 +1742,8 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
                     seen,
                     format!("binop:{line}:{operator}:{side}:{label}"),
                     format!(
-                        "binary operation `{}` in module `{}` is unsupported because the {} operand `{}` has type `unknown`",
-                        operator,
+                        "{} in module `{}` is unsupported because the {} `{}` has type `unknown`",
+                        direct_expr_operation_description(operator, single_operand_operation),
                         node.module_path.display(),
                         side,
                         label,
@@ -1892,6 +1891,37 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
                 seen,
             );
         }
+    }
+}
+
+fn direct_expr_operator_operands<'a>(
+    operator: &str,
+    metadata: &'a typepython_syntax::DirectExprMetadata,
+) -> Vec<(&'static str, Option<&'a typepython_syntax::DirectExprMetadata>)> {
+    if direct_expr_operator_is_single_operand(operator) || metadata.value_binop_right.is_none() {
+        vec![("operand", metadata.value_binop_left.as_deref())]
+    } else {
+        vec![
+            ("left operand", metadata.value_binop_left.as_deref()),
+            ("right operand", metadata.value_binop_right.as_deref()),
+        ]
+    }
+}
+
+fn direct_expr_operator_is_single_operand(operator: &str) -> bool {
+    matches!(operator, "truthiness" | "not" | "~")
+}
+
+fn direct_expr_operation_description(operator: &str, single_operand_operation: bool) -> String {
+    match operator {
+        "truthiness" => String::from("truthiness check"),
+        "and" | "or" => format!("boolean operation `{operator}`"),
+        "not" | "~" => format!("unary operation `{operator}`"),
+        "==" | "!=" | "<" | "<=" | ">" | ">=" | "in" | "not in" => {
+            format!("comparison `{operator}`")
+        }
+        "+" | "-" if single_operand_operation => format!("unary operation `{operator}`"),
+        _ => format!("binary operation `{operator}`"),
     }
 }
 

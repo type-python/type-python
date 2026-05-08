@@ -163,9 +163,14 @@ x: unknown = get()
 x.method()         # TPY4003: Cannot access member 'method' on type 'unknown'
 x()                # TPY4003: Cannot call type 'unknown'
 x[0]               # TPY4003: Cannot index type 'unknown'
+if x:              # TPY4003: Cannot use 'unknown' for truthiness
+x == 1             # TPY4003: Cannot compare 'unknown' without narrowing
 ```
 
-**Fix:** Narrow with `isinstance` or a type guard before use.
+**Allowed narrowing forms:** `x is None`, `x is not None`, `isinstance(x, T)`, documented
+type guards, or an explicit `cast`.
+
+**Fix:** Narrow with an allowed guard or cast before ordinary value use.
 
 #### TPY4004 -- Duplicate declaration
 

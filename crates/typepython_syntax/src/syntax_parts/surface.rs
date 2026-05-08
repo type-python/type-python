@@ -913,15 +913,9 @@ pub struct DirectExprMetadata {
 
 impl DirectExprMetadata {
     #[must_use]
-    pub fn rendered_value_type(&self) -> Option<String> {
-        self.value_type_expr.as_ref().map(TypeExpr::render)
-    }
-
-    #[must_use]
-    pub fn from_type_text(text: impl Into<String>) -> Self {
-        let value_type = text.into();
+    pub fn empty() -> Self {
         Self {
-            value_type_expr: TypeExpr::parse(&value_type),
+            value_type_expr: None,
             is_awaited: false,
             value_callee: None,
             value_name: None,
@@ -949,6 +943,17 @@ impl DirectExprMetadata {
             value_set_elements: None,
             value_dict_entries: None,
         }
+    }
+
+    #[must_use]
+    pub fn rendered_value_type(&self) -> Option<String> {
+        self.value_type_expr.as_ref().map(TypeExpr::render)
+    }
+
+    #[must_use]
+    pub fn from_type_text(text: impl Into<String>) -> Self {
+        let value_type = text.into();
+        Self { value_type_expr: TypeExpr::parse(&value_type), ..Self::empty() }
     }
 }
 

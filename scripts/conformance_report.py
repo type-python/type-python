@@ -84,6 +84,28 @@ SEMANTIC_SUBRULE_EVIDENCE: tuple[SemanticSubRule, ...] = (
     ),
     SemanticSubRule(
         "unknown",
+        "bare, guard, and call-argument expression use sites diagnose `unknown` operations",
+        (
+            "cargo test -p typepython-checking check_reports_unknown_bare_expression_operations_from_real_parse_pipeline",
+            "cargo test -p typepython-checking check_reports_unknown_guard_expression_operations_from_real_parse_pipeline",
+            "cargo test -p typepython-checking check_reports_unknown_call_argument_operations_with_local_context",
+        ),
+    ),
+    SemanticSubRule(
+        "unknown",
+        "truthiness, boolean, comparison, membership, and unary operations on `unknown` are diagnosed",
+        (
+            "cargo test -p typepython-checking check_reports_unknown_truthiness_and_boolean_operations",
+            "cargo test -p typepython-checking check_reports_unknown_comparison_membership_and_unary_operations",
+        ),
+    ),
+    SemanticSubRule(
+        "unknown",
+        "identity and `isinstance` guards are allowed narrowing forms for `unknown`",
+        ("cargo test -p typepython-checking check_accepts_unknown_identity_and_isinstance_guards",),
+    ),
+    SemanticSubRule(
+        "unknown",
         "`unknown` cannot flow into concrete parameters or returns without narrowing",
         (
             "cargo test -p typepython-checking check_reports_unknown_call_argument_to_concrete_parameter",
@@ -332,7 +354,10 @@ RULE_EVIDENCE_PATTERNS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = tu
         (r"typing_extensions|typing semantic|target_python|target version|target-version|compatibility matrix|emit_style|typeshed snapshot|standard-library type source", TEST_EVIDENCE["Target-version compatibility matrix for emitted typing constructs"]),
         (r"no_implicit_dynamic|fallback to `dynamic`|fallback to dynamic", TEST_EVIDENCE["No implicit dynamic fallback"]),
         (r"unknown config keys|configuration schema is closed|unknown top-level tables|unknown keys inside a recognized table", TEST_EVIDENCE["Closed configuration schema"]),
-        (r"unknown.*assign|assign.*unknown|dynamic.*assign|assign.*dynamic|operations involving `unknown`|member access.*unknown", TEST_EVIDENCE["Unknown and dynamic boundary assignability"]),
+        (
+            r"unknown.*assign|assign.*unknown|dynamic.*assign|assign.*dynamic|operations involving `unknown`|value-consuming use of `unknown`|identity checks.*isinstance|explicit casts|member access.*unknown",
+            TEST_EVIDENCE["Unknown and dynamic boundary assignability"],
+        ),
         (r"untyped import|imports =|imported values", TEST_EVIDENCE["Untyped import fallback (`unknown`/`dynamic`)"]),
         (r"strict_nulls|strict null|assignment-compatible with any type except|ordinary member access.*None", TEST_EVIDENCE["Strict null compatibility modes"]),
         (r"diagnostic|compile errors|TPY\d+|severity", TEST_EVIDENCE["Deterministic diagnostics"]),

@@ -546,6 +546,70 @@ fn check_reports_unknown_call_argument_operations_with_local_context() {
 }
 
 #[test]
+fn check_reports_unknown_truthiness_and_boolean_operations() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "def run(value: unknown, other: bool) -> None:\n",
+        "    if value:\n",
+        "        pass\n",
+        "    if get_value():\n",
+        "        pass\n",
+        "    if not value:\n",
+        "        pass\n",
+        "    if value and other:\n",
+        "        pass\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("truthiness check"), "{rendered}");
+    assert!(rendered.contains("unary operation `not`"), "{rendered}");
+    assert!(rendered.contains("boolean operation `and`"), "{rendered}");
+    assert!(rendered.contains("operand `value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("operand `get_value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_comparison_membership_and_unary_operations() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(value: unknown, values: list[int]) -> None:\n",
+        "    _eq = value == 1\n",
+        "    _lt = value < 1\n",
+        "    _in_left = value in values\n",
+        "    _in_right = 1 in value\n",
+        "    _neg = -value\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("comparison `==`"), "{rendered}");
+    assert!(rendered.contains("comparison `<`"), "{rendered}");
+    assert!(rendered.contains("comparison `in`"), "{rendered}");
+    assert!(rendered.contains("unary operation `-`"), "{rendered}");
+    assert!(rendered.contains("left operand `value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("right operand `value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("operand `value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_unknown_identity_and_isinstance_guards() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(value: unknown) -> None:\n",
+        "    if value is None:\n",
+        "        return\n",
+        "    if value is not None:\n",
+        "        pass\n",
+        "    if isinstance(value, int):\n",
+        "        pass\n",
+        "    if not isinstance(value, str):\n",
+        "        pass\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_unknown_subscript_and_arithmetic_after_explicit_cast() {
     let result = check_temp_typepython_source(concat!(
         "from typing import cast\n\n",

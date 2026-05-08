@@ -400,7 +400,11 @@ A property name that is not a valid identifier (e.g., contains spaces) MUST be a
 
 - Any value may be assigned to `unknown`.
 - `unknown` may be assigned only to `unknown`, `dynamic`, and `object`, unless narrowed or cast.
-- Member access, calls, indexing, and arithmetic on `unknown` are **errors** until narrowed.
+- Value-consuming operations on `unknown` are **errors** until narrowed or cast. Core v1 requires
+  diagnostics for member access, direct calls, method calls, indexing, arithmetic, comparisons,
+  membership, truthiness checks, boolean composition, and unary operators.
+- Identity checks (`is`, `is not`), `isinstance`, documented narrowing predicates, and explicit
+  casts are permitted ways to inspect or narrow an `unknown` value.
 - `unknown` SHOULD lower to `object` in emitted `.pyi` when no better external representation exists.
 
 #### 8.1.3 `Never`
@@ -1069,7 +1073,14 @@ Overload resolution proceeds after applicability filtering:
 | `not in`                      | `x not in container` | `bool`                                                                                          |
 | `is`, `is not`                | any                  | `bool`; participate in narrowing (Section 15)                                                   |
 
-Operations involving `dynamic` produce `dynamic`. Operations involving `unknown` MUST be diagnosed unless the `unknown` value has first been narrowed or explicitly cast to a type that supports the operation.
+Operations involving `dynamic` produce `dynamic`. Operations involving `unknown` follow this Core v1 boundary:
+
+- MUST diagnose value-consuming use of `unknown` in arithmetic, ordering, equality, membership,
+  truthiness, `not`, `and`, `or`, numeric unary operators, subscript/indexing, member access,
+  direct calls, and method calls.
+- MUST allow identity checks (`is`, `is not`) and `isinstance` / documented type-guard predicates,
+  because these forms are narrowing operations rather than ordinary value consumption.
+- MUST allow explicit casts; after a cast, the operation is checked against the cast target type.
 
 Short-circuit boolean operators participate in flow analysis. The right-hand operand of `and` and `or` MUST be checked in the branch environment induced by the left-hand operand as defined in Section 15.
 
