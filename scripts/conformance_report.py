@@ -102,7 +102,10 @@ SEMANTIC_SUBRULE_EVIDENCE: tuple[SemanticSubRule, ...] = (
     SemanticSubRule(
         "unknown",
         "identity and `isinstance` guards are allowed narrowing forms for `unknown`",
-        ("cargo test -p typepython-checking check_accepts_unknown_identity_and_isinstance_guards",),
+        (
+            "cargo test -p typepython-checking check_accepts_unknown_identity_and_isinstance_guards",
+            "cargo test -p typepython-checking check_accepts_unknown_boolop_rhs_after_isinstance_narrowing",
+        ),
     ),
     SemanticSubRule(
         "unknown",
