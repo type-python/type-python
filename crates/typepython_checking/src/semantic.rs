@@ -1626,6 +1626,19 @@ pub(super) fn direct_unknown_operation_diagnostics(
             );
         }
     }
+    for expression_site in context.source_facts.expression_use_sites(node) {
+        collect_unknown_direct_expression_operation_diagnostics(
+            context,
+            node,
+            nodes,
+            expression_site.owner_name.as_deref(),
+            expression_site.owner_type_name.as_deref(),
+            expression_site.line,
+            &expression_site.value,
+            &mut diagnostics,
+            &mut seen_expression_operations,
+        );
+    }
 
     diagnostics
 }

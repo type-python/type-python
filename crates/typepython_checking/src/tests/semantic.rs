@@ -488,6 +488,64 @@ fn check_reports_unknown_arithmetic_from_real_parse_pipeline() {
 }
 
 #[test]
+fn check_reports_unknown_bare_expression_operations_from_real_parse_pipeline() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "get_value()[0]\n",
+        "get_value() + 1\n",
+        "1 + get_value()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("subscript access"), "{rendered}");
+    assert!(rendered.contains("binary operation `+`"), "{rendered}");
+    assert!(rendered.contains("left operand `get_value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("right operand `get_value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_guard_expression_operations_from_real_parse_pipeline() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "if get_value()[0]:\n",
+        "    pass\n\n",
+        "assert get_value() + 1\n\n",
+        "while get_value()[0]:\n",
+        "    break\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("subscript access"), "{rendered}");
+    assert!(rendered.contains("binary operation `+`"), "{rendered}");
+    assert!(rendered.contains("left operand `get_value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_call_argument_operations_with_local_context() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "def takes(value: object) -> None:\n",
+        "    ...\n\n",
+        "def run() -> None:\n",
+        "    value: unknown = get_value()\n",
+        "    takes(value[0])\n",
+        "    takes(value + 1)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("subscript access"), "{rendered}");
+    assert!(rendered.contains("`value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("binary operation `+`"), "{rendered}");
+    assert!(rendered.contains("left operand `value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_unknown_subscript_and_arithmetic_after_explicit_cast() {
     let result = check_temp_typepython_source(concat!(
         "from typing import cast\n\n",

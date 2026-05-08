@@ -124,6 +124,20 @@ pub fn collect_direct_call_context_sites(source: &str) -> Vec<DirectCallContextS
 }
 
 #[must_use]
+pub fn collect_expression_use_sites(source: &str) -> Vec<ExpressionUseSite> {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return Vec::new();
+        };
+
+        let mut sites = Vec::new();
+        collect_expression_use_sites_in_suite(&normalized, parsed.suite(), None, None, &mut sites);
+        sites
+    })
+}
+
+#[must_use]
 pub fn collect_nested_direct_call_context_sites(source: &str) -> Vec<DirectCallContextSite> {
     let normalized = normalize_annotated_lambda_source_lossy(source);
     with_source_line_index(&normalized, || {
@@ -2182,6 +2196,288 @@ pub(super) fn direct_call_has_unpacked_kwargs(expr: &Expr) -> Option<bool> {
         return None;
     };
     Some(call.arguments.keywords.iter().any(|keyword| keyword.arg.is_none()))
+}
+
+pub(super) fn collect_expression_use_sites_in_suite(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    sites: &mut Vec<ExpressionUseSite>,
+) {
+    for stmt in suite {
+        collect_expression_use_sites_from_statement_exprs(
+            source,
+            stmt,
+            owner_name,
+            owner_type_name,
+            sites,
+        );
+
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_expression_use_sites_in_suite(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_expression_use_sites_in_suite(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    sites,
+                );
+            }
+            Stmt::Try(try_stmt) => {
+                collect_expression_use_sites_in_suite(
+                    source,
+                    &try_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_expression_use_sites_in_suite(
+                        source,
+                        &handler.body,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+                collect_expression_use_sites_in_suite(
+                    source,
+                    &try_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_expression_use_sites_in_suite(
+                    source,
+                    &try_stmt.finalbody,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::If(if_stmt) => {
+                collect_expression_use_sites_in_suite(
+                    source,
+                    &if_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                for_each_if_false_suite(if_stmt, |suite| {
+                    collect_expression_use_sites_in_suite(
+                        source,
+                        suite,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                });
+            }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_expression_use_sites_in_suite(
+                        source,
+                        &case.body,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+            }
+            Stmt::For(for_stmt) => {
+                collect_expression_use_sites_in_suite(
+                    source,
+                    &for_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_expression_use_sites_in_suite(
+                    source,
+                    &for_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::While(while_stmt) => {
+                collect_expression_use_sites_in_suite(
+                    source,
+                    &while_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_expression_use_sites_in_suite(
+                    source,
+                    &while_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::With(with_stmt) => {
+                collect_expression_use_sites_in_suite(
+                    source,
+                    &with_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_expression_use_sites_from_statement_exprs(
+    source: &str,
+    stmt: &Stmt,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    sites: &mut Vec<ExpressionUseSite>,
+) {
+    match stmt {
+        Stmt::Expr(expr) => collect_expression_use_sites_in_expr(
+            source,
+            &expr.value,
+            owner_name,
+            owner_type_name,
+            sites,
+        ),
+        Stmt::Assign(assign) => collect_expression_use_sites_in_expr(
+            source,
+            &assign.value,
+            owner_name,
+            owner_type_name,
+            sites,
+        ),
+        Stmt::AnnAssign(assign) => {
+            if let Some(value) = assign.value.as_deref() {
+                collect_expression_use_sites_in_expr(
+                    source,
+                    value,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+        }
+        Stmt::AugAssign(assign) => collect_expression_use_sites_in_expr(
+            source,
+            &assign.value,
+            owner_name,
+            owner_type_name,
+            sites,
+        ),
+        Stmt::Return(return_stmt) => {
+            if let Some(value) = return_stmt.value.as_deref() {
+                collect_expression_use_sites_in_expr(
+                    source,
+                    value,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+        }
+        Stmt::If(if_stmt) => collect_expression_use_sites_in_expr(
+            source,
+            &if_stmt.test,
+            owner_name,
+            owner_type_name,
+            sites,
+        ),
+        Stmt::Assert(assert_stmt) => collect_expression_use_sites_in_expr(
+            source,
+            &assert_stmt.test,
+            owner_name,
+            owner_type_name,
+            sites,
+        ),
+        Stmt::While(while_stmt) => collect_expression_use_sites_in_expr(
+            source,
+            &while_stmt.test,
+            owner_name,
+            owner_type_name,
+            sites,
+        ),
+        Stmt::Match(match_stmt) => collect_expression_use_sites_in_expr(
+            source,
+            &match_stmt.subject,
+            owner_name,
+            owner_type_name,
+            sites,
+        ),
+        Stmt::For(for_stmt) => collect_expression_use_sites_in_expr(
+            source,
+            &for_stmt.iter,
+            owner_name,
+            owner_type_name,
+            sites,
+        ),
+        Stmt::With(with_stmt) => {
+            for item in &with_stmt.items {
+                collect_expression_use_sites_in_expr(
+                    source,
+                    &item.context_expr,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_expression_use_sites_in_expr(
+    source: &str,
+    expr: &Expr,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    sites: &mut Vec<ExpressionUseSite>,
+) {
+    let mut collector = ExpressionUseSiteCollector {
+        source,
+        owner_name: owner_name.map(str::to_owned),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        sites,
+    };
+    collector.visit_expr(expr);
+}
+
+struct ExpressionUseSiteCollector<'source, 'sites> {
+    source: &'source str,
+    owner_name: Option<String>,
+    owner_type_name: Option<String>,
+    sites: &'sites mut Vec<ExpressionUseSite>,
+}
+
+impl<'source, 'sites, 'ast> visitor::Visitor<'ast> for ExpressionUseSiteCollector<'source, 'sites> {
+    fn visit_expr(&mut self, expr: &'ast Expr) {
+        if matches!(expr, Expr::Subscript(_) | Expr::BinOp(_)) {
+            self.sites.push(ExpressionUseSite {
+                owner_name: self.owner_name.clone(),
+                owner_type_name: self.owner_type_name.clone(),
+                value: extract_direct_expr_metadata(self.source, expr),
+                line: offset_to_line_column(self.source, expr.range().start().to_usize()).0,
+            });
+        }
+
+        visitor::walk_expr(self, expr);
+    }
 }
 
 pub(super) fn collect_typed_dict_literal_sites_in_suite(

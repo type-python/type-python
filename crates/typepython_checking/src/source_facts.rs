@@ -4,7 +4,7 @@ use typepython_binding::{Declaration, ModuleSurfaceFacts};
 use typepython_graph::ModuleNode;
 use typepython_syntax::{
     ConditionalReturnSite, DataclassTransformModuleInfo, DecoratorTransformModuleInfo,
-    DirectCallContextSite, DirectFunctionParamSite, DirectMethodSignatureSite,
+    DirectCallContextSite, DirectFunctionParamSite, DirectMethodSignatureSite, ExpressionUseSite,
     FrameworkTransformModuleInfo, FrozenFieldMutationSite, ModuleSurfaceMetadata, SourceFile,
     TypedDictClassMetadata, TypedDictLiteralSite, TypedDictMutationSite, UnsafeOperationSite,
     UnsupportedDualEmitAsyncConstructSite,
@@ -28,6 +28,7 @@ struct FallbackModuleSourceFacts {
     frozen_field_mutation_sites: Option<Vec<FrozenFieldMutationSite>>,
     unsafe_operation_sites: Option<Vec<UnsafeOperationSite>>,
     direct_call_context_sites: Option<Vec<DirectCallContextSite>>,
+    expression_use_sites: Option<Vec<ExpressionUseSite>>,
     unsafe_capability_ranges: Option<Vec<(usize, usize)>>,
     conditional_return_sites: Option<Vec<ConditionalReturnSite>>,
     unsupported_dual_emit_async_construct_sites: Option<Vec<UnsupportedDualEmitAsyncConstructSite>>,
@@ -148,6 +149,22 @@ impl FallbackModuleSourceFacts {
         }
 
         self.direct_call_context_sites.as_deref().unwrap_or(&[])
+    }
+
+    fn expression_use_sites(
+        &mut self,
+        node: &ModuleNode,
+        source_overrides: Option<&BTreeMap<String, String>>,
+    ) -> &[ExpressionUseSite] {
+        if self.expression_use_sites.is_none() {
+            self.expression_use_sites = Some(
+                self.source_text(node, source_overrides)
+                    .map(typepython_syntax::collect_expression_use_sites)
+                    .unwrap_or_default(),
+            );
+        }
+
+        self.expression_use_sites.as_deref().unwrap_or(&[])
     }
 
     fn unsafe_capability_ranges(
@@ -420,6 +437,12 @@ impl<'a> CheckerSourceFactsProvider<'a> {
     ) -> Vec<DirectCallContextSite> {
         self.with_module_facts(node, |facts| {
             facts.direct_call_context_sites(node, self.source_overrides).to_vec()
+        })
+    }
+
+    pub(super) fn expression_use_sites(&self, node: &ModuleNode) -> Vec<ExpressionUseSite> {
+        self.with_module_facts(node, |facts| {
+            facts.expression_use_sites(node, self.source_overrides).to_vec()
         })
     }
 

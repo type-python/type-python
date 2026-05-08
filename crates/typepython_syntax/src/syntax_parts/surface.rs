@@ -1003,6 +1003,15 @@ pub struct DirectCallContextSite {
     pub line: usize,
 }
 
+/// Expression use site that may contain value-consuming operations needing semantic checks.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ExpressionUseSite {
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub value: DirectExprMetadata,
+    pub line: usize,
+}
+
 /// Mutation forms tracked for TypedDict keys.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum TypedDictMutationKind {
