@@ -167,10 +167,17 @@ if x:              # TPY4003: Cannot use 'unknown' for truthiness
 x == 1             # TPY4003: Cannot compare 'unknown' without narrowing
 ```
 
-**Allowed narrowing forms:** `x is None`, `x is not None`, `isinstance(x, T)`, documented
-type guards, or an explicit `cast`.
+**Allowed inspection forms:** `x is None`, `x is not None`, `isinstance(x, T)`,
+documented type guards, or an explicit `cast`.
 
-**Fix:** Narrow with an allowed guard or cast before ordinary value use.
+**Operation-enabling forms:** `isinstance(x, T)` where `T` supports the operation,
+documented type guards / `TypeIs` predicates, or an explicit `cast`. `x is None`
+and `x is not None` are valid inspections, but they only refine nullability; they
+do not by themselves prove that `x` supports member access, calls, indexing, or
+operators.
+
+**Fix:** Narrow to a type that supports the operation, or cast explicitly before
+ordinary value use.
 
 #### TPY4004 -- Duplicate declaration
 
