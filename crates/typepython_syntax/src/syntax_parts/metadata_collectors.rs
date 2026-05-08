@@ -2550,13 +2550,26 @@ fn collect_expression_use_sites_from_statement_exprs(
             owner_type_name,
             sites,
         ),
-        Stmt::Match(match_stmt) => collect_expression_use_sites_in_expr(
-            source,
-            &match_stmt.subject,
-            owner_name,
-            owner_type_name,
-            sites,
-        ),
+        Stmt::Match(match_stmt) => {
+            collect_expression_use_sites_in_expr(
+                source,
+                &match_stmt.subject,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
+            for case in &match_stmt.cases {
+                if let Some(guard) = case.guard.as_deref() {
+                    collect_guard_expression_use_sites_in_expr(
+                        source,
+                        guard,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+            }
+        }
         Stmt::For(for_stmt) => collect_expression_use_sites_in_expr(
             source,
             &for_stmt.iter,
