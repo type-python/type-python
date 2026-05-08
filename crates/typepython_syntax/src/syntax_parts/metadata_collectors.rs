@@ -125,14 +125,21 @@ pub fn collect_direct_call_context_sites(source: &str) -> Vec<DirectCallContextS
 
 #[must_use]
 pub fn collect_expression_use_sites(source: &str) -> Vec<ExpressionUseSite> {
-    let normalized = module_surface_metadata_parse_source(source);
+    let (normalized, skipped_statement_lines) = expression_use_sites_parse_source(source);
     with_source_line_index(&normalized, || {
         let Ok(parsed) = parse_module(&normalized) else {
             return Vec::new();
         };
 
         let mut sites = Vec::new();
-        collect_expression_use_sites_in_suite(&normalized, parsed.suite(), None, None, &mut sites);
+        collect_expression_use_sites_in_suite(
+            &normalized,
+            parsed.suite(),
+            None,
+            None,
+            &skipped_statement_lines,
+            &mut sites,
+        );
         sites
     })
 }
@@ -341,6 +348,35 @@ fn module_surface_metadata_parse_source(source: &str) -> String {
         text: source.to_owned(),
     });
     normalize_annotated_lambda_source_lossy(&normalize_typepython_source(source, &tree.statements))
+}
+
+fn expression_use_sites_parse_source(source: &str) -> (String, std::collections::BTreeSet<usize>) {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    if parse_module(&normalized).is_ok() {
+        return (normalized, std::collections::BTreeSet::new());
+    }
+
+    let tree = parse(SourceFile {
+        path: PathBuf::from("<expression-use-sites>.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: source.to_owned(),
+    });
+    let skipped_statement_lines = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::TypeAlias(statement) => Some(statement.line),
+            _ => None,
+        })
+        .collect();
+    (
+        normalize_annotated_lambda_source_lossy(&normalize_typepython_source(
+            source,
+            &tree.statements,
+        )),
+        skipped_statement_lines,
+    )
 }
 
 #[must_use]
@@ -2203,16 +2239,20 @@ pub(super) fn collect_expression_use_sites_in_suite(
     suite: &[Stmt],
     owner_name: Option<&str>,
     owner_type_name: Option<&str>,
+    skipped_statement_lines: &std::collections::BTreeSet<usize>,
     sites: &mut Vec<ExpressionUseSite>,
 ) {
     for stmt in suite {
-        collect_expression_use_sites_from_statement_exprs(
-            source,
-            stmt,
-            owner_name,
-            owner_type_name,
-            sites,
-        );
+        let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+        if !skipped_statement_lines.contains(&line) {
+            collect_expression_use_sites_from_statement_exprs(
+                source,
+                stmt,
+                owner_name,
+                owner_type_name,
+                sites,
+            );
+        }
 
         match stmt {
             Stmt::FunctionDef(function) => {
@@ -2221,6 +2261,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                     &function.body,
                     Some(function.name.as_str()),
                     owner_type_name,
+                    skipped_statement_lines,
                     sites,
                 );
             }
@@ -2230,6 +2271,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                     &class_def.body,
                     owner_name,
                     Some(class_def.name.as_str()),
+                    skipped_statement_lines,
                     sites,
                 );
             }
@@ -2239,6 +2281,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                     &try_stmt.body,
                     owner_name,
                     owner_type_name,
+                    skipped_statement_lines,
                     sites,
                 );
                 for handler in &try_stmt.handlers {
@@ -2248,6 +2291,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                         &handler.body,
                         owner_name,
                         owner_type_name,
+                        skipped_statement_lines,
                         sites,
                     );
                 }
@@ -2256,6 +2300,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                     &try_stmt.orelse,
                     owner_name,
                     owner_type_name,
+                    skipped_statement_lines,
                     sites,
                 );
                 collect_expression_use_sites_in_suite(
@@ -2263,6 +2308,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                     &try_stmt.finalbody,
                     owner_name,
                     owner_type_name,
+                    skipped_statement_lines,
                     sites,
                 );
             }
@@ -2272,6 +2318,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                     &if_stmt.body,
                     owner_name,
                     owner_type_name,
+                    skipped_statement_lines,
                     sites,
                 );
                 for_each_if_false_suite(if_stmt, |suite| {
@@ -2280,6 +2327,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                         suite,
                         owner_name,
                         owner_type_name,
+                        skipped_statement_lines,
                         sites,
                     );
                 });
@@ -2291,6 +2339,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                         &case.body,
                         owner_name,
                         owner_type_name,
+                        skipped_statement_lines,
                         sites,
                     );
                 }
@@ -2301,6 +2350,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                     &for_stmt.body,
                     owner_name,
                     owner_type_name,
+                    skipped_statement_lines,
                     sites,
                 );
                 collect_expression_use_sites_in_suite(
@@ -2308,6 +2358,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                     &for_stmt.orelse,
                     owner_name,
                     owner_type_name,
+                    skipped_statement_lines,
                     sites,
                 );
             }
@@ -2317,6 +2368,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                     &while_stmt.body,
                     owner_name,
                     owner_type_name,
+                    skipped_statement_lines,
                     sites,
                 );
                 collect_expression_use_sites_in_suite(
@@ -2324,6 +2376,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                     &while_stmt.orelse,
                     owner_name,
                     owner_type_name,
+                    skipped_statement_lines,
                     sites,
                 );
             }
@@ -2333,6 +2386,7 @@ pub(super) fn collect_expression_use_sites_in_suite(
                     &with_stmt.body,
                     owner_name,
                     owner_type_name,
+                    skipped_statement_lines,
                     sites,
                 );
             }

@@ -522,6 +522,17 @@ fn check_reports_unknown_bare_expression_operations_after_typepython_surface_syn
 }
 
 #[test]
+fn check_accepts_typepython_typealias_when_collecting_expression_use_sites() {
+    let result = check_temp_typepython_source(concat!(
+        "typealias Pair = tuple[int, int]\n\n",
+        "def run(value: Pair) -> None:\n",
+        "    pass\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_reports_unknown_guard_expression_operations_from_real_parse_pipeline() {
     let result = check_temp_typepython_source(concat!(
         "def get_value() -> unknown:\n",
