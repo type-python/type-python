@@ -1,6 +1,7 @@
 # Release Evidence
 
-This page records concrete release-gate runs that can be audited after the fact.
+This page records concrete local release-gate runs and CI follow-up requirements
+that can be audited after the fact.
 The GitHub `rust` workflow remains the authoritative cross-platform publish gate;
 local evidence is a maintainer preflight, not a replacement for the CI matrix.
 

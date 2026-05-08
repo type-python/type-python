@@ -97,7 +97,8 @@ gate, not a replacement for the CI-only interpreter, platform, and uploaded-arti
 PyPI publish workflow refuses to publish unless the release commit already has a successful `rust`
 workflow run containing a successful `beta-release-gate` job.
 
-Concrete local and CI release-gate runs are recorded in [Release Evidence](release-evidence.md).
+Local release-gate evidence and CI follow-up requirements are recorded in
+[Release Evidence](release-evidence.md).
 
 ## Packaging and install contract
 
