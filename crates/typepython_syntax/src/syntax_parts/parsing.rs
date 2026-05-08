@@ -244,6 +244,13 @@ pub(super) fn parse_typepython_source(source: SourceFile, options: ParseOptions)
                         None,
                         &mut statements,
                     );
+                    collect_nested_member_access_statements(
+                        &normalized,
+                        parsed.suite(),
+                        None,
+                        None,
+                        &mut statements,
+                    );
                     collect_function_body_assignments(
                         &normalized,
                         parsed.suite(),

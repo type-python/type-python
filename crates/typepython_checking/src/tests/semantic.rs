@@ -427,6 +427,19 @@ fn check_reports_unknown_call_argument_to_concrete_parameter() {
 }
 
 #[test]
+fn check_reports_unknown_member_access_with_local_context() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(value: unknown) -> None:\n",
+        "    value.name\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `name`"), "{rendered}");
+    assert!(rendered.contains("`value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_return_to_concrete_type() {
     let result = check_temp_typepython_source(concat!(
         "def get_value() -> unknown:\n",
@@ -753,6 +766,19 @@ fn check_accepts_unknown_boolop_rhs_after_isinstance_narrowing() {
         "def run(value: unknown) -> None:\n",
         "    if isinstance(value, int) and value + 1:\n",
         "        pass\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_accepts_unknown_member_access_after_isinstance_narrowing() {
+    let result = check_temp_typepython_source(concat!(
+        "class Box:\n",
+        "    value: int\n\n",
+        "def run(value: unknown) -> None:\n",
+        "    if isinstance(value, Box):\n",
+        "        value.value\n",
     ));
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());

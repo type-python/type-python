@@ -1417,7 +1417,15 @@ pub(super) fn direct_unknown_operation_diagnostics(
     let mut seen_expression_operations = std::collections::BTreeSet::new();
 
     for access in &node.member_accesses {
-        if name_is_unknown_boundary(context, node, nodes, &access.owner_name) {
+        if name_is_unknown_boundary_with_context(
+            context,
+            node,
+            nodes,
+            access.current_owner_name.as_deref(),
+            access.current_owner_type_name.as_deref(),
+            access.line,
+            &access.owner_name,
+        ) {
             let mut diagnostic = Diagnostic::error(
                 "TPY4003",
                 format!(
