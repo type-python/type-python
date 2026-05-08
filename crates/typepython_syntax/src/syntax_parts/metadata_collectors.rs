@@ -2452,6 +2452,7 @@ fn collect_guard_expression_use_sites_in_expr(
     sites.push(ExpressionUseSite {
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
+        suppressed_names: Vec::new(),
         value: synthetic_operation_metadata(
             "truthiness",
             extract_direct_expr_metadata(source, expr),
@@ -2473,6 +2474,7 @@ fn collect_expression_use_sites_in_expr(
         source,
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
+        suppressed_names: std::collections::BTreeSet::new(),
         sites,
     };
     collector.visit_expr(expr);
@@ -2482,21 +2484,72 @@ struct ExpressionUseSiteCollector<'source, 'sites> {
     source: &'source str,
     owner_name: Option<String>,
     owner_type_name: Option<String>,
+    suppressed_names: std::collections::BTreeSet<String>,
     sites: &'sites mut Vec<ExpressionUseSite>,
 }
 
 impl<'source, 'sites, 'ast> visitor::Visitor<'ast> for ExpressionUseSiteCollector<'source, 'sites> {
     fn visit_expr(&mut self, expr: &'ast Expr) {
+        if self.visit_comprehension_expr(expr) {
+            return;
+        }
+
         for value in expression_use_site_metadata(self.source, expr) {
             self.sites.push(ExpressionUseSite {
                 owner_name: self.owner_name.clone(),
                 owner_type_name: self.owner_type_name.clone(),
+                suppressed_names: self.suppressed_names.iter().cloned().collect(),
                 value,
                 line: offset_to_line_column(self.source, expr.range().start().to_usize()).0,
             });
         }
 
         visitor::walk_expr(self, expr);
+    }
+}
+
+impl ExpressionUseSiteCollector<'_, '_> {
+    fn visit_comprehension_expr(&mut self, expr: &Expr) -> bool {
+        match expr {
+            Expr::ListComp(comp) => {
+                self.visit_comprehension(&comp.generators, None, &comp.elt);
+                true
+            }
+            Expr::SetComp(comp) => {
+                self.visit_comprehension(&comp.generators, None, &comp.elt);
+                true
+            }
+            Expr::DictComp(comp) => {
+                self.visit_comprehension(&comp.generators, Some(&comp.key), &comp.value);
+                true
+            }
+            Expr::Generator(comp) => {
+                self.visit_comprehension(&comp.generators, None, &comp.elt);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn visit_comprehension(
+        &mut self,
+        generators: &[ruff_python_ast::Comprehension],
+        key: Option<&Expr>,
+        element: &Expr,
+    ) {
+        let outer_suppressed_names = self.suppressed_names.clone();
+        for generator in generators {
+            self.visit_expr(&generator.iter);
+            self.suppressed_names.extend(extract_assignment_names(&generator.target));
+            for condition in &generator.ifs {
+                self.visit_expr(condition);
+            }
+        }
+        if let Some(key) = key {
+            self.visit_expr(key);
+        }
+        self.visit_expr(element);
+        self.suppressed_names = outer_suppressed_names;
     }
 }
 

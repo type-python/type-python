@@ -1627,7 +1627,12 @@ pub(super) fn direct_unknown_operation_diagnostics(
         }
     }
     for expression_site in context.source_facts.expression_use_sites(node) {
-        collect_unknown_direct_expression_operation_diagnostics(
+        let suppressed_names = expression_site
+            .suppressed_names
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
             context,
             node,
             nodes,
@@ -1635,6 +1640,7 @@ pub(super) fn direct_unknown_operation_diagnostics(
             expression_site.owner_type_name.as_deref(),
             expression_site.line,
             &expression_site.value,
+            &suppressed_names,
             &mut diagnostics,
             &mut seen_expression_operations,
         );

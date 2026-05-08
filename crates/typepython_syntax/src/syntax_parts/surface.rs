@@ -1013,6 +1013,7 @@ pub struct DirectCallContextSite {
 pub struct ExpressionUseSite {
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
+    pub suppressed_names: Vec<String>,
     pub value: DirectExprMetadata,
     pub line: usize,
 }
