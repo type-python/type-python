@@ -690,7 +690,7 @@ checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "typepython-config"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "thiserror",
@@ -700,14 +700,14 @@ dependencies = [
 
 [[package]]
 name = "typepython-diagnostics"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "typepython-emit"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "littrs-ruff-python-ast",
  "littrs-ruff-python-parser",
@@ -729,7 +729,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-lowering"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "littrs-ruff-python-ast",
  "littrs-ruff-python-parser",
@@ -741,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-syntax"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "littrs-ruff-python-ast",
  "littrs-ruff-python-parser",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-target"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
 ]

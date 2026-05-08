@@ -151,6 +151,7 @@ class RepoContractsTests(unittest.TestCase):
         pypi_readme = read_text("README-PyPI.md")
         faq = read_text("docs/faq.md")
         beta = read_text("docs/beta-readiness.md")
+        release_evidence = read_text("docs/release-evidence.md")
         workflow = read_text(".github/workflows/rust.yml")
         makefile = read_text("Makefile")
 
@@ -170,6 +171,11 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("quickstart-smoke:", makefile)
         self.assertIn("quickstart-smoke", makefile.split("beta-release-gate:", 1)[1])
         self.assertIn("run: cargo test --workspace", workflow)
+        self.assertIn("[Release Evidence](release-evidence.md)", beta)
+        self.assertIn("macOS Local RC Preflight", release_evidence)
+        self.assertIn("downstream_checker_smoke.py", release_evidence)
+        self.assertIn("make fuzz-smoke", release_evidence)
+        self.assertIn("CI-only follow-up", release_evidence)
 
     def test_feature_status_contracts_match_marketing_claims(self) -> None:
         readme = read_text("README.md")
