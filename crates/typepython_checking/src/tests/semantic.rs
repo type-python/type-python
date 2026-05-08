@@ -455,10 +455,7 @@ fn check_reports_unknown_direct_call_with_local_context() {
 #[test]
 fn check_reports_unknown_direct_call_with_local_context_when_imports_are_dynamic() {
     let result = check_temp_typepython_source_with_checker_options(
-        concat!(
-            "def run(callback: unknown) -> None:\n",
-            "    callback()\n",
-        ),
+        concat!("def run(callback: unknown) -> None:\n", "    callback()\n",),
         ParseOptions::default(),
         crate::CheckerOptions {
             import_fallback: ImportFallback::Dynamic,
@@ -827,6 +824,34 @@ fn check_accepts_unknown_member_access_after_isinstance_narrowing() {
     ));
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_reports_unknown_member_access_when_local_parameter_shadows_module_value() {
+    let result = check_temp_typepython_source(concat!(
+        "value: int = 1\n\n",
+        "def run(value: unknown) -> None:\n",
+        "    value.name\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `name`"), "{rendered}");
+    assert!(rendered.contains("`value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_local_parameter_when_module_value_is_unknown() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "value: unknown = get_value()\n\n",
+        "def run(value: int) -> None:\n",
+        "    value + 1\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4003"), "{rendered}");
 }
 
 #[test]

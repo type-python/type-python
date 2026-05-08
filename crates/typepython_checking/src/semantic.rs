@@ -2184,18 +2184,6 @@ pub(super) fn name_is_unknown_boundary_with_context(
     if resolve_typing_callable_signature(name).is_some()
         || resolve_builtin_return_type(name).is_some()
         || matches!(name, "eval" | "exec" | "setattr" | "delattr")
-        || resolve_direct_function(node, nodes, name).is_some()
-        || resolve_direct_base(nodes, node, name).is_some()
-        || resolve_module_level_assignment_reference_semantic_type(node, nodes, None, usize::MAX, name)
-            .is_some()
-        || node.declarations.iter().any(|declaration| {
-            declaration.owner.is_none()
-                && declaration.kind == DeclarationKind::Value
-                && declaration.name == name
-                && declaration_value_annotation_semantic_type(declaration).is_some_and(|annotation| {
-                    !matches!(annotation.strip_annotated(), SemanticType::Name(name) if name == "unknown")
-                })
-        })
     {
         return false;
     }
@@ -2211,7 +2199,23 @@ pub(super) fn name_is_unknown_boundary_with_context(
         line,
         name,
     ) {
-        return matches!(resolved.strip_annotated(), SemanticType::Name(name) if name == "unknown");
+        return semantic_type_is_unknown(&resolved);
+    }
+
+    if resolve_direct_function(node, nodes, name).is_some()
+        || resolve_direct_base(nodes, node, name).is_some()
+        || resolve_module_level_assignment_reference_semantic_type(node, nodes, None, usize::MAX, name)
+            .is_some()
+        || node.declarations.iter().any(|declaration| {
+            declaration.owner.is_none()
+                && declaration.kind == DeclarationKind::Value
+                && declaration.name == name
+                && declaration_value_annotation_semantic_type(declaration).is_some_and(|annotation| {
+                    !matches!(annotation.strip_annotated(), SemanticType::Name(name) if name == "unknown")
+                })
+        })
+    {
+        return false;
     }
 
     if let Some((head, _)) = name.split_once('.')
