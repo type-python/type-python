@@ -649,6 +649,21 @@ fn check_reports_unknown_truthiness_and_boolean_operations() {
 }
 
 #[test]
+fn check_reports_unknown_expression_truthiness_use_sites() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(value: unknown, other: unknown, values: list[int]) -> None:\n",
+        "    _branch = 1 if value else 0\n",
+        "    _items = [item for item in values if other]\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("truthiness check"), "{rendered}");
+    assert!(rendered.contains("operand `value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("operand `other` has type `unknown`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_comparison_membership_and_unary_operations() {
     let result = check_temp_typepython_source(concat!(
         "def run(value: unknown, values: list[int]) -> None:\n",

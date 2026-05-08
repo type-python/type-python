@@ -2690,18 +2690,14 @@ fn collect_guard_expression_use_sites_in_expr(
     owner_type_name: Option<&str>,
     sites: &mut Vec<ExpressionUseSite>,
 ) {
-    sites.push(ExpressionUseSite {
+    let mut collector = ExpressionUseSiteCollector {
+        source,
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
-        suppressed_names: Vec::new(),
-        value: synthetic_operation_metadata(
-            "truthiness",
-            extract_direct_expr_metadata(source, expr),
-            None,
-        ),
-        line: offset_to_line_column(source, expr.range().start().to_usize()).0,
-    });
-    collect_expression_use_sites_in_expr(source, expr, owner_name, owner_type_name, sites);
+        suppressed_names: std::collections::BTreeSet::new(),
+        sites,
+    };
+    collector.visit_guard_expr(expr);
 }
 
 fn collect_expression_use_sites_in_expr(
@@ -2736,13 +2732,7 @@ impl<'source, 'sites, 'ast> visitor::Visitor<'ast> for ExpressionUseSiteCollecto
         }
 
         for value in expression_use_site_metadata(self.source, expr) {
-            self.sites.push(ExpressionUseSite {
-                owner_name: self.owner_name.clone(),
-                owner_type_name: self.owner_type_name.clone(),
-                suppressed_names: self.suppressed_names.iter().cloned().collect(),
-                value,
-                line: offset_to_line_column(self.source, expr.range().start().to_usize()).0,
-            });
+            self.push_expression_use_site(expr, value);
         }
 
         visitor::walk_expr(self, expr);
@@ -2750,6 +2740,28 @@ impl<'source, 'sites, 'ast> visitor::Visitor<'ast> for ExpressionUseSiteCollecto
 }
 
 impl ExpressionUseSiteCollector<'_, '_> {
+    fn push_expression_use_site(&mut self, expr: &Expr, value: DirectExprMetadata) {
+        self.sites.push(ExpressionUseSite {
+            owner_name: self.owner_name.clone(),
+            owner_type_name: self.owner_type_name.clone(),
+            suppressed_names: self.suppressed_names.iter().cloned().collect(),
+            value,
+            line: offset_to_line_column(self.source, expr.range().start().to_usize()).0,
+        });
+    }
+
+    fn visit_guard_expr(&mut self, expr: &Expr) {
+        self.push_expression_use_site(
+            expr,
+            synthetic_operation_metadata(
+                "truthiness",
+                extract_direct_expr_metadata(self.source, expr),
+                None,
+            ),
+        );
+        self.visit_expr(expr);
+    }
+
     fn visit_comprehension_expr(&mut self, expr: &Expr) -> bool {
         match expr {
             Expr::ListComp(comp) => {
@@ -2783,7 +2795,7 @@ impl ExpressionUseSiteCollector<'_, '_> {
             self.visit_expr(&generator.iter);
             self.suppressed_names.extend(extract_assignment_names(&generator.target));
             for condition in &generator.ifs {
-                self.visit_expr(condition);
+                self.visit_guard_expr(condition);
             }
         }
         if let Some(key) = key {
@@ -2837,6 +2849,11 @@ fn expression_use_site_metadata(source: &str, expr: &Expr) -> Vec<DirectExprMeta
             })
             .flatten()
             .collect(),
+        Expr::If(if_expr) => vec![synthetic_operation_metadata(
+            "truthiness",
+            extract_direct_expr_metadata(source, &if_expr.test),
+            None,
+        )],
         _ => Vec::new(),
     }
 }
