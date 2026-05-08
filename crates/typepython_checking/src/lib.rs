@@ -160,6 +160,11 @@ impl CheckerOptions {
         Self::from_typing_config(&TypingConfig::default())
     }
 
+    /// Compatibility default for legacy tests and boolean helper APIs.
+    ///
+    /// Production embedding should use `CheckerOptions::default()`,
+    /// `CheckerOptions::core_project_default()`, `CheckerOptions::from_config(...)`, or pass an
+    /// explicit `CheckerOptions` through the structured checker entry points.
     #[must_use]
     pub fn permissive_test_default() -> Self {
         Self {
@@ -536,7 +541,12 @@ pub fn check(graph: &ModuleGraph) -> CheckResult {
     check_with_checker_options(graph, CheckerOptions::core_project_default())
 }
 
-/// Runs the checker with the caller-controlled option surface used by the CLI and tests.
+/// Legacy compatibility helper that fills omitted option fields from
+/// `CheckerOptions::permissive_test_default()`.
+///
+/// Production callers should prefer `check_with_checker_options` so every checker option is
+/// supplied from `CheckerOptions::default()`, `CheckerOptions::from_config(...)`, or an explicit
+/// structured option value.
 #[must_use]
 pub fn check_with_options(
     graph: &ModuleGraph,
@@ -573,7 +583,10 @@ pub fn check_with_checker_options(graph: &ModuleGraph, options: CheckerOptions) 
     clippy::too_many_arguments,
     reason = "mirrors the public checker option surface while threading binding metadata"
 )]
-/// Runs the checker with precomputed binding metadata to avoid recomputing source-derived facts.
+/// Legacy compatibility helper that fills omitted option fields from
+/// `CheckerOptions::permissive_test_default()` while reusing precomputed binding metadata.
+///
+/// Production callers should prefer `check_with_binding_metadata_and_options`.
 pub fn check_with_binding_metadata(
     graph: &ModuleGraph,
     bindings: &[BindingTable],
@@ -738,6 +751,10 @@ pub fn semantic_incremental_state_with_reused_summaries_and_options(
     clippy::too_many_arguments,
     reason = "mirrors the public checker option surface while adding LSP source overrides"
 )]
+/// Legacy compatibility helper that fills omitted option fields from
+/// `CheckerOptions::permissive_test_default()` while accepting editor source overrides.
+///
+/// Production callers should prefer `check_with_checker_options_and_source_overrides`.
 pub fn check_with_source_overrides(
     graph: &ModuleGraph,
     require_explicit_overrides: bool,
@@ -781,6 +798,10 @@ pub fn check_with_checker_options_and_source_overrides(
     clippy::too_many_arguments,
     reason = "mirrors the public checker option surface while adding subset recheck inputs"
 )]
+/// Legacy compatibility helper that fills omitted option fields from
+/// `CheckerOptions::permissive_test_default()` for subset checks.
+///
+/// Production callers should prefer `check_modules_with_checker_options_and_source_overrides`.
 pub fn check_modules_with_source_overrides(
     graph: &ModuleGraph,
     module_keys: &BTreeSet<String>,

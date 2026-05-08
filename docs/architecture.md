@@ -222,6 +222,12 @@ The core type-checking engine. Runs multiple diagnostic rule categories against 
 - Alias expansion now stays on semantic alias bodies: imported typing rewrites and generic substitution operate on `SemanticType` values directly instead of rendering alias bodies back to text for reparsing.
 - Contextual and flow-sensitive owner lookup no longer bridge through rendered owner signature text in the active path; scope-local parameter lookup uses owner declarations and semantic signature sites directly.
 
+**Checker option API boundary:**
+
+`CheckerOptions::default()` is the Core project default and matches `CheckerOptions::core_project_default()`. Production embedding should use `check(graph)`, `check_with_checker_options(...)`, `check_with_binding_metadata_and_options(...)`, or the corresponding structured source-override/subset APIs with `CheckerOptions::from_config(...)` or an explicit `CheckerOptions`.
+
+`CheckerOptions::permissive_test_default()` is reserved for tests and legacy compatibility helpers. Boolean-argument helpers such as `check_with_options(...)`, `check_with_binding_metadata(...)`, `check_with_source_overrides(...)`, and `check_modules_with_source_overrides(...)` fill any omitted fields from that permissive default and are not the Core project default.
+
 **TypeStore decision (implemented narrowly in the main path):**
 
 `TypeStore` is part of the checker declaration-semantic hot path. The shared declaration semantic cache interns declaration-derived semantic types (callable parameter annotations, callable returns, value annotations, alias bodies) into `TypeStore` and materializes semantic facts from those stored IDs. Solver state and final diagnostics continue to use `SemanticType` values as their human-readable working surface, while declaration-driven lookup and reuse rely on the interned store.

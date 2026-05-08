@@ -593,6 +593,25 @@ class RepoContractsTests(unittest.TestCase):
         )
         self.assertIn("TPY4029", coverage)
 
+    def test_checker_api_default_boundary_is_documented(self) -> None:
+        checker = read_text("crates/typepython_checking/src/lib.rs")
+        architecture = read_text("docs/architecture.md")
+
+        self.assertIn("pub fn core_project_default() -> Self", checker)
+        self.assertIn("pub fn permissive_test_default() -> Self", checker)
+        self.assertIn("Compatibility default for legacy tests and boolean helper APIs", checker)
+        self.assertIn("Legacy compatibility helper", checker)
+        self.assertIn("check_with_checker_options", checker)
+        self.assertIn("check_with_binding_metadata_and_options", checker)
+
+        self.assertIn("Checker option API boundary", architecture)
+        self.assertIn("`CheckerOptions::default()` is the Core project default", architecture)
+        self.assertIn(
+            "`CheckerOptions::permissive_test_default()` is reserved for tests",
+            architecture,
+        )
+        self.assertIn("Boolean-argument helpers", architecture)
+
     def test_unknown_assignability_contract_is_enforced(self) -> None:
         assignability = read_text(
             "crates/typepython_checking/src/type_system/assignability.rs"
