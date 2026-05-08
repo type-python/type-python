@@ -481,7 +481,7 @@ fn my_new_check_diagnostics(graph: &ModuleGraph, /* options */) -> Vec<Diagnosti
 }
 ```
 
-2. Call it from the `check_with_options()` function
+2. Wire it into the relevant `collect_node_*_diagnostics` pass in `typepython_checking/src/lib.rs`
 3. Add test cases (this crate has the largest test suite in the workspace -- follow existing patterns)
 4. Document any new diagnostic codes
 
