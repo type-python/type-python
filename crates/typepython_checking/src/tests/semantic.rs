@@ -684,6 +684,31 @@ fn check_reports_unknown_expression_truthiness_use_sites() {
 }
 
 #[test]
+fn check_reports_unknown_expression_operations_with_source_overrides_without_backing_file() {
+    let result = check_virtual_source_with_overrides(
+        concat!(
+            "def get_value() -> unknown:\n",
+            "    ...\n\n",
+            "def run(value: unknown) -> None:\n",
+            "    value[0]\n",
+            "    if value:\n",
+            "        pass\n",
+            "    _item = get_value()[0]\n",
+        ),
+        ParseOptions::default(),
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("subscript access"), "{rendered}");
+    assert!(rendered.contains("truthiness check"), "{rendered}");
+    assert!(rendered.contains("`value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("`get_value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_comparison_membership_and_unary_operations() {
     let result = check_temp_typepython_source(concat!(
         "def run(value: unknown, values: list[int]) -> None:\n",
