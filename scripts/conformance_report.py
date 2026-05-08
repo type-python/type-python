@@ -57,7 +57,10 @@ SEMANTIC_SUBRULE_EVIDENCE: tuple[SemanticSubRule, ...] = (
     SemanticSubRule(
         "unknown",
         "member access on `unknown` is diagnosed as TPY4003",
-        ("cargo test -p typepython-checking check_reports_unknown_member_access",),
+        (
+            "cargo test -p typepython-checking check_reports_unknown_member_access",
+            "cargo test -p typepython-checking check_reports_unknown_member_access_with_local_context",
+        ),
     ),
     SemanticSubRule(
         "unknown",
