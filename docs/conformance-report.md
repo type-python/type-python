@@ -86,7 +86,7 @@ This table expands broad Core v1 feature claims into the specific semantic cases
 | Area | Sub-rule | Evidence |
 | ---- | -------- | -------- |
 | unknown | member access on `unknown` is diagnosed as TPY4003 | `cargo test -p typepython-checking check_reports_unknown_member_access`<br>`cargo test -p typepython-checking check_reports_unknown_member_access_with_local_context` |
-| unknown | direct call of `unknown` is diagnosed as TPY4003 | `cargo test -p typepython-checking check_reports_unknown_direct_call_keyword`<br>`cargo test -p typepython-checking check_reports_unknown_direct_call_on_import` |
+| unknown | direct call of `unknown` is diagnosed as TPY4003 | `cargo test -p typepython-checking check_reports_unknown_direct_call_keyword`<br>`cargo test -p typepython-checking check_reports_unknown_direct_call_on_import`<br>`cargo test -p typepython-checking check_reports_unknown_direct_call_with_local_context` |
 | unknown | method call on `unknown` is diagnosed as TPY4003 | `cargo test -p typepython-checking check_reports_unknown_method_call` |
 | unknown | subscript/indexing on `unknown` is diagnosed as TPY4003 | `cargo test -p typepython-checking check_reports_unknown_subscript_from_real_parse_pipeline` |
 | unknown | binary arithmetic with either operand `unknown` is diagnosed as TPY4003 | `cargo test -p typepython-checking check_reports_unknown_arithmetic_from_real_parse_pipeline` |

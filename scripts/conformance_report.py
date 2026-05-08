@@ -68,6 +68,7 @@ SEMANTIC_SUBRULE_EVIDENCE: tuple[SemanticSubRule, ...] = (
         (
             "cargo test -p typepython-checking check_reports_unknown_direct_call_keyword",
             "cargo test -p typepython-checking check_reports_unknown_direct_call_on_import",
+            "cargo test -p typepython-checking check_reports_unknown_direct_call_with_local_context",
         ),
     ),
     SemanticSubRule(

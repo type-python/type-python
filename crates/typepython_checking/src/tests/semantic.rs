@@ -440,6 +440,19 @@ fn check_reports_unknown_member_access_with_local_context() {
 }
 
 #[test]
+fn check_reports_unknown_direct_call_with_local_context() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(callback: unknown) -> None:\n",
+        "    callback()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("call to `callback`"), "{rendered}");
+    assert!(rendered.contains("`callback` has type `unknown`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_return_to_concrete_type() {
     let result = check_temp_typepython_source(concat!(
         "def get_value() -> unknown:\n",
