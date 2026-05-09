@@ -2150,6 +2150,21 @@ fn resolve_direct_call_result_semantic_type_with_context(
     )
     .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, callee))
     .or_else(|| {
+        let has_contextual_local_binding = name_has_contextual_local_binding(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            callee,
+        );
+        let has_module_value_binding = current_owner_name.is_none()
+            && name_has_module_value_binding(context, node, nodes, line, callee);
+        if !has_contextual_local_binding && !has_module_value_binding {
+            return None;
+        }
+
         let callable = resolve_direct_name_reference_semantic_type_with_context(
             context,
             node,
