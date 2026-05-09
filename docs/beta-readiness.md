@@ -115,6 +115,9 @@ A Beta release candidate must pass the tracked release gate before the classifie
 - package build and metadata check: `python -m build --sdist --wheel` and `python -m twine check dist/*`
 - installed wheel quickstart smoke, including `typepython --help`, `init`, `check`, `build`, and
   `verify`, proving the installed wheel uses its bundled Rust CLI without `cargo`
+- editor integration contract: `python scripts/test_editor_integrations.py`, which verifies the
+  source-installable VS Code manifest, LSP stdio launch wiring, version-aligned VSIX docs, and the
+  rule that VS Code packaging evidence does not block Core v1.0 RC
 - Python 3.9 wrapper smoke
 - Python 3.13 and 3.14 target smoke
 - macOS and Windows platform smoke

@@ -135,6 +135,11 @@ the language server after TypePython setting changes, workspace-folder changes,
 or project config file create/change/delete events. Configure
 `typepython.binaryPath` when the CLI is not on `PATH`, or set `TYPEPYTHON_BIN`.
 
+This source-installable extension and local VSIX packaging check are DX evidence.
+The local VSIX packaging check does not require Marketplace publication and does
+not block Core v1.0 RC; editor packaging remains outside the Stable Core
+compatibility promise until the DX gate is complete.
+
 ### Neovim (nvim-lspconfig)
 
 Add to your Neovim configuration:

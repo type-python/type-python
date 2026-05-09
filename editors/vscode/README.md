@@ -28,3 +28,7 @@ code --install-extension typepython-vscode-0.4.0.vsix
 The extension is a Supported Beta DX surface. Extension settings, commands, and
 packaging details may change before the DX v1.0 gate in
 [`docs/dx-stability.md`](../../docs/dx-stability.md).
+
+Source-installable extension checks and local VSIX packaging are release evidence,
+but the local VSIX packaging check does not block Core v1.0 RC. Marketplace
+publication and polished onboarding remain part of the later DX v1.0 gate.

@@ -43,3 +43,15 @@ Until those items are complete, README and release notes should describe these
 surfaces as supported Beta DX rather than stable v1.0 commitments. A Core-only
 v1.0 RC may ship before this gate is complete, but it must keep the DX exclusion
 visible in the README, PyPI description, and release notes.
+
+## Core RC VS Code Packaging Evidence
+
+The source-installable VS Code extension under `editors/vscode/` is release-gate evidence for the
+Supported DX tier, not part of the Stable Core surface. `scripts/test_editor_integrations.py` checks
+that the manifest launches `typepython lsp` over stdio, that `.tpy` registration and Python document
+attachment remain wired, and that the documented VSIX filename matches the package version.
+
+That evidence does not require Marketplace publication, does not require uploading a VSIX artifact
+from the Core RC workflow, and does not block Core v1.0 RC when the compiler, emitted artifacts, and
+Core verification gates are green. Marketplace release and polished editor onboarding remain DX gate
+items for a later product-wide v1.0 claim.

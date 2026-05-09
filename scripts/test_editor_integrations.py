@@ -107,9 +107,10 @@ class EditorIntegrationTests(unittest.TestCase):
         lsp = read_text("docs/lsp.md")
         readme = read_text("README.md")
         pypi_readme = read_text("README-PyPI.md")
+        expected_vsix = f"typepython-vscode-{project_version()}.vsix"
 
         self.assertIn("editors/vscode", lsp)
-        self.assertIn("code --install-extension typepython-vscode-0.4.0.vsix", lsp)
+        self.assertIn(f"code --install-extension {expected_vsix}", lsp)
         self.assertIn("attaches the TypePython LSP client to VS Code", lsp)
         self.assertIn("first workspace folder with `typepython.toml`", lsp)
         self.assertIn("setting changes, workspace-folder changes", lsp)
@@ -120,6 +121,20 @@ class EditorIntegrationTests(unittest.TestCase):
 
         self.assertIn("source-installable VS Code extension", readme)
         self.assertIn("source-installable VS Code extension", pypi_readme)
+
+    def test_vscode_packaging_is_non_blocking_for_core_rc(self) -> None:
+        dx = read_text("docs/dx-stability.md")
+        beta = read_text("docs/beta-readiness.md")
+        lsp = read_text("docs/lsp.md")
+        extension_readme = read_text("editors/vscode/README.md")
+
+        for text in (dx, beta, lsp, extension_readme):
+            normalized = " ".join(text.split())
+            self.assertIn("does not block Core v1.0 RC", normalized)
+
+        self.assertIn("scripts/test_editor_integrations.py", beta)
+        self.assertIn("does not require Marketplace publication", " ".join(dx.split()))
+        self.assertIn("does not require Marketplace publication", " ".join(lsp.split()))
 
 
 if __name__ == "__main__":
