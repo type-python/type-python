@@ -7,6 +7,7 @@
       "sqlalchemy_typing_heavy": ["ecosystem-patterns-package"],
       "protocol_paramspec_heavy": ["standard-typing-package", "typeshed-heavy-package", "toy-task-package"],
       "typeddict_sdk_client": ["sdk-client-package"],
+      "flagship_core_package": ["flagship-core-package"],
       "namespace_package": ["namespace-package"],
       "partial_stub_package": ["pep561-partial-stub-package"],
       "large_py_typed_package": ["typeshed-heavy-package", "pep561-partial-stub-package"],
@@ -21,6 +22,26 @@
     {
       "name": "rich-package",
       "targets": ["3.10", "3.12", "3.13", "3.14"]
+    },
+    {
+      "name": "flagship-core-package",
+      "targets": ["3.12"],
+      "expected_stub_fragments": {
+        "3.12": [
+          "class PublicUser(TypedDict):",
+          "class UserWithoutSecret(TypedDict):",
+          "class ReadonlyUserRecord(TypedDict):",
+          "class Renderable(Protocol):",
+          "class LookupResult:",
+          "class Found(LookupResult):",
+          "class Missing(LookupResult):",
+          "def clean_label(value: str) -> str: ...",
+          "def apply_patch(record: UserRecord, patch: UserPatch) -> UserRecord: ...",
+          "def describe_result(result: LookupResult) -> str: ...",
+          "def render_all(items: list[Renderable]) -> list[str]: ...",
+          "def freeze_record(record: UserRecord) -> ReadonlyUserRecord: ..."
+        ]
+      }
     },
     {
       "name": "standard-typing-package",

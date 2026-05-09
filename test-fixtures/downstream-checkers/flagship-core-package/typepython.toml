@@ -1,0 +1,13 @@
+[project]
+src = ["src"]
+target_python = "3.12"
+
+[typing]
+profile = "library"
+strict = true
+strict_nulls = true
+require_known_public_types = true
+
+[emit]
+emit_pyi = true
+no_emit_on_error = true

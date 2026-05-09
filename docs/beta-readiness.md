@@ -97,6 +97,9 @@ A Beta release candidate must pass the tracked release gate before the classifie
 - CLI verification suite: `cargo test -p typepython-cli tests::verification::`
 - downstream checker smoke: `python scripts/downstream_checker_smoke.py` with mypy strict,
   pyright strict, basedpyright strict, and ty strict
+- flagship Core fixture smoke: `python scripts/flagship_core_smoke.py`, which checks, builds,
+  verifies, and inspects a composed author-package fixture covering sealed classes, `unknown`,
+  interfaces, supported `TypedDict` transforms, and public `.pyi` output
 - roadmap demo smoke: `python scripts/research_roadmap_demo_smoke.py`, which checks and builds the
   P0-P4 author-time semantics example and asserts portable output
 - fuzz smoke: `parser`, `type_expr`, and `lowering_stub`

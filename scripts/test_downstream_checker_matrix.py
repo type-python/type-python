@@ -21,6 +21,7 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
 
         self.assertIn("basic-package", matrix)
         self.assertIn("rich-package", matrix)
+        self.assertIn("flagship-core-package", matrix)
         self.assertIn("compat-package", matrix)
         self.assertIn("pydantic-like-package", matrix)
         self.assertIn("fastapi-like-package", matrix)
@@ -52,6 +53,7 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
             "sqlalchemy_typing_heavy",
             "protocol_paramspec_heavy",
             "typeddict_sdk_client",
+            "flagship_core_package",
             "namespace_package",
             "partial_stub_package",
             "large_py_typed_package",

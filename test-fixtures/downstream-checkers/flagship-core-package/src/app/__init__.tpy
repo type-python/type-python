@@ -1,0 +1,113 @@
+from typing import Literal, TypedDict, cast
+
+
+class ErrorInfo(TypedDict):
+    code: str
+    message: str
+
+
+class UserRecord(TypedDict):
+    id: int
+    name: str
+    status: Literal["active", "disabled"]
+    email: str | None
+    password_hash: str
+
+
+typealias UserPatch = Partial[UserRecord]
+typealias PublicUser = Pick[UserRecord, Literal["id", "name", "status"]]
+typealias UserWithoutSecret = Omit[UserRecord, Literal["password_hash"]]
+typealias ReadonlyUserRecord = Readonly[UserRecord]
+
+
+interface Renderable:
+    def render(self) -> str: ...
+
+
+data class User(Renderable):
+    id: int
+    name: str
+    status: Literal["active", "disabled"]
+
+    def render(self) -> str:
+        return f"{self.id}:{self.name}:{self.status}"
+
+
+sealed class LookupResult:
+    pass
+
+
+data class Found(LookupResult):
+    user: PublicUser
+
+
+data class Missing(LookupResult):
+    error: ErrorInfo
+
+
+class Client:
+    def get_user(self, user_id: int) -> UserRecord:
+        return cast(UserRecord, {
+            "id": user_id,
+            "name": "Ada",
+            "status": "active",
+            "email": None,
+            "password_hash": "redacted",
+        })
+
+
+def _normalize_name(value: unknown) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    return "unknown"
+
+
+def clean_label(value: str) -> str:
+    return _normalize_name(value)
+
+
+def public_user(record: UserRecord) -> PublicUser:
+    return {"id": record["id"], "name": record["name"], "status": record["status"]}
+
+
+def user_without_secret(record: UserRecord) -> UserWithoutSecret:
+    return {
+        "id": record["id"],
+        "name": record["name"],
+        "status": record["status"],
+        "email": record["email"],
+    }
+
+
+def apply_patch(record: UserRecord, patch: UserPatch) -> UserRecord:
+    return {
+        "id": record["id"],
+        "name": record["name"],
+        "status": record["status"],
+        "email": record["email"],
+        "password_hash": record["password_hash"],
+    }
+
+
+def lookup_user(client: Client, user_id: int) -> LookupResult:
+    if user_id < 0:
+        return Missing({"code": "not_found", "message": "missing user"})
+    return Found(public_user(client.get_user(user_id)))
+
+
+def describe_result(result: LookupResult) -> str:
+    match result:
+        case Found():
+            return "found"
+        case Missing():
+            return "missing"
+        case _:
+            return "unknown"
+
+
+def render_all(items: list[Renderable]) -> list[str]:
+    return [item.render() for item in items]
+
+
+def freeze_record(record: UserRecord) -> ReadonlyUserRecord:
+    return cast(ReadonlyUserRecord, record)
