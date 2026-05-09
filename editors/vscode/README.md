@@ -14,7 +14,7 @@ configuration changes.
 cd editors/vscode
 npm install
 npm run package
-code --install-extension typepython-vscode-0.4.0.vsix
+code --install-extension typepython-vscode-1.0.0-rc.1.vsix
 ```
 
 ## Settings

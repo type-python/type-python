@@ -23,4 +23,4 @@ __all__ = [
     "supported_formats",
 ]
 
-__version__ = "0.4.0"
+__version__ = "1.0.0-rc.1"

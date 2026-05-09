@@ -1,4 +1,4 @@
-# Core v1 Beta Readiness
+# Core v1 Beta and RC Readiness
 
 TypePython's Beta claim is intentionally narrow: **Core v1 Beta**. The package may include Supported
 DX, Experimental opt-in, and Roadmap / prototype capabilities, but those surfaces are not part of the
@@ -6,6 +6,10 @@ Beta compatibility promise until they are promoted explicitly. The canonical sta
 in [TypePython Feature Status](feature-status.md). Shipped-but-unstable feature gates are tracked in
 the [Experimental Feature Registry](experimental-features.md). Editor and workflow maturity is
 tracked separately in [DX and LSP Stability](dx-stability.md).
+
+The `1.0.0-rc.1` release promotes the Stable Core v1 surface to **Core v1.0 RC** while keeping the
+same tier split. The PyPI classifier remains `Development Status :: 4 - Beta` for this pre-release
+because Python packaging classifiers do not have a release-candidate status.
 
 ## Stable Core v1 During Beta
 

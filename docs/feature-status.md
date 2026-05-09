@@ -9,7 +9,7 @@ should use the status vocabulary below. Shipped-but-unstable features are tracke
 
 | Status | Meaning | May appear as a primary README differentiator? |
 | ------ | ------- | ---------------------------------------------- |
-| Stable Core v1 | The source syntax or configuration, author-package checker semantics, diagnostic code identity, emitted `.py` / `.pyi` shape, and interop boundary are part of the Core v1 Beta compatibility promise. | Yes, when author-time scope and external boundary are visible. |
+| Stable Core v1 | The source syntax or configuration, author-package checker semantics, diagnostic code identity, emitted `.py` / `.pyi` shape, and interop boundary are part of the Core v1 Beta compatibility promise and the Core v1.0 RC compatibility promise when the package is labeled as an RC. | Yes, when author-time scope and external boundary are visible. |
 | Supported DX, non-stable | The feature is implemented and useful, but command UX, JSON shape, heuristics, or editor behavior may change during Beta. | Only as toolchain/DX, with the non-stable status visible. |
 | Experimental opt-in | The feature is outside Core v1 conformance, requires an explicit opt-in flag or config setting, and must not change Core v1 behavior when disabled. | No; document it in Experimental sections only. |
 | Roadmap / prototype | The feature is a design direction, RFC slice, adapter prototype, or example fixture without a compatibility promise. | No; it must not be presented as a completed advantage over mypy, pyright, or PEP 695. |

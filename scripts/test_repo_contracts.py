@@ -156,10 +156,12 @@ class RepoContractsTests(unittest.TestCase):
         makefile = read_text("Makefile")
 
         self.assertIn("Development Status :: 4 - Beta", pyproject)
-        self.assertIn("Core v1 Beta", readme)
-        self.assertIn("Core v1 Beta", pypi_readme)
-        self.assertIn(f"Core v1 Beta** (v{package_version})", readme)
-        self.assertIn(f"Core v1 Beta** (v{package_version})", pypi_readme)
+        self.assertIn("Core v1.0 RC", readme)
+        self.assertIn("Core v1.0 RC", pypi_readme)
+        self.assertIn(f"Core v1.0 RC** (v{package_version})", readme)
+        self.assertIn(f"Core v1.0 RC** (v{package_version})", pypi_readme)
+        self.assertIn("release-candidate status", beta)
+        self.assertIn("Development Status :: 4 - Beta", beta)
         self.assertIn("not a blanket production-ready claim", faq)
         self.assertIn("Stable Core v1 During Beta", beta)
         self.assertIn("Core v1.0 RC Scope", beta)
@@ -451,12 +453,12 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("Supported Beta DX surface", lsp)
         self.assertIn("DX and LSP Stability", lsp)
 
-        self.assertIn("supported Beta stdio LSP server", readme)
-        self.assertIn("Supported Beta LSP server", pypi_readme)
+        self.assertIn("supported DX stdio LSP server", readme)
+        self.assertIn("Supported DX LSP server", pypi_readme)
         for text in (readme, pypi_readme):
             normalized = " ".join(text.split())
             self.assertIn("extension packaging", normalized)
-            self.assertIn("Core v1 Beta compatibility promise", normalized)
+            self.assertIn("Core v1.0 RC compatibility promise", normalized)
 
     def test_cli_json_schema_is_versioned_and_documented(self) -> None:
         main = read_text("crates/typepython_cli/src/main.rs")

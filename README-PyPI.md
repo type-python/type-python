@@ -21,15 +21,15 @@ downstream checkers.
 
 **No custom runtime. No required per-checker plugin for emitted output. No vendor lock-in.**
 
-> Status: **Core v1 Beta** (v0.4.0). Core syntax, config, `init`/`check`/`build`/
-> `clean`/`verify`, Core checker semantics, diagnostic code identity, and emitted
-> `.py`/`.pyi` compatibility are the stable Beta surfaces. Supported DX,
-> Experimental opt-in, and Roadmap / prototype features remain outside the Beta
-> compatibility promise and are tracked separately in the Experimental Feature
-> Registry.
-> The first v1.0 release candidate is scoped as Core v1.0 RC: editor UX,
-> VS Code packaging, `watch`, migration heuristics, and research slices remain
-> outside the stable v1.0 promise until their own gates are complete.
+> Status: **Core v1.0 RC** (v1.0.0-rc.1). Core syntax, config, `init`/`check`/
+> `build`/`clean`/`verify`, Core checker semantics, diagnostic code identity,
+> and emitted `.py`/`.pyi` compatibility are the release-candidate surfaces.
+> Supported DX, Experimental opt-in, and Roadmap / prototype features remain
+> outside the Core v1.0 RC compatibility promise and are tracked separately in
+> the Experimental Feature Registry.
+> This is not a full product-wide v1.0 RC: editor UX, VS Code packaging,
+> `watch`, migration heuristics, and research slices remain outside the stable
+> v1.0 promise until their own gates are complete.
 > Bug reports and contributions are very welcome.
 
 ## Install
@@ -124,11 +124,11 @@ TypePython-aware consumer.
   downstream rechecks when only a body changes.
 - **Full toolchain** — `init`, `check`, `build`, `watch`, `clean`, `verify`,
   `compat`, `api-diff`, `type-health`, `migrate`, `lsp`.
-- **Supported Beta LSP server** — hover, go to definition, references, rename,
+- **Supported DX LSP server** — hover, go to definition, references, rename,
   completions, signature help, real-time diagnostics, and code-action quick fixes.
   The repository includes a source-installable VS Code extension plus copy-paste
   setup for Neovim, Helix, Sublime Text, and Emacs. Editor UX and extension
-  packaging are still outside the Core v1 Beta compatibility promise.
+  packaging are still outside the Core v1.0 RC compatibility promise.
 - **Standard, portable output** — emitted `.py` + `.pyi` work with mypy,
   pyright, and ty out of the box. PEP 561 `py.typed` is written automatically.
 - **Mixed projects** — `.tpy`, `.py`, and `.pyi` live in the same source tree.

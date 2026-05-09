@@ -2,19 +2,19 @@
 
 This report maps the feature matrix in `docs/spec/conformance-and-test-plan-v1.md` to test evidence commands. It is intentionally conservative: missing evidence is reported as `missing`, not inferred from nearby tests.
 
-It also extracts normative `MUST` and `MUST NOT` rules from `docs/spec/` and maps each externally visible Core v1 Beta rule to the nearest concrete test family when one can be inferred. Rules outside the Core v1 Beta compatibility claim remain visible as `meta-rule` or `not-claimed-beta` rather than disappearing from review.
+It also extracts normative `MUST` and `MUST NOT` rules from `docs/spec/` and maps each externally visible Core v1 Beta / Core v1.0 RC rule to the nearest concrete test family when one can be inferred. Rules outside the Core v1 Beta / Core v1.0 RC compatibility claim remain visible as `meta-rule` or `not-claimed-beta` rather than disappearing from review.
 
-Feature claims: 58. Normative rules: 318 (292 mapped, 26 non-blocking for Core v1 Beta, 0 need mapping).
+Feature claims: 58. Normative rules: 318 (292 mapped, 26 non-blocking for Core v1 Beta / Core v1.0 RC, 0 need mapping).
 
 ## Beta Scope Summary
 
-Core v1 is the Beta compatibility claim. DX v1 and Experimental v1 features may ship in the package, but their UX details, adapter manifests, runtime validators, migration heuristics, conditional returns, pass-through inference, and cache internals are not compatibility-stable unless a later document explicitly promotes them.
+Core v1 is the Beta compatibility claim and the Core v1.0 RC release-candidate claim when the package is labeled as an RC. DX v1 and Experimental v1 features may ship in the package, but their UX details, adapter manifests, runtime validators, migration heuristics, conditional returns, pass-through inference, and cache internals are not compatibility-stable unless a later document explicitly promotes them.
 
 | Status | Meaning |
 | ------ | ------- |
-| `mapped` | Evidence command(s) cover this rule for the Core v1 Beta claim. |
-| `meta-rule` | Spec governance or terminology rule; non-blocking for Core v1 Beta runtime/tool behavior. |
-| `not-claimed-beta` | Not part of the externally visible Core v1 Beta compatibility claim. |
+| `mapped` | Evidence command(s) cover this rule for the Core v1 Beta / Core v1.0 RC claim. |
+| `meta-rule` | Spec governance or terminology rule; non-blocking for Core v1 Beta / Core v1.0 RC runtime/tool behavior. |
+| `not-claimed-beta` | Not part of the externally visible Core v1 Beta / Core v1.0 RC compatibility claim. |
 
 ## Feature Matrix Evidence
 

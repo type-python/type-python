@@ -14,7 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="Python 3.9+" /></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/built%20with-rust-orange.svg" alt="Built with Rust" /></a>
-  <a href="https://github.com/type-python/type-python/issues"><img src="https://img.shields.io/badge/status-Core%20v1%20Beta-blue.svg" alt="Core v1 Beta" /></a>
+  <a href="https://github.com/type-python/type-python/issues"><img src="https://img.shields.io/badge/status-Core%20v1.0%20RC-blue.svg" alt="Core v1.0 RC" /></a>
 </p>
 
 <p align="center">
@@ -142,7 +142,7 @@ Full reference: [`docs/cli-reference.md`](docs/cli-reference.md).
 
 ## Editor support
 
-`typepython lsp --project .` is a supported Beta stdio LSP server with:
+`typepython lsp --project .` is a supported DX stdio LSP server with:
 
 - real-time diagnostics, hover, go to definition, references, rename
 - completions, signature help
@@ -153,7 +153,7 @@ Full reference: [`docs/cli-reference.md`](docs/cli-reference.md).
 The repository includes a source-installable VS Code extension under
 [`editors/vscode`](editors/vscode). Neovim, Helix, Sublime Text, and Emacs can
 launch the server with copy-paste LSP snippets. Editor UX, command names, and
-extension packaging are not part of the Core v1 Beta compatibility promise yet.
+extension packaging are not part of the Core v1.0 RC compatibility promise yet.
 Setup snippets are in [`docs/lsp.md`](docs/lsp.md), and the promotion gate is
 tracked in [`docs/dx-stability.md`](docs/dx-stability.md).
 
@@ -206,18 +206,18 @@ class BaseModel: ...
 
 ## Project status
 
-TypePython is **Core v1 Beta** (v0.4.0). The Beta claim is deliberately scoped: Core syntax and
-checker semantics, configuration, `init`/`check`/`build`/`clean`/`verify`, diagnostic code identity,
-and emitted `.py`/`.pyi` compatibility are the stable surfaces. Supported DX, Experimental opt-in,
-and Roadmap / prototype features ship for feedback but are not compatibility-stable. See
+TypePython is **Core v1.0 RC** (v1.0.0-rc.1). The release-candidate claim is deliberately scoped:
+Core syntax and checker semantics, configuration, `init`/`check`/`build`/`clean`/`verify`,
+diagnostic code identity, and emitted `.py`/`.pyi` compatibility are the release-candidate
+surfaces. Supported DX, Experimental opt-in, and Roadmap / prototype features ship for feedback but
+are not compatibility-stable. See
 [`docs/beta-readiness.md`](docs/beta-readiness.md),
 [`docs/feature-status.md`](docs/feature-status.md), and
 [`docs/experimental-features.md`](docs/experimental-features.md).
 
-The first v1.0 release candidate is scoped as **Core v1.0 RC**. It does not promote editor UX,
-VS Code packaging, `watch`, migration heuristics, or research slices to stable v1.0 commitments;
-those remain Supported DX, Experimental opt-in, or Roadmap / prototype until their own gates are
-complete.
+This is not a full product-wide v1.0 RC. It does not promote editor UX, VS Code packaging, `watch`,
+migration heuristics, or research slices to stable v1.0 commitments; those remain Supported DX,
+Experimental opt-in, or Roadmap / prototype until their own gates are complete.
 
 The breakdown:
 
@@ -230,8 +230,9 @@ The breakdown:
 
 Conformance and diagnostic-coverage reports are checked into the repo: [`docs/conformance-report.md`](docs/conformance-report.md), [`docs/diagnostic-test-coverage.md`](docs/diagnostic-test-coverage.md).
 
-> **Beta does not mean all roadmap features are stable.** It means the Core v1 authoring and emit
-> contract is ready for serious trial use while DX and Experimental surfaces continue to evolve.
+> **Core v1.0 RC does not mean all roadmap features are stable.** It means the Core v1 authoring
+> and emit contract is in release-candidate status while DX and Experimental surfaces continue to
+> evolve.
 
 ## Configuration
 

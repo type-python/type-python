@@ -13,6 +13,10 @@ PACKAGE_INIT = ROOT / "typepython" / "__init__.py"
 CARGO_LOCK = ROOT / "Cargo.lock"
 README = ROOT / "README.md"
 PYPI_README = ROOT / "README-PyPI.md"
+LSP_DOC = ROOT / "docs" / "lsp.md"
+VSCODE_PACKAGE = ROOT / "editors" / "vscode" / "package.json"
+VSCODE_README = ROOT / "editors" / "vscode" / "README.md"
+VERSION_PATTERN = r"\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?"
 
 
 def replace_single(pattern: str, replacement: str, text: str, label: str) -> str:
@@ -30,10 +34,10 @@ def replace_literal(old: str, new: str, text: str, label: str) -> str:
 
 def replace_status_version(text: str, version: str, label: str) -> str:
     return replace_single(
-        r"\(v\d+\.\d+\.\d+\)",
+        rf"\(v{VERSION_PATTERN}\)",
         f"(v{version})",
         text,
-        f"{label} Core v1 Beta status version",
+        f"{label} Core status version",
     )
 
 
@@ -96,11 +100,13 @@ def update_cargo_lock(text: str, package_names: list[str], new_version: str) -> 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Synchronize TypePython package versions")
-    parser.add_argument("version", help="New semantic version, for example 0.0.8")
+    parser.add_argument("version", help="New semantic version, for example 0.0.8 or 1.0.0-rc.1")
     args = parser.parse_args()
 
-    if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
-        raise SystemExit(f"invalid version {args.version!r}; expected semantic version like 0.0.8")
+    if not re.fullmatch(VERSION_PATTERN, args.version):
+        raise SystemExit(
+            f"invalid version {args.version!r}; expected semantic version like 0.0.8 or 1.0.0-rc.1"
+        )
 
     pyproject_text = PYPROJECT_TOML.read_text()
     old_version = extract_pyproject_version(pyproject_text)
@@ -110,6 +116,9 @@ def main() -> None:
     lock_text = CARGO_LOCK.read_text()
     readme_text = README.read_text()
     pypi_readme_text = PYPI_README.read_text()
+    lsp_doc_text = LSP_DOC.read_text()
+    vscode_package_text = VSCODE_PACKAGE.read_text()
+    vscode_readme_text = VSCODE_README.read_text()
 
     cargo_text = replace_single(
         r'^version = "[^"]+"$',
@@ -134,6 +143,16 @@ def main() -> None:
     pypi_readme_text = replace_status_version(
         pypi_readme_text, args.version, "README-PyPI.md"
     )
+    lsp_doc_text = replace_literal(old_version, args.version, lsp_doc_text, "docs/lsp.md")
+    vscode_package_text = replace_single(
+        r'^  "version": "[^"]+",$',
+        f'  "version": "{args.version}",',
+        vscode_package_text,
+        "editors/vscode/package.json version",
+    )
+    vscode_readme_text = replace_literal(
+        old_version, args.version, vscode_readme_text, "editors/vscode/README.md"
+    )
 
     CARGO_TOML.write_text(cargo_text)
     PYPROJECT_TOML.write_text(pyproject_text)
@@ -141,6 +160,9 @@ def main() -> None:
     CARGO_LOCK.write_text(lock_text)
     README.write_text(readme_text)
     PYPI_README.write_text(pypi_readme_text)
+    LSP_DOC.write_text(lsp_doc_text)
+    VSCODE_PACKAGE.write_text(vscode_package_text)
+    VSCODE_README.write_text(vscode_readme_text)
 
     print(f"updated version {old_version} -> {args.version}")
 

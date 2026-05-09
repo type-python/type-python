@@ -2,7 +2,7 @@
   "name": "typepython-vscode",
   "displayName": "TypePython",
   "description": "VS Code language client for the TypePython LSP server.",
-  "version": "0.4.0",
+  "version": "1.0.0-rc.1",
   "publisher": "type-python",
   "license": "MIT",
   "engines": {
