@@ -2145,26 +2145,16 @@ fn resolve_direct_call_result_semantic_type_with_context(
     line: usize,
     callee: &str,
 ) -> Option<SemanticType> {
-    resolve_direct_callable_return_semantic_type_for_line_with_context(
-        context, node, nodes, callee, line,
-    )
-    .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, callee))
-    .or_else(|| {
-        let has_contextual_local_binding = name_has_contextual_local_binding(
-            context,
-            node,
-            nodes,
-            current_owner_name,
-            current_owner_type_name,
-            line,
-            callee,
-        );
-        let has_module_value_binding = current_owner_name.is_none()
-            && name_has_module_value_binding(context, node, nodes, line, callee);
-        if !has_contextual_local_binding && !has_module_value_binding {
-            return None;
-        }
-
+    let has_contextual_local_binding = name_has_contextual_local_binding(
+        context,
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        line,
+        callee,
+    );
+    if has_contextual_local_binding {
         let callable = resolve_direct_name_reference_semantic_type_with_context(
             context,
             node,
@@ -2175,9 +2165,34 @@ fn resolve_direct_call_result_semantic_type_with_context(
             current_owner_type_name,
             line,
             callee,
-        )?;
-        callable.callable_parts().map(|(_, return_type)| return_type.clone())
-    })
+        )
+        .or_else(|| {
+            source_scope_param_semantic_type_with_context(
+                context,
+                node,
+                current_owner_name,
+                current_owner_type_name,
+                callee,
+            )
+        })?;
+        return callable.callable_parts().map(|(_, return_type)| return_type.clone());
+    }
+
+    if let Some(callable) = resolve_module_level_assignment_reference_semantic_type_with_options(
+        node,
+        nodes,
+        None,
+        line,
+        callee,
+        context.assignability_options(),
+    ) {
+        return callable.callable_parts().map(|(_, return_type)| return_type.clone());
+    }
+
+    resolve_direct_callable_return_semantic_type_for_line_with_context(
+        context, node, nodes, callee, line,
+    )
+    .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, callee))
 }
 
 #[allow(clippy::too_many_arguments)]
