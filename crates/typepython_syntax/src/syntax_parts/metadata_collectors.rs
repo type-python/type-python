@@ -2819,13 +2819,14 @@ impl ExpressionUseSiteCollector<'_, '_> {
         let Expr::Call(call) = expr else {
             return false;
         };
-        if !matches!(call.func.as_ref(), Expr::Attribute(_)) {
+        let Expr::Attribute(attribute) = call.func.as_ref() else {
             return false;
-        }
+        };
 
         for value in expression_use_site_metadata(self.source, expr) {
             self.push_expression_use_site(expr, value);
         }
+        self.visit_expr(attribute.value.as_ref());
         for argument in &call.arguments.args {
             self.visit_expr(argument);
         }
