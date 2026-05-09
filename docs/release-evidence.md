@@ -5,6 +5,78 @@ that can be audited after the fact.
 The GitHub `rust` workflow remains the authoritative cross-platform publish gate;
 local evidence is a maintainer preflight, not a replacement for the CI matrix.
 
+## 2026-05-09 macOS Local Preflight for `d341e4a`
+
+Scope:
+
+- This entry records the local preflight for source commit
+  `d341e4afe5f783e63fb8dc9f9c82d6345bacbf7f`.
+- The follow-up evidence commit is docs-only and records this run.
+- This local evidence is not sufficient for publication by itself.
+- CI evidence is still pending: the release commit must have a successful
+  GitHub `rust` workflow run with a retained `beta-release-gate` job URL or
+  artifact.
+- `gh --version` failed locally because the GitHub CLI is not installed, and no
+  branch push was performed from this preflight.
+
+Environment:
+
+- Host: macOS 15.7.5 (24G624), Apple Silicon
+- Rust stable: `cargo 1.94.0 (85eff7c80 2026-01-15)`, `rustc 1.94.0 (4a4ef493e 2026-03-02)`
+- Rust nightly for fuzzing: `cargo 1.97.0-nightly (eb9b60f1f 2026-04-24)`, `rustc 1.97.0-nightly (37d85e592 2026-04-28)`
+- `cargo-fuzz 0.13.1`
+- Host Python: `Python 3.9.6`
+- `uv 0.8.14 (af856fb88 2025-08-28)`
+- Native-target smoke interpreters: `CPython 3.13.7` and `CPython 3.14.0rc2` from `uv`
+- Downstream checkers: `mypy 1.19.1`, `pyright 1.1.409`, `basedpyright 1.39.3`, `ty 0.0.32`
+- Packaging tools: `build 1.4.4`, `twine 6.2.0`
+
+Passed commands:
+
+| Gate | Result | Notes |
+| --- | --- | --- |
+| `RUSTUP_TOOLCHAIN=1.94.0 cargo fmt --all --check` | PASS | Full workspace format check. |
+| `RUSTUP_TOOLCHAIN=1.94.0 cargo clippy --workspace --all-targets -- -D warnings` | PASS | Full workspace lint gate. |
+| `RUSTUP_TOOLCHAIN=1.94.0 cargo test --workspace` | PASS | Full Rust workspace test suite. |
+| `python3 scripts/conformance_report.py --check` | PASS | Conformance report is current. |
+| `python3 scripts/diagnostic_test_coverage.py --check` | PASS | Diagnostic coverage report is current. |
+| `python3 -m unittest discover -s scripts -p 'test_*.py'` | PASS | 74 Python repo-script tests. |
+| `PATH="/tmp/typepython-checkers-py313/bin:/tmp/typepython-checkers-venv/bin:$PATH" python3 scripts/downstream_checker_smoke.py` | PASS | Full fixture matrix with mypy strict, pyright strict, basedpyright strict, and ty strict. |
+| `python3 scripts/research_roadmap_demo_smoke.py` | PASS | P0-P4 roadmap example checked and built with portable output. |
+| `python3 scripts/refresh_stdlib_stubs.py --check` | PASS | `stdlib_sha256=927023866400ef3cc991521fa89f827fc16132cfef3d3f48530e5780cdb4587c`, `typeshed_commit=68517355a3269be407bde20fea8fd66af2dc4241`. |
+| `RUSTUP_TOOLCHAIN=1.94.0 cargo bench --workspace --no-run` | PASS | Bench binaries compile for the workspace. |
+| `python3 -m build --sdist --wheel` | PASS | Built local sdist and universal2 wheel. |
+| `python3 -m twine check dist/*` | PASS | Local sdist and wheel metadata passed. |
+| `make quickstart-smoke` | PASS | Rebuilt sdist/wheel, ran `twine check dist/*`, installed wheel into a clean venv, then ran `typepython --help`, `init`, `check`, `build`, and `verify`. |
+| `TYPEPYTHON_BIN="$PWD/target/release/typepython" uv run --no-project --python 3.13 python scripts/native_target_smoke.py --target-python 3.13` | PASS | Native Python 3.13 target smoke. |
+| `PYTHONPATH="$PWD" TYPEPYTHON_BIN="$PWD/target/release/typepython" uv run --no-project --python 3.14 python scripts/native_target_smoke.py --target-python 3.14` | PASS | Native Python 3.14 target smoke using `CPython 3.14.0rc2`. |
+| `python3 scripts/industrial_perf_smoke.py --json-out /tmp/typepython-industrial-perf.json` | PASS | 512 modules, 128 external stub packages, Python 3.12 target. |
+| `make fuzz-smoke` | PASS | `parser`, `type_expr`, and `lowering_stub`, 30 seconds each; generated corpus byproducts were discarded. |
+
+Local package artifacts:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `dist/type_python-0.4.0-py3-none-macosx_10_9_universal2.whl` | `222e4cf907fd29b0a6f1b6a86b5aef8f60947d65799e23e981001cfdfb226c68` |
+| `dist/type_python-0.4.0.tar.gz` | `0dac11ce854031cb8d990acb73f66c46db4de948f11e2c34df3c23f67443467b` |
+
+Industrial performance smoke:
+
+| Step | Time | Peak RSS |
+| --- | ---: | ---: |
+| cold check | 1.927s | 67.8 MiB |
+| warm check | 0.720s | 80.0 MiB |
+| single-file implementation edit | 0.751s | 83.7 MiB |
+| public surface edit | 1.624s | 86.8 MiB |
+
+CI evidence required before this entry is publishable:
+
+- Push the release commit to a GitHub branch that runs
+  `.github/workflows/rust.yml`.
+- Record the successful `beta-release-gate` job URL or retained artifact here.
+- Confirm the CI run includes Linux, macOS, Windows, Python 3.13, Python 3.14,
+  fuzz smoke, coverage, and the uploaded `industrial-performance-smoke` artifact.
+
 ## 2026-05-08 macOS Local RC Preflight
 
 Scope:
