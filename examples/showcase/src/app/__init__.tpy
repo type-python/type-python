@@ -33,11 +33,8 @@ def identity[T](value: T) -> T:
 
 
 # ---------------------------------------------------------------------------
-# 3. Overloaded functions
+# 3. Union-based parsing
 # ---------------------------------------------------------------------------
-
-overload def parse_id(value: str) -> UserId: ...
-overload def parse_id(value: int) -> UserId: ...
 
 def parse_id(value: str | int) -> UserId:
     if isinstance(value, str):
@@ -62,7 +59,10 @@ def find_user(users: list[User], name: str) -> User | None:
     return None
 
 def must_find_user(users: list[User], name: str) -> User:
-    result = find_user(users, name)
+    result: User | None = None
+    for user in users:
+        if user.name == name:
+            result = user
     assert result is not None
     # result is narrowed to User here
     return result

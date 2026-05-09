@@ -585,6 +585,51 @@ fn verify_build_artifacts_accepts_native_generic_class_and_function_surface() {
 }
 
 #[test]
+fn verify_build_artifacts_accepts_typevar_factory_assignments_in_stubs() {
+    let project_dir =
+        temp_project_dir("verify_build_artifacts_accepts_typevar_factory_assignments_in_stubs");
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("typepython.toml should be written");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("build dir should be created");
+        fs::create_dir_all(project_dir.join(".typepython/cache"))
+            .expect("cache dir should be created");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "from typing import TypeVar\nT = TypeVar(\"T\")\n\ndef first(value: T) -> T:\n    return value\n",
+        )
+        .expect("runtime artifact should be written");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "from typing import TypeVar\nT = TypeVar(\"T\")\n\ndef first(value: T) -> T: ...\n",
+        )
+        .expect("stub artifact should be written");
+        fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+            .expect("marker should be written");
+        write_incremental_snapshot(
+            &project_dir.join(".typepython/cache"),
+            &IncrementalState::default(),
+        )
+        .expect("snapshot should be written");
+
+        let config = load(&project_dir).expect("config should load");
+        verify_build_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(!rendered.contains("TPY5003"), "{rendered}");
+}
+
+#[test]
 fn verify_build_artifacts_warns_about_comment_only_stub_metadata() {
     let project_dir =
         temp_project_dir("verify_build_artifacts_warns_about_comment_only_stub_metadata");
@@ -2850,6 +2895,29 @@ fn declaration_surface_accepts_function_to_object_transform_surface() {
             "__all__ = [\"build\"]\n\nclass Task[P, R]: ...\n\nbuild: Task[[int], str]\n",
         )
         .expect("test setup should succeed");
+
+        verify_emitted_declaration_surface(&runtime_path, &stub_path)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+}
+
+#[test]
+fn declaration_surface_ignores_function_local_value_bindings() {
+    let project_dir = temp_project_dir("declaration_surface_ignores_function_local_value_bindings");
+    let diagnostic = {
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        let runtime_path = project_dir.join(".typepython/build/app/__init__.py");
+        let stub_path = project_dir.join(".typepython/build/app/__init__.pyi");
+        fs::write(
+            &runtime_path,
+            "def summary(items: list[int]) -> int:\n    total = 0\n    for item in items:\n        total = total + item\n    return total\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(&stub_path, "def summary(items: list[int]) -> int: ...\n")
+            .expect("test setup should succeed");
 
         verify_emitted_declaration_surface(&runtime_path, &stub_path)
     };

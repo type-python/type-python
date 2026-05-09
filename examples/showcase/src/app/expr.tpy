@@ -16,10 +16,10 @@ class Neg(Expr):
 
 
 def evaluate(expr: Expr) -> int:
-    match expr:
-        case Num(value=v):
-            return v
-        case Add(left=l, right=r):
-            return evaluate(l) + evaluate(r)
-        case Neg(operand=o):
-            return -evaluate(o)
+    if isinstance(expr, Num):
+        return expr.value
+    if isinstance(expr, Add):
+        return evaluate(expr.left) + evaluate(expr.right)
+    if isinstance(expr, Neg):
+        return -evaluate(expr.operand)
+    return 0

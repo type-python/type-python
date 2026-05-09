@@ -7,7 +7,7 @@ FUZZ_SMOKE_SECONDS ?= 30
 FUZZ_LONG_SECONDS ?= 300
 COVERAGE_MIN_LINES ?= 20
 
-.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers flagship-smoke roadmap-demo-smoke coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare perf-smoke package-check quickstart-smoke beta-release-gate snapshot-review docs ci bump-version
+.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers flagship-smoke examples-smoke roadmap-demo-smoke coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare perf-smoke package-check quickstart-smoke beta-release-gate snapshot-review docs ci bump-version
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -43,6 +43,9 @@ test-downstream-checkers:
 flagship-smoke:
 	$(PYTHON) scripts/flagship_core_smoke.py
 
+examples-smoke:
+	$(PYTHON) scripts/examples_smoke.py
+
 roadmap-demo-smoke:
 	$(PYTHON) scripts/research_roadmap_demo_smoke.py
 
@@ -70,7 +73,7 @@ diagnostic-coverage-check:
 	$(PYTHON) scripts/diagnostic_test_coverage.py --check
 
 repo-contracts:
-	$(PYTHON) -m unittest scripts/test_repo_contracts.py scripts/test_downstream_checker_matrix.py scripts/test_flagship_core_smoke.py scripts/test_research_roadmap_demo_smoke.py scripts/test_industrial_perf_smoke.py scripts/test_editor_integrations.py scripts/test_packaging_contracts.py
+	$(PYTHON) -m unittest scripts/test_repo_contracts.py scripts/test_downstream_checker_matrix.py scripts/test_flagship_core_smoke.py scripts/test_examples_smoke.py scripts/test_research_roadmap_demo_smoke.py scripts/test_industrial_perf_smoke.py scripts/test_editor_integrations.py scripts/test_packaging_contracts.py
 
 bench:
 	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker
@@ -91,7 +94,7 @@ quickstart-smoke: package-check
 	"$$tmpdir/venv/bin/python" -m pip install --force-reinstall dist/*.whl; \
 	"$$tmpdir/venv/bin/python" scripts/quickstart_smoke.py
 
-beta-release-gate: fmt-check lint test test-cli-verification test-downstream-checkers flagship-smoke roadmap-demo-smoke perf-smoke fuzz-smoke package-check quickstart-smoke stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts
+beta-release-gate: fmt-check lint test test-cli-verification test-downstream-checkers flagship-smoke examples-smoke roadmap-demo-smoke perf-smoke fuzz-smoke package-check quickstart-smoke stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts
 
 bump-version:
 	@test -n "$(VERSION)" || (echo "Usage: make bump-version VERSION=0.0.8" && exit 1)
@@ -112,4 +115,4 @@ snapshot-review:
 docs:
 	RUSTDOCFLAGS="$(RUSTDOCFLAGS)" $(CARGO) doc --workspace --no-deps
 
-ci: fmt-check lint test-fast test-cli-verification test-downstream-checkers flagship-smoke roadmap-demo-smoke stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench-check package-check
+ci: fmt-check lint test-fast test-cli-verification test-downstream-checkers flagship-smoke examples-smoke roadmap-demo-smoke stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench-check package-check

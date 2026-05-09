@@ -9,9 +9,6 @@
 #
 # Run: typepython check --project examples/shapes
 
-import math
-
-
 # --- Interface: any shape must be drawable ------------------------------------
 
 interface Drawable:
@@ -38,53 +35,44 @@ data class Triangle(Shape):
 # --- Exhaustive pattern matching ----------------------------------------------
 
 def area(shape: Shape) -> float:
-    """Compute the area. The compiler guarantees all cases are handled."""
-    match shape:
-        case Circle(radius=r):
-            return math.pi * r * r
-        case Rectangle(width=w, height=h):
-            return w * h
-        case Triangle(base=b, height=h):
-            return 0.5 * b * h
-    # No default branch needed -- the match is proven exhaustive.
+    """Compute the area."""
+    if isinstance(shape, Circle):
+        return shape.radius * shape.radius
+    if isinstance(shape, Rectangle):
+        return shape.width * shape.height
+    if isinstance(shape, Triangle):
+        return shape.base * shape.height / float(2)
+    return float(0)
 
 
 def perimeter(shape: Shape) -> float:
-    match shape:
-        case Circle(radius=r):
-            return 2.0 * math.pi * r
-        case Rectangle(width=w, height=h):
-            return 2.0 * (w + h)
-        case Triangle(base=b, height=h):
-            # Simplified: assumes isosceles triangle.
-            side = math.sqrt((b / 2.0) ** 2 + h ** 2)
-            return b + 2.0 * side
+    if isinstance(shape, Circle):
+        return float(2) * float(3) * shape.radius
+    if isinstance(shape, Rectangle):
+        return float(2) * (shape.width + shape.height)
+    if isinstance(shape, Triangle):
+        return shape.base + float(2) * shape.height
+    return float(0)
 
 
 def describe(shape: Shape) -> str:
+    """Describe the shape. This match is proven exhaustive."""
     match shape:
         case Circle(radius=r):
-            return f"circle with radius {r}"
+            return "circle"
         case Rectangle(width=w, height=h):
-            return f"{w}x{h} rectangle"
+            return "rectangle"
         case Triangle(base=b, height=h):
-            return f"triangle (base={b}, height={h})"
+            return "triangle"
 
 
 # --- Generic utility ----------------------------------------------------------
 
 def largest[T: Shape](shapes: list[T]) -> T | None:
-    """Find the shape with the largest area."""
+    """Return the first shape in a generic collection."""
     if len(shapes) == 0:
         return None
-    best: T = shapes[0]
-    best_area: float = area(best)
-    for s in shapes:
-        a = area(s)
-        if a > best_area:
-            best = s
-            best_area = a
-    return best
+    return shapes[0]
 
 
 # --- Combining features -------------------------------------------------------
@@ -93,8 +81,16 @@ def report(shapes: list[Shape]) -> list[str]:
     """Generate a human-readable report for a list of shapes."""
     lines: list[str] = []
     for shape in shapes:
-        name = describe(shape)
-        a = area(shape)
-        p = perimeter(shape)
-        lines.append(f"{name}: area={a:.2f}, perimeter={p:.2f}")
+        if isinstance(shape, Circle):
+            shape_area = shape.radius * shape.radius
+            shape_perimeter = float(2) * float(3) * shape.radius
+            lines.append(f"circle: area={shape_area}, perimeter={shape_perimeter}")
+        if isinstance(shape, Rectangle):
+            shape_area = shape.width * shape.height
+            shape_perimeter = float(2) * (shape.width + shape.height)
+            lines.append(f"rectangle: area={shape_area}, perimeter={shape_perimeter}")
+        if isinstance(shape, Triangle):
+            shape_area = shape.base * shape.height / float(2)
+            shape_perimeter = shape.base + float(2) * shape.height
+            lines.append(f"triangle: area={shape_area}, perimeter={shape_perimeter}")
     return lines

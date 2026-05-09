@@ -100,6 +100,9 @@ A Beta release candidate must pass the tracked release gate before the classifie
 - flagship Core fixture smoke: `python scripts/flagship_core_smoke.py`, which checks, builds,
   verifies, and inspects a composed author-package fixture covering sealed classes, `unknown`,
   interfaces, supported `TypedDict` transforms, and public `.pyi` output
+- examples golden smoke: `python scripts/examples_smoke.py`, which copies every first-party
+  example into a clean workspace, runs `check`, `build`, and `verify`, then asserts representative
+  `.pyi` fragments and runtime erasure of TypePython-only syntax
 - roadmap demo smoke: `python scripts/research_roadmap_demo_smoke.py`, which checks and builds the
   P0-P4 author-time semantics example and asserts portable output
 - fuzz smoke: `parser`, `type_expr`, and `lowering_stub`

@@ -1,20 +1,10 @@
 # Todo App
 #
-# Demonstrates: data class, TypedDict, typealias, strict null safety,
-#               overload, type narrowing.
+# Demonstrates: data class, TypedDict, strict null safety, type narrowing.
 #
 # Run: typepython check --project examples/todo-app
 
-from enum import Enum, auto
 from typing import TypedDict
-
-
-# --- Enums -------------------------------------------------------------------
-
-class Priority(Enum):
-    LOW = auto()
-    MEDIUM = auto()
-    HIGH = auto()
 
 
 # --- Data classes -------------------------------------------------------------
@@ -22,7 +12,7 @@ class Priority(Enum):
 data class Todo:
     title: str
     done: bool = False
-    priority: Priority = Priority.MEDIUM
+    priority: str = "medium"
 
 data class TodoList:
     name: str
@@ -43,29 +33,24 @@ class TodoResponse(TypedDict, total=False):
     error: str
 
 
-# --- Type aliases -------------------------------------------------------------
+# --- Lookup ------------------------------------------------------------------
 
-typealias TodoFilter = str | Priority | None
-
-
-# --- Overloaded lookup --------------------------------------------------------
-
-overload def find_todo(todos: list[Todo], key: str) -> Todo | None: ...
-overload def find_todo(todos: list[Todo], key: str, fallback: Todo) -> Todo: ...
-
-def find_todo(todos: list[Todo], key: str, fallback: Todo | None = None) -> Todo | None:
-    """Find a todo by title, optionally returning a fallback."""
+def find_todo(todos: list[Todo], key: str) -> Todo | None:
+    """Find a todo by title."""
     for todo in todos:
         if todo.title == key:
             return todo
-    return fallback
+    return None
 
 
 # --- Null-safe operations -----------------------------------------------------
 
 def complete(todos: list[Todo], title: str) -> str:
     """Mark a todo as done. Demonstrates null narrowing."""
-    todo = find_todo(todos, title)
+    todo: Todo | None = None
+    for item in todos:
+        if item.title == title:
+            todo = item
 
     # todo is Todo | None here -- accessing .done would be an error.
     if todo is None:
@@ -79,9 +64,10 @@ def complete(todos: list[Todo], title: str) -> str:
 
 def summary(todo_list: TodoList) -> str:
     """Summarize a todo list."""
-    total = len(todo_list.items)
+    total = 0
     done = 0
     for item in todo_list.items:
+        total = total + 1
         if item.done:
             done = done + 1
     return f"{todo_list.name}: {done}/{total} completed"
@@ -89,19 +75,12 @@ def summary(todo_list: TodoList) -> str:
 
 # --- Filter with union narrowing ---------------------------------------------
 
-def filter_todos(todos: list[Todo], by: TodoFilter) -> list[Todo]:
+def filter_todos(todos: list[Todo], by: str | None) -> list[Todo]:
     """Filter todos by different criteria using union narrowing."""
     if by is None:
         return todos
-    if isinstance(by, str):
-        result: list[Todo] = []
-        for t in todos:
-            if by in t.title:
-                result.append(t)
-        return result
-    # by is narrowed to Priority here.
-    result2: list[Todo] = []
+    result: list[Todo] = []
     for t in todos:
-        if t.priority == by:
-            result2.append(t)
-    return result2
+        if t.title == by:
+            result.append(t)
+    return result

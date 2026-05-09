@@ -2021,9 +2021,7 @@ fn verify_stub_syntax_rules(
                 ));
             }
             typepython_syntax::SyntaxStatement::Value(statement)
-                if statement.owner_name.is_none()
-                    && statement.annotation.is_none()
-                    && statement.names == [String::from("__all__")] => {}
+                if stub_unannotated_value_statement_is_allowed(statement) => {}
             typepython_syntax::SyntaxStatement::Value(statement)
                 if statement.owner_name.is_none() && statement.annotation.is_none() =>
             {
@@ -2195,22 +2193,46 @@ fn stub_metadata_expectation_warnings(path: &Path) -> Vec<Diagnostic> {
 }
 
 fn stub_statement_is_runtime(statement: &typepython_syntax::SyntaxStatement) -> bool {
-    matches!(
-        statement,
+    match statement {
+        typepython_syntax::SyntaxStatement::Call(statement)
+            if stub_type_parameter_factory_call_is_allowed(statement) =>
+        {
+            false
+        }
         typepython_syntax::SyntaxStatement::Call(_)
-            | typepython_syntax::SyntaxStatement::MemberAccess(_)
-            | typepython_syntax::SyntaxStatement::MethodCall(_)
-            | typepython_syntax::SyntaxStatement::Return(_)
-            | typepython_syntax::SyntaxStatement::Yield(_)
-            | typepython_syntax::SyntaxStatement::If(_)
-            | typepython_syntax::SyntaxStatement::Assert(_)
-            | typepython_syntax::SyntaxStatement::Invalidate(_)
-            | typepython_syntax::SyntaxStatement::Match(_)
-            | typepython_syntax::SyntaxStatement::For(_)
-            | typepython_syntax::SyntaxStatement::With(_)
-            | typepython_syntax::SyntaxStatement::ExceptHandler(_)
-            | typepython_syntax::SyntaxStatement::Unsafe(_)
-    )
+        | typepython_syntax::SyntaxStatement::MemberAccess(_)
+        | typepython_syntax::SyntaxStatement::MethodCall(_)
+        | typepython_syntax::SyntaxStatement::Return(_)
+        | typepython_syntax::SyntaxStatement::Yield(_)
+        | typepython_syntax::SyntaxStatement::If(_)
+        | typepython_syntax::SyntaxStatement::Assert(_)
+        | typepython_syntax::SyntaxStatement::Invalidate(_)
+        | typepython_syntax::SyntaxStatement::Match(_)
+        | typepython_syntax::SyntaxStatement::For(_)
+        | typepython_syntax::SyntaxStatement::With(_)
+        | typepython_syntax::SyntaxStatement::ExceptHandler(_)
+        | typepython_syntax::SyntaxStatement::Unsafe(_) => true,
+        _ => false,
+    }
+}
+
+fn stub_unannotated_value_statement_is_allowed(
+    statement: &typepython_syntax::ValueStatement,
+) -> bool {
+    statement.owner_name.is_none()
+        && statement.annotation.is_none()
+        && (statement.names == [String::from("__all__")]
+            || statement.value_callee.as_deref().is_some_and(is_stub_type_parameter_factory))
+}
+
+fn stub_type_parameter_factory_call_is_allowed(
+    statement: &typepython_syntax::CallStatement,
+) -> bool {
+    is_stub_type_parameter_factory(&statement.callee)
+}
+
+fn is_stub_type_parameter_factory(callee: &str) -> bool {
+    matches!(callee, "TypeVar" | "ParamSpec" | "TypeVarTuple")
 }
 
 fn emitted_syntax(path: &Path) -> Option<typepython_syntax::SyntaxTree> {
@@ -2318,6 +2340,9 @@ fn declaration_surface(
                 }
             }
             typepython_syntax::SyntaxStatement::Value(statement) => {
+                if statement.owner_name.is_some() || statement.owner_type_name.is_some() {
+                    continue;
+                }
                 for name in &statement.names {
                     surface.insert(SurfaceEntry {
                         owner: None,

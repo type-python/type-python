@@ -1,6 +1,6 @@
 # Data classes and TypedDict demonstrations.
 
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 
 # ---------------------------------------------------------------------------
@@ -44,4 +44,4 @@ class UserRecord(TypedDict):
     age: int
 
 typealias PartialUserRecord = Partial[UserRecord]
-typealias UserSummary = Pick[UserRecord, "name", "email"]
+typealias UserSummary = Pick[UserRecord, Literal["name", "email"]]

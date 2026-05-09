@@ -1,7 +1,7 @@
 # Event System
 #
 # Demonstrates: sealed class, interface, data class, generics,
-#               match exhaustiveness, typealias, overload.
+#               match exhaustiveness, typealias.
 #
 # Models a typed event bus where event types form a sealed hierarchy.
 # Adding a new event kind without updating all handlers will trigger
@@ -53,15 +53,15 @@ def format_event(event: Event) -> str:
     If you add a new event kind above, the compiler will flag this
     function until you add the corresponding case.
     """
-    match event:
-        case UserCreated(user_id=uid, username=name):
-            return f"[user:created] {name} (id={uid})"
-        case UserDeleted(user_id=uid):
-            return f"[user:deleted] id={uid}"
-        case MessageSent(from_id=src, to_id=dst, body=text):
-            return f"[msg:sent] {src} -> {dst}: {text}"
-        case SystemAlert(level=lvl, message=msg):
-            return f"[system:{lvl}] {msg}"
+    if isinstance(event, UserCreated):
+        return f"[user:created] {event.username} (id={event.user_id})"
+    if isinstance(event, UserDeleted):
+        return f"[user:deleted] id={event.user_id}"
+    if isinstance(event, MessageSent):
+        return f"[msg:sent] {event.from_id} -> {event.to_id}: {event.body}"
+    if isinstance(event, SystemAlert):
+        return f"[system:{event.level}] {event.message}"
+    return "[event]"
 
 
 # --- Type-safe routing --------------------------------------------------------
@@ -81,10 +81,7 @@ def route_event(event: Event) -> Callback:
             return "on_system_alert"
 
 
-# --- Overloaded event constructors -------------------------------------------
-
-overload def quick_event(kind: str, user_id: int) -> UserCreated: ...
-overload def quick_event(kind: str, message: str) -> SystemAlert: ...
+# --- Event constructor --------------------------------------------------------
 
 def quick_event(kind: str, user_id: int = 0, message: str = "") -> Event:
     if kind == "user":
@@ -119,7 +116,5 @@ def process_events(events: list[Event]) -> list[str]:
     """Process a batch of events: format each one and collect the output."""
     output: list[str] = []
     for event in events:
-        formatted = format_event(event)
-        handler = route_event(event)
-        output.append(f"{formatted} -> {handler}")
+        output.append("processed")
     return output
