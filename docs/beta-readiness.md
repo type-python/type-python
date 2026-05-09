@@ -47,6 +47,10 @@ prototype tiers. Those features may ship in the same package, but release notes 
 with their tier labels and must not imply that editor UX, watch behavior, migration heuristics,
 framework adapters, or research slices are stable v1.0 surfaces.
 
+Checker file-size hotspots and syntax-extraction traversal cleanup are tracked as post-RC
+maintenance work in [Maintainability Plan](maintainability-plan.md). They do not expand or narrow
+the Core v1.0 RC compatibility promise.
+
 ## Full v1.0 / DX Promotion
 
 A later full product-wide v1.0 claim can include the editor and workflow surfaces only after the

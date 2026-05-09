@@ -146,6 +146,12 @@ Crates keep narrow ownership boundaries. Key rules:
 - Keep public APIs minimal: expose only what downstream crates need
 - Use `pub(crate)` for internal items
 
+### Large Refactors
+
+Post-RC checker splitting and syntax-extraction visitor consolidation are tracked in
+[Maintainability Plan](maintainability-plan.md). Refactor PRs in those areas should follow that split
+order and keep each slice behavior-preserving unless the PR explicitly documents a semantic change.
+
 ### Error Handling
 
 - Use `thiserror` for typed error enums in library crates

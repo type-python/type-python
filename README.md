@@ -312,6 +312,7 @@ Full guide: [`docs/migration-guide.md`](docs/migration-guide.md).
 | You're checking feature stability            | [Feature Status](docs/feature-status.md)         |
 | You're checking experimental gates           | [Experimental Feature Registry](docs/experimental-features.md) |
 | You want the crate map / pipeline diagram    | [Architecture](docs/architecture.md)             |
+| You're tracking post-RC refactor debt        | [Maintainability Plan](docs/maintainability-plan.md) |
 | You're evaluating the P0-P4 research slices  | [Author-Time Semantics](docs/author-time-semantics.md) |
 | You're sending a PR                          | [Contributing](docs/contributing.md)             |
 | You have a quick question                    | [FAQ](docs/faq.md)                               |

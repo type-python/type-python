@@ -174,6 +174,9 @@ Parser boundary that wraps `ruff_python_parser` to produce a `SyntaxTree`.
 **Unsafe operation tracking:**
 `EvalCall`, `ExecCall`, `GlobalsWrite`, `LocalsWrite`, `DictWrite`, `SetAttrNonLiteral`, `DelAttrNonLiteral`
 
+The current extractor layout intentionally favors explicit, separately testable passes. The post-RC
+plan for consolidating repeated AST walks is tracked in [Maintainability Plan](maintainability-plan.md).
+
 ### typepython_binding
 
 Symbol extraction phase that transforms a `SyntaxTree` into a `BindingTable`.
@@ -286,6 +289,10 @@ These prefixes are descriptive rather than exhaustive. A single diagnostic pass 
 | `abstract_member`              | Abstract class instantiation prevention        |
 
 **Built-in signature knowledge:** `len`, `str`, `int`, `float`, `bool`, `bytes`, `list`, `dict`, `tuple`, `set`, `frozenset`, `range`, `input`, `print`, `ord`, `chr`, `hash`, `id`, `cast`, `TypeVar`, `ParamSpec`, `TypeVarTuple`, `NewType`.
+
+Known checker module-size hotspots and the planned split order are tracked in
+[Maintainability Plan](maintainability-plan.md). They are post-RC maintenance work, not a change to
+the Core v1 checker contract.
 
 ### typepython_lowering
 
