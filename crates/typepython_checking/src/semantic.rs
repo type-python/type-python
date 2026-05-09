@@ -1877,7 +1877,53 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
         );
     }
 
-    if let Some(operator) = metadata.value_binop_operator.as_deref() {
+    if let Some(operator) = metadata.value_binop_operator.as_deref()
+        && let Some((operation, member_name)) = direct_expr_member_operation(operator)
+        && let Some(owner) = metadata.value_binop_left.as_deref()
+        && direct_expr_metadata_resolves_to_unknown(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            owner,
+            suppressed_names,
+        )
+    {
+        let owner_label = direct_expr_operation_label(owner);
+        let (key_prefix, message) = match operation {
+            DirectExprMemberOperation::MemberAccess => (
+                "member",
+                format!(
+                    "member access `{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                    member_name,
+                    node.module_path.display(),
+                    owner_label,
+                ),
+            ),
+            DirectExprMemberOperation::MethodCall => (
+                "method",
+                format!(
+                    "method call `{}.{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                    owner_label,
+                    member_name,
+                    node.module_path.display(),
+                    owner_label,
+                ),
+            ),
+        };
+        push_unique_unknown_operation_diagnostic(
+            diagnostics,
+            seen,
+            format!("{key_prefix}:{line}:{owner_label}.{member_name}"),
+            message,
+        );
+    }
+
+    if let Some(operator) = metadata.value_binop_operator.as_deref()
+        && direct_expr_member_operation(operator).is_none()
+    {
         let single_operand_operation = direct_expr_operator_is_single_operand(operator)
             || metadata.value_binop_right.is_none();
         for (side, operand) in direct_expr_operator_operands(operator, metadata) {
@@ -2082,6 +2128,23 @@ fn direct_expr_operation_description(operator: &str, single_operand_operation: b
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum DirectExprMemberOperation {
+    MemberAccess,
+    MethodCall,
+}
+
+fn direct_expr_member_operation(operator: &str) -> Option<(DirectExprMemberOperation, &str)> {
+    operator
+        .strip_prefix("member-access:")
+        .map(|member| (DirectExprMemberOperation::MemberAccess, member))
+        .or_else(|| {
+            operator
+                .strip_prefix("method-call:")
+                .map(|method| (DirectExprMemberOperation::MethodCall, method))
+        })
+}
+
 fn allowed_runtime_inspection_member(owner_name: &str, member_name: &str) -> bool {
     owner_name == "sys" && matches!(member_name, "version_info" | "platform")
 }
@@ -2282,6 +2345,20 @@ fn direct_expr_metadata_resolves_to_unknown(
         )
         .is_some_and(|resolved| semantic_type_is_unknown(&resolved));
     }
+    if metadata.value_subscript_target.is_some()
+        && let Some(resolved) = resolve_direct_expression_semantic_type_from_metadata_with_options(
+            node,
+            nodes,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            metadata,
+            context.assignability_options(),
+        )
+    {
+        return semantic_type_is_unknown(&resolved);
+    }
     if let Some(rendered) = metadata.rendered_value_type() {
         return semantic_type_is_unknown(&lower_type_text_or_name(&rendered));
     }
@@ -2308,6 +2385,16 @@ fn direct_expr_operation_label(metadata: &typepython_syntax::DirectExprMetadata)
         && let Some(method) = metadata.value_method_name.as_deref()
     {
         return format!("{owner}.{method}()");
+    }
+    if let Some(target) = metadata.value_subscript_target.as_deref() {
+        let target_label = direct_expr_operation_label(target);
+        if let Some(index) = metadata.value_subscript_index.as_deref() {
+            return format!("{target_label}[{index}]");
+        }
+        if let Some(key) = metadata.value_subscript_string_key.as_deref() {
+            return format!("{target_label}[{key:?}]");
+        }
+        return format!("{target_label}[...]");
     }
     String::from("expression")
 }

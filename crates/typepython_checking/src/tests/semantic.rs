@@ -1033,6 +1033,55 @@ fn check_reports_unknown_operations_on_callable_unknown_return() {
 }
 
 #[test]
+fn check_reports_unknown_member_and_method_on_attribute_owner_expression() {
+    let result = check_temp_typepython_source(concat!(
+        "class Box:\n",
+        "    payload: unknown\n\n",
+        "def run(box: Box) -> None:\n",
+        "    box.payload.name\n",
+        "    box.payload.method()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `name`"), "{rendered}");
+    assert!(rendered.contains("method call `box.payload.method`"), "{rendered}");
+    assert!(rendered.contains("`box.payload` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_member_and_method_on_subscript_owner_expression() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(items: list[unknown]) -> None:\n",
+        "    items[0].name\n",
+        "    items[0].method()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `name`"), "{rendered}");
+    assert!(rendered.contains("method call `items[0].method`"), "{rendered}");
+    assert!(rendered.contains("`items[0]` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_member_on_callable_attribute_owner_expression() {
+    let result = check_temp_typepython_source(concat!(
+        "class Box:\n",
+        "    payload: unknown\n\n",
+        "def get_box() -> Box:\n",
+        "    ...\n\n",
+        "def run() -> None:\n",
+        "    get_box().payload.name\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `name`"), "{rendered}");
+    assert!(rendered.contains("`get_box.payload` has type `unknown`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_operations_on_callable_shadowing_function_return() {
     let result = check_temp_typepython_source(concat!(
         "from typing import Callable\n\n",
