@@ -743,8 +743,8 @@ fn prelude_untyped_param(name: &str) -> typepython_syntax::FunctionParam {
 
 #[cfg(test)]
 mod tests {
-    use super::build;
-    use std::path::PathBuf;
+    use super::{build, collections_abc_prelude_node, typing_prelude_declarations};
+    use std::{collections::BTreeSet, fs, path::PathBuf};
     use typepython_binding::{
         BindingTable, BoundCallableSignature, BoundTypeExpr, Declaration, DeclarationKind,
         DeclarationMetadata, DeclarationOwner, DeclarationOwnerKind, GenericTypeParam,
@@ -815,6 +815,109 @@ mod tests {
             is_class_var: false,
             bases: Vec::new(),
             type_params: Vec::new(),
+        }
+    }
+
+    fn declaration_names(declarations: &[Declaration]) -> BTreeSet<String> {
+        declarations.iter().map(|declaration| declaration.name.clone()).collect()
+    }
+
+    fn vendored_stdlib_text(relative_path: &str) -> String {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib").join(relative_path);
+        fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!("expected vendored stdlib file {}: {error}", path.display())
+        })
+    }
+
+    fn stdlib_mentions_symbol(text: &str, symbol: &str) -> bool {
+        text.contains(&format!("\"{symbol}\""))
+            || text.contains(&format!("class {symbol}"))
+            || text.contains(&format!("def {symbol}"))
+            || text.contains(&format!("{symbol}:"))
+            || text.contains(&format!("{symbol} ="))
+    }
+
+    #[test]
+    fn fallback_typing_prelude_has_explicit_vendored_stdlib_coverage_decisions() {
+        let typing = vendored_stdlib_text("typing.pyi");
+        let typing_extensions = vendored_stdlib_text("typing_extensions.pyi");
+        let stdlib_surface = format!("{typing}\n{typing_extensions}");
+        let prelude_names = declaration_names(&typing_prelude_declarations());
+
+        let covered = [
+            "Any",
+            "List",
+            "Dict",
+            "Tuple",
+            "Set",
+            "FrozenSet",
+            "Optional",
+            "Union",
+            "Callable",
+            "Literal",
+            "Concatenate",
+            "TYPE_CHECKING",
+            "TypedDict",
+            "Protocol",
+            "Awaitable",
+            "AsyncIterable",
+            "AsyncIterator",
+            "AsyncGenerator",
+            "Coroutine",
+            "Generator",
+            "cast",
+            "NewType",
+            "TypeVar",
+            "ParamSpec",
+            "TypeVarTuple",
+        ];
+        for symbol in covered {
+            assert!(
+                stdlib_mentions_symbol(&stdlib_surface, symbol),
+                "vendored stdlib no longer exposes covered fallback prelude symbol `{symbol}`"
+            );
+            assert!(prelude_names.contains(symbol), "fallback prelude lost `{symbol}`");
+        }
+
+        let deferred = ["Self", "override", "TypeAliasType", "ReadOnly", "TypeIs", "NoDefault"];
+        for symbol in deferred {
+            assert!(
+                stdlib_mentions_symbol(&stdlib_surface, symbol),
+                "vendored stdlib no longer exposes deferred typing symbol `{symbol}`"
+            );
+            assert!(
+                !prelude_names.contains(symbol),
+                "fallback prelude now covers `{symbol}`; update the RC support matrix and tests"
+            );
+        }
+    }
+
+    #[test]
+    fn fallback_collections_abc_prelude_is_backed_by_vendored_stdlib_exports() {
+        let collections_abc = vendored_stdlib_text("_collections_abc.pyi");
+        let prelude = collections_abc_prelude_node();
+        let prelude_names = declaration_names(&prelude.declarations);
+
+        for symbol in [
+            "Sized",
+            "Iterable",
+            "Sequence",
+            "Mapping",
+            "Callable",
+            "AsyncIterable",
+            "AsyncIterator",
+            "AsyncGenerator",
+            "Iterator",
+        ] {
+            assert!(
+                stdlib_mentions_symbol(&collections_abc, symbol),
+                "vendored _collections_abc no longer exposes fallback symbol `{symbol}`"
+            );
+            assert!(
+                prelude_names.contains(symbol),
+                "collections.abc fallback prelude lost `{symbol}`"
+            );
         }
     }
 

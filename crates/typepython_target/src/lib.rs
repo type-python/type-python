@@ -206,8 +206,17 @@ mod tests {
     fn stdlib_owner_tracks_runtime_capabilities() {
         assert_eq!(PythonTarget::PYTHON_3_10.stdlib_owner("Self"), Some("typing_extensions"));
         assert_eq!(PythonTarget::PYTHON_3_11.stdlib_owner("Self"), Some("typing"));
+        assert_eq!(PythonTarget::PYTHON_3_11.stdlib_owner("override"), Some("typing_extensions"));
+        assert_eq!(PythonTarget::PYTHON_3_12.stdlib_owner("override"), Some("typing"));
+        assert_eq!(
+            PythonTarget::PYTHON_3_10.stdlib_owner("TypeVarTuple"),
+            Some("typing_extensions")
+        );
+        assert_eq!(PythonTarget::PYTHON_3_11.stdlib_owner("TypeVarTuple"), Some("typing"));
         assert_eq!(PythonTarget::PYTHON_3_12.stdlib_owner("deprecated"), Some("typing_extensions"));
         assert_eq!(PythonTarget::PYTHON_3_13.stdlib_owner("deprecated"), Some("warnings"));
+        assert_eq!(PythonTarget::PYTHON_3_12.stdlib_owner("NoDefault"), Some("typing_extensions"));
+        assert_eq!(PythonTarget::PYTHON_3_13.stdlib_owner("NoDefault"), Some("typing"));
         assert_eq!(PythonTarget::PYTHON_3_13.stdlib_owner("ReadOnly"), Some("typing"));
     }
 

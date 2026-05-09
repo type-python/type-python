@@ -94,6 +94,8 @@ A Beta release candidate must pass the tracked release gate before the classifie
 - `cargo fmt --all --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo test --workspace`
+- fallback prelude drift tests: `cargo test -p typepython-graph fallback_` and
+  `cargo test -p typepython-target stdlib_owner_tracks_runtime_capabilities`
 - CLI verification suite: `cargo test -p typepython-cli tests::verification::`
 - downstream checker smoke: `python scripts/downstream_checker_smoke.py` with mypy strict,
   pyright strict, basedpyright strict, and ty strict
