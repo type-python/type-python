@@ -2491,13 +2491,13 @@ fn name_has_contextual_local_binding(
         .is_some()
 }
 
-fn name_has_module_value_binding(
+fn resolve_module_value_binding_semantic_type(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     line: usize,
     name: &str,
-) -> bool {
+) -> Option<SemanticType> {
     resolve_module_level_assignment_reference_semantic_type_with_options(
         node,
         nodes,
@@ -2506,7 +2506,6 @@ fn name_has_module_value_binding(
         name,
         context.assignability_options(),
     )
-    .is_some()
 }
 
 fn name_has_module_import_binding(node: &typepython_graph::ModuleNode, name: &str) -> bool {
@@ -2597,8 +2596,7 @@ pub(super) fn name_is_unknown_boundary_with_context(
         name,
     );
 
-    let has_module_value_binding = name_has_module_value_binding(context, node, nodes, line, name);
-    if has_contextual_local_binding || has_module_value_binding {
+    if has_contextual_local_binding {
         if let Some(resolved) = resolve_direct_name_reference_semantic_type_with_context(
             context,
             node,
@@ -2622,6 +2620,13 @@ pub(super) fn name_is_unknown_boundary_with_context(
         ) {
             return semantic_type_is_unknown(&resolved);
         }
+    }
+
+    let module_value_binding =
+        resolve_module_value_binding_semantic_type(context, node, nodes, line, name);
+    let has_module_value_binding = module_value_binding.is_some();
+    if let Some(resolved) = module_value_binding {
+        return semantic_type_is_unknown(&resolved);
     }
 
     if !has_contextual_local_binding

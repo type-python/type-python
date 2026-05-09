@@ -510,6 +510,28 @@ fn check_reports_unknown_direct_call_when_module_value_shadows_builtin() {
 }
 
 #[test]
+fn check_reports_unknown_direct_call_when_module_value_shadows_builtin_in_function() {
+    let result = check_temp_typepython_source_with_checker_options(
+        concat!(
+            "def get_value() -> unknown:\n",
+            "    ...\n\n",
+            "iter: unknown = get_value()\n\n",
+            "def run() -> None:\n",
+            "    iter()\n",
+        ),
+        ParseOptions::default(),
+        crate::CheckerOptions {
+            import_fallback: ImportFallback::Dynamic,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("call to `iter`"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_builtin_direct_call_before_module_value_shadows_builtin() {
     let result = check_temp_typepython_source(concat!(
         "def get_value() -> unknown:\n",
@@ -916,6 +938,29 @@ fn check_reports_unknown_member_access_when_local_parameter_shadows_module_value
         "def run(value: unknown) -> None:\n",
         "    value.name\n",
     ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `name`"), "{rendered}");
+    assert!(rendered.contains("`value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_member_access_to_module_value_in_function() {
+    let result = check_temp_typepython_source_with_checker_options(
+        concat!(
+            "def get_value() -> unknown:\n",
+            "    ...\n\n",
+            "value: unknown = get_value()\n\n",
+            "def run() -> None:\n",
+            "    value.name\n",
+        ),
+        ParseOptions::default(),
+        crate::CheckerOptions {
+            import_fallback: ImportFallback::Dynamic,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
+    );
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4003"), "{rendered}");
