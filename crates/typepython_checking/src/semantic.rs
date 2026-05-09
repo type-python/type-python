@@ -2421,6 +2421,29 @@ fn name_has_contextual_local_binding(
         .is_some()
 }
 
+fn name_has_module_value_binding(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    line: usize,
+    name: &str,
+) -> bool {
+    resolve_module_level_assignment_reference_semantic_type_with_options(
+        node,
+        nodes,
+        None,
+        line,
+        name,
+        context.assignability_options(),
+    )
+    .is_some()
+        || node.declarations.iter().any(|declaration| {
+            declaration.owner.is_none()
+                && declaration.name == name
+                && declaration.kind == DeclarationKind::Value
+        })
+}
+
 fn source_param_semantic_type(param: &typepython_syntax::DirectFunctionParamSite) -> SemanticType {
     semantic_type_from_direct_param_site(param)
         .unwrap_or_else(|| SemanticType::Name(String::from("dynamic")))
@@ -2473,16 +2496,6 @@ pub(super) fn name_is_unknown_boundary_with_context(
     line: usize,
     name: &str,
 ) -> bool {
-    if resolve_typing_callable_signature(name).is_some()
-        || resolve_builtin_return_type(name).is_some()
-        || matches!(
-            name,
-            "eval" | "exec" | "setattr" | "delattr" | "isinstance" | "framework_transform"
-        )
-    {
-        return false;
-    }
-
     let has_contextual_local_binding = name_has_contextual_local_binding(
         context,
         node,
@@ -2492,9 +2505,40 @@ pub(super) fn name_is_unknown_boundary_with_context(
         line,
         name,
     );
-    if !has_contextual_local_binding
-        && (resolve_direct_function(node, nodes, name).is_some()
-            || resolve_direct_base(nodes, node, name).is_some())
+
+    let has_module_value_binding = name_has_module_value_binding(context, node, nodes, line, name);
+    if has_contextual_local_binding || has_module_value_binding {
+        if let Some(resolved) = resolve_direct_name_reference_semantic_type_with_context(
+            context,
+            node,
+            nodes,
+            None,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            name,
+        ) {
+            return semantic_type_is_unknown(&resolved);
+        }
+
+        if let Some(resolved) = source_scope_param_semantic_type_with_context(
+            context,
+            node,
+            current_owner_name,
+            current_owner_type_name,
+            name,
+        ) {
+            return semantic_type_is_unknown(&resolved);
+        }
+    }
+
+    if resolve_typing_callable_signature(name).is_some()
+        || resolve_builtin_return_type(name).is_some()
+        || matches!(
+            name,
+            "eval" | "exec" | "setattr" | "delattr" | "isinstance" | "framework_transform"
+        )
     {
         return false;
     }
@@ -2521,6 +2565,13 @@ pub(super) fn name_is_unknown_boundary_with_context(
         name,
     ) {
         return semantic_type_is_unknown(&resolved);
+    }
+
+    if !has_contextual_local_binding
+        && (resolve_direct_function(node, nodes, name).is_some()
+            || resolve_direct_base(nodes, node, name).is_some())
+    {
+        return false;
     }
 
     if let Some((head, _)) = name.split_once('.')

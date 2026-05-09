@@ -482,6 +482,34 @@ fn check_accepts_local_callable_direct_call() {
 }
 
 #[test]
+fn check_reports_unknown_direct_call_when_local_parameter_shadows_special_name() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(isinstance: unknown, iter: unknown) -> None:\n",
+        "    isinstance()\n",
+        "    iter()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("call to `isinstance`"), "{rendered}");
+    assert!(rendered.contains("call to `iter`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_direct_call_when_module_value_shadows_builtin() {
+    let result = check_temp_typepython_source(concat!(
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "iter: unknown = get_value()\n",
+        "iter()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("call to `iter`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_return_to_concrete_type() {
     let result = check_temp_typepython_source(concat!(
         "def get_value() -> unknown:\n",
