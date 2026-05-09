@@ -2477,11 +2477,6 @@ fn name_has_module_value_binding(
         context.assignability_options(),
     )
     .is_some()
-        || node.declarations.iter().any(|declaration| {
-            declaration.owner.is_none()
-                && declaration.name == name
-                && declaration.kind == DeclarationKind::Value
-        })
 }
 
 fn source_param_semantic_type(param: &typepython_syntax::DirectFunctionParamSite) -> SemanticType {
