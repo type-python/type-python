@@ -1417,7 +1417,16 @@ pub(super) fn direct_unknown_operation_diagnostics(
     let mut seen_expression_operations = std::collections::BTreeSet::new();
 
     for access in &node.member_accesses {
-        if allowed_runtime_inspection_member(&access.owner_name, &access.member) {
+        if allowed_runtime_inspection_member_with_context(
+            context,
+            node,
+            nodes,
+            access.current_owner_name.as_deref(),
+            access.current_owner_type_name.as_deref(),
+            access.line,
+            &access.owner_name,
+            &access.member,
+        ) {
             continue;
         }
         if name_is_unknown_boundary_with_context(
@@ -1786,7 +1795,16 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
 
     if let Some(owner_name) = metadata.value_member_owner_name.as_deref()
         && let Some(member_name) = metadata.value_member_name.as_deref()
-        && !allowed_runtime_inspection_member(owner_name, member_name)
+        && !allowed_runtime_inspection_member_with_context(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            owner_name,
+            member_name,
+        )
         && direct_operation_owner_resolves_to_unknown(
             context,
             node,
@@ -2145,8 +2163,45 @@ fn direct_expr_member_operation(operator: &str) -> Option<(DirectExprMemberOpera
         })
 }
 
-fn allowed_runtime_inspection_member(owner_name: &str, member_name: &str) -> bool {
-    owner_name == "sys" && matches!(member_name, "version_info" | "platform")
+#[allow(clippy::too_many_arguments)]
+fn allowed_runtime_inspection_member_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    line: usize,
+    owner_name: &str,
+    member_name: &str,
+) -> bool {
+    if !matches!(member_name, "version_info" | "platform") {
+        return false;
+    }
+    if name_has_contextual_local_binding(
+        context,
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        line,
+        owner_name,
+    ) || resolve_module_value_binding_semantic_type(context, node, nodes, line, owner_name)
+        .is_some()
+    {
+        return false;
+    }
+    name_resolves_to_sys_module_import(node, owner_name)
+}
+
+fn name_resolves_to_sys_module_import(node: &typepython_graph::ModuleNode, name: &str) -> bool {
+    node.declarations.iter().any(|declaration| {
+        declaration.owner.is_none()
+            && declaration.name == name
+            && declaration.kind == DeclarationKind::Import
+            && declaration_import_target_ref(declaration).is_some_and(|target| {
+                target.module_target == "sys" && target.symbol_target.is_none()
+            })
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

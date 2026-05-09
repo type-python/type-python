@@ -983,6 +983,51 @@ fn check_accepts_local_parameter_when_module_value_is_unknown() {
 }
 
 #[test]
+fn check_accepts_imported_sys_runtime_inspection_members() {
+    let result = check_temp_typepython_source(concat!(
+        "import sys\n\n",
+        "if sys.version_info >= (3, 11):\n",
+        "    pass\n",
+        "if sys.platform == \"darwin\":\n",
+        "    pass\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_reports_unknown_sys_runtime_member_when_local_parameter_shadows_import() {
+    let result = check_temp_typepython_source(concat!(
+        "import sys\n\n",
+        "def run(sys: unknown) -> None:\n",
+        "    sys.version_info\n",
+        "    sys.platform\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `version_info`"), "{rendered}");
+    assert!(rendered.contains("member access `platform`"), "{rendered}");
+    assert!(rendered.contains("`sys` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_sys_runtime_member_when_module_value_shadows_import() {
+    let result = check_temp_typepython_source(concat!(
+        "import sys\n\n",
+        "def get_value() -> unknown:\n",
+        "    ...\n\n",
+        "sys: unknown = get_value()\n",
+        "sys.version_info\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `version_info`"), "{rendered}");
+    assert!(rendered.contains("`sys` has type `unknown`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_member_and_method_expression_positions() {
     let result = check_temp_typepython_source(concat!(
         "def takes(value: object) -> None:\n",
