@@ -919,6 +919,47 @@ fn check_accepts_unknown_boolop_rhs_after_isinstance_narrowing() {
 }
 
 #[test]
+fn check_reports_unknown_member_access_after_is_none_boolop_guard() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(value: unknown) -> None:\n",
+        "    if value is None and value.name:\n",
+        "        pass\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `name`"), "{rendered}");
+    assert!(rendered.contains("`value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_member_access_after_is_not_none_boolop_guard() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(value: unknown) -> None:\n",
+        "    if value is not None and value.name:\n",
+        "        pass\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `name`"), "{rendered}");
+    assert!(rendered.contains("`value` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_known_member_access_after_isinstance_boolop_guard() {
+    let result = check_temp_typepython_source(concat!(
+        "class Box:\n",
+        "    name: str\n\n",
+        "def run(value: unknown) -> None:\n",
+        "    if isinstance(value, Box) and value.name:\n",
+        "        pass\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_unknown_member_access_after_isinstance_narrowing() {
     let result = check_temp_typepython_source(concat!(
         "class Box:\n",

@@ -2929,11 +2929,6 @@ fn guard_condition_unknown_suppressed_names(
         GuardCondition::IsInstance { name, .. } if branch_true => {
             names.insert(name.clone());
         }
-        GuardCondition::IsNone { name, negated }
-            if (branch_true && !negated) || (!branch_true && *negated) =>
-        {
-            names.insert(name.clone());
-        }
         GuardCondition::Not(inner) => {
             names.extend(guard_condition_unknown_suppressed_names(inner, !branch_true));
         }
