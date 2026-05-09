@@ -915,6 +915,24 @@ fn check_reports_unknown_chained_member_and_method_expression_positions() {
 }
 
 #[test]
+fn check_reports_unknown_operations_on_callable_unknown_return() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable\n\n",
+        "def run(callback: Callable[[], unknown]) -> None:\n",
+        "    callback().name\n",
+        "    callback().method()\n",
+        "    callback()[0]\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `name`"), "{rendered}");
+    assert!(rendered.contains("method call `callback.method`"), "{rendered}");
+    assert!(rendered.contains("subscript access"), "{rendered}");
+    assert!(rendered.contains("`callback` has type `unknown`"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_typed_member_and_method_expression_positions() {
     let result = check_temp_typepython_source(concat!(
         "class Client:\n",

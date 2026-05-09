@@ -2102,10 +2102,15 @@ fn direct_operation_owner_resolves_to_unknown(
         return false;
     }
     if through_instance {
-        return resolve_direct_callable_return_semantic_type_for_line_with_context(
-            context, node, nodes, owner_name, line,
+        return resolve_direct_call_result_semantic_type_with_context(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            owner_name,
         )
-        .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, owner_name))
         .is_some_and(|resolved| semantic_type_is_unknown(&resolved));
     }
     name_is_unknown_boundary_with_context(
@@ -2128,6 +2133,36 @@ fn direct_operation_owner_resolves_to_unknown(
         owner_name,
     )
     .is_some_and(|resolved| semantic_type_is_unknown(&resolved))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_direct_call_result_semantic_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    line: usize,
+    callee: &str,
+) -> Option<SemanticType> {
+    resolve_direct_callable_return_semantic_type_for_line_with_context(
+        context, node, nodes, callee, line,
+    )
+    .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, callee))
+    .or_else(|| {
+        let callable = resolve_direct_name_reference_semantic_type_with_context(
+            context,
+            node,
+            nodes,
+            None,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            callee,
+        )?;
+        callable.callable_parts().map(|(_, return_type)| return_type.clone())
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2167,10 +2202,15 @@ fn direct_expr_metadata_resolves_to_unknown(
         .is_some_and(|resolved| semantic_type_is_unknown(&resolved));
     }
     if let Some(callee) = metadata.value_callee.as_deref() {
-        return resolve_direct_callable_return_semantic_type_for_line_with_context(
-            context, node, nodes, callee, line,
+        return resolve_direct_call_result_semantic_type_with_context(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            callee,
         )
-        .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, callee))
         .is_some_and(|resolved| semantic_type_is_unknown(&resolved))
             || metadata.rendered_value_type().is_some_and(|rendered| {
                 semantic_type_is_unknown(&lower_type_text_or_name(&rendered))
