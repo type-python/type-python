@@ -2494,6 +2494,32 @@ fn name_has_module_value_binding(
     .is_some()
 }
 
+fn name_has_module_import_binding(node: &typepython_graph::ModuleNode, name: &str) -> bool {
+    node.declarations.iter().any(|declaration| {
+        declaration.owner.is_none()
+            && declaration.name == name
+            && declaration.kind == DeclarationKind::Import
+    })
+}
+
+fn name_has_supported_typing_import_binding(
+    node: &typepython_graph::ModuleNode,
+    name: &str,
+) -> bool {
+    (resolve_typing_callable_signature(name).is_some() || name == "cast")
+        && node.declarations.iter().any(|declaration| {
+            declaration.owner.is_none()
+                && declaration.name == name
+                && declaration.kind == DeclarationKind::Import
+                && declaration_import_target_ref(declaration).is_some_and(|target| {
+                    target.symbol_target.as_ref().is_some_and(|symbol| {
+                        matches!(symbol.module_key.as_str(), "typing" | "typing_extensions")
+                            && symbol.symbol_name == name
+                    })
+                })
+        })
+}
+
 fn source_param_semantic_type(param: &typepython_syntax::DirectFunctionParamSite) -> SemanticType {
     semantic_type_from_direct_param_site(param)
         .unwrap_or_else(|| SemanticType::Name(String::from("dynamic")))
@@ -2581,6 +2607,16 @@ pub(super) fn name_is_unknown_boundary_with_context(
         ) {
             return semantic_type_is_unknown(&resolved);
         }
+    }
+
+    if !has_contextual_local_binding
+        && !has_module_value_binding
+        && name_has_module_import_binding(node, name)
+        && !name_has_supported_typing_import_binding(node, name)
+        && unresolved_import_boundary_type_with_context(context, node, nodes, name)
+            .is_some_and(|boundary| boundary == "unknown")
+    {
+        return true;
     }
 
     if resolve_typing_callable_signature(name).is_some()

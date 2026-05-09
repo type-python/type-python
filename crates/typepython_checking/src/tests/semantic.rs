@@ -525,6 +525,46 @@ fn check_accepts_builtin_direct_call_before_module_value_shadows_builtin() {
 }
 
 #[test]
+fn check_reports_unknown_direct_call_when_unresolved_import_shadows_builtin() {
+    let result = check_temp_typepython_source(concat!(
+        "from definitely_missing import iter\n\n",
+        "iter()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("call to `iter`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_direct_call_when_unresolved_import_shadows_typing_name() {
+    let result = check_temp_typepython_source(concat!(
+        "from definitely_missing import TypeVar\n\n",
+        "TypeVar(\"T\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("call to `TypeVar`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_builtin_shadowed_by_unresolved_import_when_imports_are_dynamic() {
+    let result = check_temp_typepython_source_with_checker_options(
+        concat!("from definitely_missing import iter\n\n", "iter()\n",),
+        ParseOptions::default(),
+        crate::CheckerOptions {
+            import_fallback: ImportFallback::Dynamic,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4003"), "{rendered}");
+    assert!(!rendered.contains("call to `iter`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_return_to_concrete_type() {
     let result = check_temp_typepython_source(concat!(
         "def get_value() -> unknown:\n",
