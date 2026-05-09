@@ -109,6 +109,51 @@ fn run_watch_rebuild_reloads_project_and_recovers_after_checker_failure() {
 }
 
 #[test]
+fn run_watch_rebuild_recovers_after_config_load_failure() {
+    let project_dir = temp_project_dir("run_watch_rebuild_recovers_after_config_load_failure");
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+
+        let first = run_watch_rebuild(
+            Some(&project_dir),
+            OutputFormat::Json,
+            vec![String::from("initial watch check")],
+        )
+        .expect("initial rebuild should run");
+
+        fs::write(project_dir.join("typepython.toml"), "[project\n")
+            .expect("test setup should corrupt config");
+        let failed = run_watch_rebuild(
+            Some(&project_dir),
+            OutputFormat::Json,
+            vec![String::from("broken watch config")],
+        )
+        .expect_err("invalid config should report an error without poisoning watch state")
+        .to_string();
+
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should restore config");
+        let recovered = run_watch_rebuild(
+            Some(&project_dir),
+            OutputFormat::Json,
+            vec![String::from("recovered watch config")],
+        )
+        .expect("subsequent rebuild should recover");
+
+        (first, failed, recovered)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(result.0.exit_code, ExitCode::SUCCESS);
+    assert!(result.1.contains("unable to load TypePython project configuration"));
+    assert_eq!(result.2.exit_code, ExitCode::SUCCESS);
+}
+
+#[test]
 fn run_watch_rebuild_returns_reloaded_config_for_watch_reconfiguration() {
     let project_dir =
         temp_project_dir("run_watch_rebuild_returns_reloaded_config_for_watch_reconfiguration");

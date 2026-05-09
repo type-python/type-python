@@ -408,6 +408,46 @@ fn run_with_pipeline_check_treats_old_analysis_cache_as_miss() {
 }
 
 #[test]
+fn run_with_pipeline_check_treats_corrupt_analysis_cache_as_miss() {
+    let project_dir =
+        temp_project_dir("run_with_pipeline_check_treats_corrupt_analysis_cache_as_miss");
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+
+        let first_exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("first check should run to completion");
+
+        let cache_path = project_dir.join(".typepython/cache/analysis-cache.json");
+        fs::write(&cache_path, "{not-json\n").expect("test setup should corrupt cache");
+
+        let second_exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("second check should rebuild corrupt analysis cache");
+        let rebuilt_cache: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&cache_path).expect("cache should exist"))
+                .expect("rebuilt cache should be valid JSON");
+
+        (first_exit_code, second_exit_code, rebuilt_cache["schema_version"].as_u64())
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(result, (ExitCode::SUCCESS, ExitCode::SUCCESS, Some(3)));
+}
+
+#[test]
 fn run_with_pipeline_check_treats_incompatible_incremental_snapshot_as_miss() {
     let project_dir = temp_project_dir(
         "run_with_pipeline_check_treats_incompatible_incremental_snapshot_as_miss",
@@ -452,6 +492,89 @@ fn run_with_pipeline_check_treats_incompatible_incremental_snapshot_as_miss() {
     remove_temp_project_dir(&project_dir);
 
     assert_eq!(result, (ExitCode::SUCCESS, ExitCode::SUCCESS));
+}
+
+#[test]
+fn run_with_pipeline_check_treats_corrupt_incremental_snapshot_as_miss() {
+    let project_dir =
+        temp_project_dir("run_with_pipeline_check_treats_corrupt_incremental_snapshot_as_miss");
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+
+        let first_exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("first check should run to completion");
+
+        let snapshot_path = project_dir.join(".typepython/cache/snapshot.json");
+        fs::write(&snapshot_path, "{not-json\n").expect("test setup should corrupt snapshot");
+
+        let second_exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("second check should rebuild corrupt incremental snapshot");
+        let rebuilt_snapshot: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&snapshot_path).expect("snapshot should exist"),
+        )
+        .expect("rebuilt snapshot should be valid JSON");
+
+        (first_exit_code, second_exit_code, rebuilt_snapshot["schema_version"].as_u64())
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(result, (ExitCode::SUCCESS, ExitCode::SUCCESS, Some(7)));
+}
+
+#[test]
+fn run_with_pipeline_check_drops_cached_diagnostics_for_deleted_module() {
+    let project_dir =
+        temp_project_dir("run_with_pipeline_check_drops_cached_diagnostics_for_deleted_module");
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/broken.tpy"),
+            "def broken() -> int:\n    return \"oops\"\n",
+        )
+        .expect("test setup should succeed");
+
+        let first_exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("first check should persist diagnostics for the broken module");
+
+        fs::remove_file(project_dir.join("src/broken.tpy"))
+            .expect("test setup should delete broken source");
+
+        let second_exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("second check should drop stale diagnostics for deleted modules");
+
+        (first_exit_code, second_exit_code)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(result, (ExitCode::FAILURE, ExitCode::SUCCESS));
 }
 
 #[test]
