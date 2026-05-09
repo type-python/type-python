@@ -1,9 +1,15 @@
 # DX and LSP Stability
 
 TypePython separates Core authoring semantics from editor and workflow DX. During
-the Core v1 Beta line, the compiler can expose useful LSP, watch, formatting,
-code-action, and packaging helpers without treating every editor-facing detail as
-a stable v1.0 product promise.
+the Core v1 Beta line and the first Core v1.0 RC, the compiler can expose useful
+LSP, watch, formatting, code-action, and packaging helpers without treating every
+editor-facing detail as a stable v1.0 product promise.
+
+The first v1.0 release candidate is a **Core v1.0 RC** unless release notes
+explicitly say otherwise. Core v1.0 RC does not promote the Supported DX tier:
+`typepython lsp`, `typepython watch`, editor extensions, formatter integration,
+code actions, and migration/adoption workflows remain Supported DX, non-stable
+until the DX gate below is complete.
 
 ## Stability Classes
 
@@ -21,7 +27,7 @@ a stable v1.0 product promise.
 
 ## v1.0 DX Gate
 
-A v1.0 release candidate must include evidence for:
+A product-wide v1.0 release candidate that claims stable DX must include evidence for:
 
 - an installable VS Code extension or packaged VSIX artifact;
 - copy-paste configuration for Neovim, Helix, Sublime Text, and Emacs;
@@ -34,4 +40,6 @@ A v1.0 release candidate must include evidence for:
 - packaging smoke proving installed wheels run without `cargo` on supported platforms.
 
 Until those items are complete, README and release notes should describe these
-surfaces as supported Beta DX rather than stable v1.0 commitments.
+surfaces as supported Beta DX rather than stable v1.0 commitments. A Core-only
+v1.0 RC may ship before this gate is complete, but it must keep the DX exclusion
+visible in the README, PyPI description, and release notes.

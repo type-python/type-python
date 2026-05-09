@@ -26,6 +26,10 @@ should use the status vocabulary below. Shipped-but-unstable features are tracke
 
 Stable Core v1 checker semantics are guarantees for the package while it is checked by TypePython. They are not a promise that ordinary downstream `.py` users inherit TypePython-only facts from the emitted `.pyi` surface. Public-facing claims should say "author-time" or "TypePython-checked package" when they describe sealed exhaustiveness, `unknown` strictness, or `unsafe:` fences.
 
+## Core v1.0 RC Boundary
+
+When the package is labeled Core v1.0 RC, only the Stable Core v1 row is promoted to release-candidate status. Supported DX, Experimental opt-in, and Roadmap / prototype features keep their existing labels even if they are included in the same wheel. Release notes must say "Core v1.0 RC" rather than unqualified "v1.0 RC" unless the DX gate in `docs/dx-stability.md` is complete.
+
 ## Supported DX, Non-Stable Examples
 
 The following features are usable in Beta builds, but their UX and machine-readable output are not

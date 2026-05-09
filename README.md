@@ -214,6 +214,11 @@ and Roadmap / prototype features ship for feedback but are not compatibility-sta
 [`docs/feature-status.md`](docs/feature-status.md), and
 [`docs/experimental-features.md`](docs/experimental-features.md).
 
+The first v1.0 release candidate is scoped as **Core v1.0 RC**. It does not promote editor UX,
+VS Code packaging, `watch`, migration heuristics, or research slices to stable v1.0 commitments;
+those remain Supported DX, Experimental opt-in, or Roadmap / prototype until their own gates are
+complete.
+
 The breakdown:
 
 | Tier | What's there |

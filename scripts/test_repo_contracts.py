@@ -162,6 +162,10 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn(f"Core v1 Beta** (v{package_version})", pypi_readme)
         self.assertIn("not a blanket production-ready claim", faq)
         self.assertIn("Stable Core v1 During Beta", beta)
+        self.assertIn("Core v1.0 RC Scope", beta)
+        self.assertIn("Full v1.0 / DX Promotion", beta)
+        self.assertIn("Core v1.0 RC", readme)
+        self.assertIn("Core v1.0 RC", pypi_readme)
         self.assertIn("Supported DX, Non-Stable", beta)
         self.assertIn("Experimental Opt-In", beta)
         self.assertIn("Roadmap / Prototype", beta)
@@ -435,6 +439,9 @@ class RepoContractsTests(unittest.TestCase):
 
         self.assertIn("DX and LSP Stability", beta)
         self.assertIn("LSP capability shape, formatter behavior, code-action details", beta)
+        normalized_dx = " ".join(dx.split())
+        self.assertIn("Core v1.0 RC does not promote the Supported DX tier", normalized_dx)
+        self.assertIn("A Core-only v1.0 RC may ship before this gate is complete", normalized_dx)
         self.assertIn("Supported Beta DX surface", lsp)
         self.assertIn("DX and LSP Stability", lsp)
 

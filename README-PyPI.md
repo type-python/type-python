@@ -27,6 +27,9 @@ downstream checkers.
 > Experimental opt-in, and Roadmap / prototype features remain outside the Beta
 > compatibility promise and are tracked separately in the Experimental Feature
 > Registry.
+> The first v1.0 release candidate is scoped as Core v1.0 RC: editor UX,
+> VS Code packaging, `watch`, migration heuristics, and research slices remain
+> outside the stable v1.0 promise until their own gates are complete.
 > Bug reports and contributions are very welcome.
 
 ## Install

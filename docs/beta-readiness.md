@@ -29,6 +29,31 @@ Extending sealed, `unknown`, `unsafe:`, or transform provenance semantics across
 requires an explicit TypePython-aware sidecar, checker plugin, or consumer mode; it is not part of
 the default emitted-artifact compatibility promise.
 
+## Core v1.0 RC Scope
+
+The first v1.0 release candidate is scoped as **Core v1.0 RC**, not a full product-wide v1.0 RC.
+It promotes the Stable Core v1 surfaces above from Beta trial status to release-candidate status
+only when the final release commit passes the tracked release gate. The RC claim covers:
+
+- Core source syntax, Core checker semantics, and Core `typepython.toml` fields.
+- `init`, `check`, `build`, `clean`, and `verify` command behavior needed for authored-package
+  checking and standard artifact publication.
+- Diagnostic code identity and documented JSON diagnostic shape for Core commands.
+- Emitted `.py` and `.pyi` portability, including the no-mandatory-TypePython-runtime boundary.
+- Bundled stdlib and target-version compatibility for Python 3.10 through 3.14.
+
+The Core v1.0 RC claim deliberately excludes the Supported DX, Experimental opt-in, and Roadmap /
+prototype tiers. Those features may ship in the same package, but release notes must describe them
+with their tier labels and must not imply that editor UX, watch behavior, migration heuristics,
+framework adapters, or research slices are stable v1.0 surfaces.
+
+## Full v1.0 / DX Promotion
+
+A later full product-wide v1.0 claim can include the editor and workflow surfaces only after the
+[DX and LSP Stability](dx-stability.md) gate is complete. Until then, a release may be a Core v1.0
+RC while `typepython lsp`, VS Code packaging, `watch`, `compat`, `api-diff`, `type-health`, and
+`migrate` remain Supported DX, non-stable.
+
 ## Supported DX, Non-Stable
 
 The following features can be useful in Beta builds, but their UX, schemas, or heuristics may change
