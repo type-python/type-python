@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/type-python/"><img src="https://img.shields.io/pypi/v/type-python" alt="PyPI" /></a>
-  <a href="https://github.com/type-python/type-python/actions/workflows/rust.yml"><img src="https://github.com/type-python/type-python/actions/workflows/rust.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/type-python/type-python/actions/workflows/publish.yml"><img src="https://github.com/type-python/type-python/actions/workflows/publish.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="Python 3.9+" /></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/built%20with-rust-orange.svg" alt="Built with Rust" /></a>
