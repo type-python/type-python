@@ -725,6 +725,39 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
             ]))
         })
         .or_else(|| {
+            let (operation, member_name) =
+                direct_expr_member_operation(value_binop_operator?)?;
+            let owner_type = resolve_direct_expression_semantic_type_from_metadata_with_options(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                value_binop_left?,
+                options,
+            )?;
+            match operation {
+                DirectExprMemberOperation::MemberAccess => {
+                    resolve_member_semantic_type_on_owner_type(
+                        node,
+                        nodes,
+                        &owner_type,
+                        member_name,
+                        options,
+                    )
+                }
+                DirectExprMemberOperation::MethodCall => {
+                    resolve_method_return_semantic_type_on_owner_type(
+                        node,
+                        nodes,
+                        &owner_type,
+                        member_name,
+                    )
+                }
+            }
+        })
+        .or_else(|| {
             resolve_direct_boolop_semantic_type_with_options(
                 node,
                 nodes,

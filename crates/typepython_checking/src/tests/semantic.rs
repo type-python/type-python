@@ -1151,6 +1151,63 @@ fn check_reports_unknown_member_and_method_on_subscript_owner_expression() {
 }
 
 #[test]
+fn check_reports_unknown_member_and_method_on_nested_attribute_owner_expression() {
+    let result = check_temp_typepython_source(concat!(
+        "class Inner:\n",
+        "    payload: unknown\n\n",
+        "class Outer:\n",
+        "    inner: Inner\n\n",
+        "def run(outer: Outer) -> None:\n",
+        "    outer.inner.payload.name\n",
+        "    outer.inner.payload.method()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("member access `name`"), "{rendered}");
+    assert!(rendered.contains("method call `outer.inner.payload.method`"), "{rendered}");
+    assert!(rendered.contains("`outer.inner.payload` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_operations_on_nested_attribute_owner_expression() {
+    let result = check_temp_typepython_source(concat!(
+        "class Inner:\n",
+        "    payload: unknown\n\n",
+        "class Outer:\n",
+        "    inner: Inner\n\n",
+        "def run(outer: Outer) -> None:\n",
+        "    outer.inner.payload + 1\n",
+        "    outer.inner.payload[0]\n",
+        "    if outer.inner.payload:\n",
+        "        pass\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("binary operation `+`"), "{rendered}");
+    assert!(rendered.contains("subscript access"), "{rendered}");
+    assert!(rendered.contains("truthiness check"), "{rendered}");
+    assert!(rendered.contains("`outer.inner.payload` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_typed_nested_attribute_chain_operations() {
+    let result = check_temp_typepython_source(concat!(
+        "class Profile:\n",
+        "    name: str\n\n",
+        "class Client:\n",
+        "    profile: Profile\n\n",
+        "def run(client: Client) -> None:\n",
+        "    client.profile.name.upper()\n",
+        "    client.profile.name + \"x\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4003"), "{rendered}");
+}
+
+#[test]
 fn check_reports_unknown_member_on_callable_attribute_owner_expression() {
     let result = check_temp_typepython_source(concat!(
         "class Box:\n",

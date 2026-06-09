@@ -2147,12 +2147,14 @@ fn direct_expr_operation_description(operator: &str, single_operand_operation: b
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum DirectExprMemberOperation {
+pub(crate) enum DirectExprMemberOperation {
     MemberAccess,
     MethodCall,
 }
 
-fn direct_expr_member_operation(operator: &str) -> Option<(DirectExprMemberOperation, &str)> {
+pub(crate) fn direct_expr_member_operation(
+    operator: &str,
+) -> Option<(DirectExprMemberOperation, &str)> {
     operator
         .strip_prefix("member-access:")
         .map(|member| (DirectExprMemberOperation::MemberAccess, member))
@@ -2414,6 +2416,22 @@ fn direct_expr_metadata_resolves_to_unknown(
     {
         return semantic_type_is_unknown(&resolved);
     }
+    if let Some(operator) = metadata.value_binop_operator.as_deref()
+        && direct_expr_member_operation(operator).is_some()
+        && metadata.value_binop_left.is_some()
+        && let Some(resolved) = resolve_direct_expression_semantic_type_from_metadata_with_options(
+            node,
+            nodes,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            metadata,
+            context.assignability_options(),
+        )
+    {
+        return semantic_type_is_unknown(&resolved);
+    }
     if let Some(rendered) = metadata.rendered_value_type() {
         return semantic_type_is_unknown(&lower_type_text_or_name(&rendered));
     }
@@ -2450,6 +2468,16 @@ fn direct_expr_operation_label(metadata: &typepython_syntax::DirectExprMetadata)
             return format!("{target_label}[{key:?}]");
         }
         return format!("{target_label}[...]");
+    }
+    if let Some(operator) = metadata.value_binop_operator.as_deref()
+        && let Some((operation, member_name)) = direct_expr_member_operation(operator)
+        && let Some(owner) = metadata.value_binop_left.as_deref()
+    {
+        let owner_label = direct_expr_operation_label(owner);
+        return match operation {
+            DirectExprMemberOperation::MemberAccess => format!("{owner_label}.{member_name}"),
+            DirectExprMemberOperation::MethodCall => format!("{owner_label}.{member_name}()"),
+        };
     }
     String::from("expression")
 }
