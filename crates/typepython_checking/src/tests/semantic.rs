@@ -3793,3 +3793,35 @@ fn check_allows_non_callable_decorator_transform_in_non_strict_mode() {
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }
+
+#[test]
+fn check_accepts_operations_on_match_capture_bindings() {
+    let result = check_temp_typepython_source(concat!(
+        "sealed class Shape:\n",
+        "    pass\n\n",
+        "class Circle(Shape):\n",
+        "    radius: float\n\n",
+        "class Square(Shape):\n",
+        "    side: float\n\n",
+        "def area(shape: Shape) -> float:\n",
+        "    match shape:\n",
+        "        case Circle(radius=r):\n",
+        "            return 3.14 * r * r\n",
+        "        case Square(side=s):\n",
+        "            return s * s\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4003"), "{rendered}");
+}
+
+#[test]
+fn check_still_reports_unresolved_names_outside_match_captures() {
+    let result = check_temp_typepython_source(concat!(
+        "def run() -> None:\n",
+        "    undefined_name.member\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+}

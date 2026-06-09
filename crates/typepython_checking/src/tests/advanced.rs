@@ -16200,6 +16200,7 @@ fn check_reports_non_exhaustive_sealed_match() {
                     patterns: vec![typepython_binding::MatchPatternSite::Class(String::from(
                         "Add",
                     ))],
+                    capture_names: Vec::new(),
                     has_guard: false,
                     line: 3,
                 }],
@@ -16329,11 +16330,13 @@ fn check_accepts_exhaustive_sealed_match_with_wildcard() {
                         patterns: vec![typepython_binding::MatchPatternSite::Class(String::from(
                             "Add",
                         ))],
+                        capture_names: Vec::new(),
                         has_guard: false,
                         line: 3,
                     },
                     typepython_binding::MatchCaseSite {
                         patterns: vec![typepython_binding::MatchPatternSite::Wildcard],
+                        capture_names: Vec::new(),
                         has_guard: false,
                         line: 5,
                     },
@@ -19464,6 +19467,7 @@ fn check_reports_non_exhaustive_enum_match() {
                     patterns: vec![typepython_binding::MatchPatternSite::Literal(String::from(
                         "Color.RED",
                     ))],
+                    capture_names: Vec::new(),
                     has_guard: false,
                     line: 3,
                 }],
@@ -19630,6 +19634,7 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
                         patterns: vec![typepython_binding::MatchPatternSite::Class(String::from(
                             "Num",
                         ))],
+                        capture_names: Vec::new(),
                         has_guard: false,
                         line: 3,
                     },
@@ -19637,6 +19642,7 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
                         patterns: vec![typepython_binding::MatchPatternSite::Class(String::from(
                             "Add",
                         ))],
+                        capture_names: Vec::new(),
                         has_guard: false,
                         line: 5,
                     },
@@ -20536,6 +20542,7 @@ fn check_accepts_enum_exhaustive_match() {
                         patterns: vec![typepython_binding::MatchPatternSite::Literal(
                             String::from("Status.OPEN"),
                         )],
+                        capture_names: Vec::new(),
                         has_guard: false,
                         line: 3,
                     },
@@ -20543,6 +20550,7 @@ fn check_accepts_enum_exhaustive_match() {
                         patterns: vec![typepython_binding::MatchPatternSite::Literal(
                             String::from("Status.CLOSED"),
                         )],
+                        capture_names: Vec::new(),
                         has_guard: false,
                         line: 4,
                     },
@@ -20550,6 +20558,7 @@ fn check_accepts_enum_exhaustive_match() {
                         patterns: vec![typepython_binding::MatchPatternSite::Literal(
                             String::from("Status.PENDING"),
                         )],
+                        capture_names: Vec::new(),
                         has_guard: false,
                         line: 5,
                     },
@@ -20725,6 +20734,7 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                         patterns: vec![typepython_binding::MatchPatternSite::Literal(
                             String::from("Priority.LOW"),
                         )],
+                        capture_names: Vec::new(),
                         has_guard: false,
                         line: 3,
                     },
@@ -20732,6 +20742,7 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                         patterns: vec![typepython_binding::MatchPatternSite::Literal(
                             String::from("Priority.MEDIUM"),
                         )],
+                        capture_names: Vec::new(),
                         has_guard: false,
                         line: 4,
                     },

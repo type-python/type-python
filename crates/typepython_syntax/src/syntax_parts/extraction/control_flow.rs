@@ -1275,12 +1275,68 @@ pub(in super::super) fn extract_match_statement(
             .iter()
             .map(|case| MatchCaseStatement {
                 patterns: extract_match_patterns(source, &case.pattern),
+                capture_names: extract_match_capture_names(&case.pattern),
                 has_guard: case.guard.is_some(),
                 line: offset_to_line_column(source, case.range.start().to_usize()).0,
             })
             .collect(),
         line,
     }))
+}
+
+pub(in super::super) fn extract_match_capture_names(
+    pattern: &ruff_python_ast::Pattern,
+) -> Vec<String> {
+    let mut names = Vec::new();
+    collect_match_capture_names(pattern, &mut names);
+    names
+}
+
+fn collect_match_capture_names(pattern: &ruff_python_ast::Pattern, names: &mut Vec<String>) {
+    use ruff_python_ast::Pattern;
+
+    match pattern {
+        Pattern::MatchAs(pattern) => {
+            if let Some(name) = &pattern.name {
+                names.push(name.id.as_str().to_owned());
+            }
+            if let Some(inner) = &pattern.pattern {
+                collect_match_capture_names(inner, names);
+            }
+        }
+        Pattern::MatchClass(pattern) => {
+            for inner in &pattern.arguments.patterns {
+                collect_match_capture_names(inner, names);
+            }
+            for keyword in &pattern.arguments.keywords {
+                collect_match_capture_names(&keyword.pattern, names);
+            }
+        }
+        Pattern::MatchMapping(pattern) => {
+            if let Some(rest) = &pattern.rest {
+                names.push(rest.id.as_str().to_owned());
+            }
+            for inner in &pattern.patterns {
+                collect_match_capture_names(inner, names);
+            }
+        }
+        Pattern::MatchSequence(pattern) => {
+            for inner in &pattern.patterns {
+                collect_match_capture_names(inner, names);
+            }
+        }
+        Pattern::MatchStar(pattern) => {
+            if let Some(name) = &pattern.name {
+                names.push(name.id.as_str().to_owned());
+            }
+        }
+        Pattern::MatchOr(pattern) => {
+            for inner in &pattern.patterns {
+                collect_match_capture_names(inner, names);
+            }
+        }
+        Pattern::MatchValue(_) | Pattern::MatchSingleton(_) => {}
+    }
 }
 
 pub(in super::super) fn extract_match_patterns(

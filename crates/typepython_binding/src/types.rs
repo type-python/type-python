@@ -412,6 +412,7 @@ pub struct MatchSite {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct MatchCaseSite {
     pub patterns: Vec<MatchPatternSite>,
+    pub capture_names: Vec<String>,
     pub has_guard: bool,
     pub line: usize,
 }

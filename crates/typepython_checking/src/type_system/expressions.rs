@@ -1346,6 +1346,13 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         return Some(SemanticType::Name(class_decl.name.clone()));
     }
 
+    // Match capture names bind at runtime without a declaration the binder can
+    // see; their types come from the matched pattern, so stay undecided rather
+    // than falling through to the unresolved-import boundary type.
+    if name_is_match_capture_in_scope(node, current_owner_name, value_name) {
+        return None;
+    }
+
     if let Some(boundary_type) =
         unresolved_import_boundary_type_with_context(context, node, nodes, value_name)
     {

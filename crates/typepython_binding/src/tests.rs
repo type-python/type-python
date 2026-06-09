@@ -1445,6 +1445,7 @@ fn bind_collects_match_sites_from_syntax_tree() {
             subject_method_through_instance: false,
             cases: vec![typepython_syntax::MatchCaseStatement {
                 patterns: vec![typepython_syntax::MatchPattern::Class(String::from("Add"))],
+                capture_names: Vec::new(),
                 has_guard: false,
                 line: 3,
             }],
@@ -1499,6 +1500,7 @@ fn bind_collects_match_sites_from_syntax_tree() {
             subject_method_through_instance: false,
             cases: vec![MatchCaseSite {
                 patterns: vec![MatchPatternSite::Class(String::from("Add"))],
+                capture_names: Vec::new(),
                 has_guard: false,
                 line: 3,
             }],
@@ -3471,11 +3473,13 @@ fn bind_collects_match_literal_and_unsupported_patterns() {
             cases: vec![
                 typepython_syntax::MatchCaseStatement {
                     patterns: vec![typepython_syntax::MatchPattern::Literal(String::from("1"))],
+                    capture_names: Vec::new(),
                     has_guard: false,
                     line: 2,
                 },
                 typepython_syntax::MatchCaseStatement {
                     patterns: vec![typepython_syntax::MatchPattern::Unsupported],
+                    capture_names: Vec::new(),
                     has_guard: false,
                     line: 3,
                 },
@@ -3492,11 +3496,13 @@ fn bind_collects_match_literal_and_unsupported_patterns() {
         vec![
             MatchCaseSite {
                 patterns: vec![MatchPatternSite::Literal(String::from("1"))],
+                capture_names: Vec::new(),
                 has_guard: false,
                 line: 2,
             },
             MatchCaseSite {
                 patterns: vec![MatchPatternSite::Unsupported],
+                capture_names: Vec::new(),
                 has_guard: false,
                 line: 3,
             },

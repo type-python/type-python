@@ -618,6 +618,7 @@ pub struct MatchStatement {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MatchCaseStatement {
     pub patterns: Vec<MatchPattern>,
+    pub capture_names: Vec<String>,
     pub has_guard: bool,
     pub line: usize,
 }

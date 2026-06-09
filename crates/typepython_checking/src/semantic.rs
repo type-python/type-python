@@ -2861,6 +2861,20 @@ fn source_scope_param_semantic_type_with_context(
         .map(source_param_semantic_type)
 }
 
+pub(super) fn name_is_match_capture_in_scope(
+    node: &typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    name: &str,
+) -> bool {
+    node.matches.iter().any(|match_site| {
+        match_site.owner_name.as_deref() == current_owner_name
+            && match_site
+                .cases
+                .iter()
+                .any(|case| case.capture_names.iter().any(|capture_name| capture_name == name))
+    })
+}
+
 pub(super) fn name_is_unknown_boundary_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -2904,6 +2918,15 @@ pub(super) fn name_is_unknown_boundary_with_context(
         ) {
             return semantic_type_is_unknown(&resolved);
         }
+    }
+
+    // Match capture names bind locally at runtime but carry no declaration the
+    // binder can see; their types come from the matched pattern, so never
+    // treat them as unresolved-import unknowns.
+    if !has_contextual_local_binding
+        && name_is_match_capture_in_scope(node, current_owner_name, name)
+    {
+        return false;
     }
 
     let module_value_binding =

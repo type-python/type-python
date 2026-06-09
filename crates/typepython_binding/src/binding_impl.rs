@@ -227,6 +227,7 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                                     }
                                 })
                                 .collect(),
+                            capture_names: case.capture_names.clone(),
                             has_guard: case.has_guard,
                             line: case.line,
                         })

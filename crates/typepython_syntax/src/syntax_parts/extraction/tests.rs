@@ -5233,6 +5233,7 @@ fn parse_retains_match_statement_metadata() {
             cases: vec![
                 MatchCaseStatement {
                     patterns: vec![MatchPattern::Class(String::from("Add"))],
+                    capture_names: Vec::new(),
                     has_guard: false,
                     line: 2,
                 },
@@ -5241,11 +5242,13 @@ fn parse_retains_match_statement_metadata() {
                         MatchPattern::Class(String::from("Mul")),
                         MatchPattern::Class(String::from("Div")),
                     ],
+                    capture_names: Vec::new(),
                     has_guard: false,
                     line: 4,
                 },
                 MatchCaseStatement {
                     patterns: vec![MatchPattern::Wildcard],
+                    capture_names: Vec::new(),
                     has_guard: false,
                     line: 6,
                 },
