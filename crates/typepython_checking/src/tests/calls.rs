@@ -1294,3 +1294,24 @@ fn check_accepts_newtype_construction_from_base_value() {
     let rendered = result.diagnostics.as_text();
     assert!(!rendered.contains("TPY4001"), "{rendered}");
 }
+
+#[test]
+fn check_resolves_call_args_in_modules_with_typepython_surface_syntax() {
+    let result = check_temp_typepython_source(concat!(
+        "class Inner:\n",
+        "    label: str\n\n",
+        "class Outer:\n",
+        "    inner: Inner\n\n",
+        "sealed class Expr:\n",
+        "    pass\n\n",
+        "class Num(Expr):  value: int\n\n",
+        "def takes_str(text: str) -> None:\n",
+        "    ...\n\n",
+        "def forward(outer: Outer) -> None:\n",
+        "    takes_str(outer.inner.label)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4001"), "{rendered}");
+    assert!(!rendered.contains("TPY4003"), "{rendered}");
+}

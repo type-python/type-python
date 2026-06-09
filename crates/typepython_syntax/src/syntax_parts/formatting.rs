@@ -64,10 +64,11 @@ pub(super) fn normalize_typepython_statement_line(
         | SyntaxStatement::ClassDef(statement) => {
             let indentation = leading_indent(line);
             format!(
-                "{indentation}class {}{}{}:",
+                "{indentation}class {}{}{}:{}",
                 statement.name,
                 render_type_params(&statement.type_params),
-                statement.header_suffix
+                statement.header_suffix,
+                inline_suite_tail(line)
             )
         }
         SyntaxStatement::OverloadDef(_) => {
@@ -93,9 +94,45 @@ pub(super) fn normalize_typepython_statement_line(
         | SyntaxStatement::ExceptHandler(_) => line.to_owned(),
         SyntaxStatement::Unsafe(_) => {
             let indentation = leading_indent(line);
-            format!("{indentation}if True:")
+            format!("{indentation}if True:{}", inline_suite_tail(line))
         }
     }
+}
+
+// Preserve an inline suite written after the header colon, e.g.
+// `class Num(Expr):  value: int`. Dropping it would leave an empty block and
+// make the normalized module unparseable.
+pub(super) fn inline_suite_tail(line: &str) -> String {
+    depth_zero_colon_index(line)
+        .map(|index| line[index + 1..].trim())
+        .filter(|tail| !tail.is_empty() && !tail.starts_with('#'))
+        .map(|tail| format!(" {tail}"))
+        .unwrap_or_default()
+}
+
+fn depth_zero_colon_index(line: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut in_string: Option<char> = None;
+    let mut chars = line.char_indices();
+    while let Some((index, character)) = chars.next() {
+        match in_string {
+            Some(quote) => {
+                if character == '\\' {
+                    chars.next();
+                } else if character == quote {
+                    in_string = None;
+                }
+            }
+            None => match character {
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                '\'' | '"' => in_string = Some(character),
+                ':' if depth == 0 => return Some(index),
+                _ => {}
+            },
+        }
+    }
+    None
 }
 
 pub(super) fn normalize_generic_python_header_line(line: &str) -> String {

@@ -5583,3 +5583,22 @@ mod fuzz {
         }
     }
 }
+
+#[test]
+fn collect_direct_call_context_sites_handles_typepython_surface_syntax() {
+    let source = concat!(
+        "sealed class Expr:\n",
+        "    pass\n\n",
+        "class Num(Expr):  value: int\n\n",
+        "def forward(value: int) -> None:\n",
+        "    print(value)\n",
+    );
+
+    let sites = crate::collect_direct_call_context_sites(source);
+    assert!(
+        sites
+            .iter()
+            .any(|site| site.callee == "print" && site.owner_name.as_deref() == Some("forward")),
+        "{sites:?}"
+    );
+}

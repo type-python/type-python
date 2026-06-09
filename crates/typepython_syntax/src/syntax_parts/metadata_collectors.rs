@@ -85,7 +85,7 @@ pub(super) fn with_source_line_index<T>(source: &str, action: impl FnOnce() -> T
 
 #[must_use]
 pub fn collect_typed_dict_literal_sites(source: &str) -> Vec<TypedDictLiteralSite> {
-    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let normalized = surface_normalized_parse_source(source);
     with_source_line_index(&normalized, || {
         let Ok(parsed) = parse_module(&normalized) else {
             return Vec::new();
@@ -105,7 +105,7 @@ pub fn collect_typed_dict_literal_sites(source: &str) -> Vec<TypedDictLiteralSit
 
 #[must_use]
 pub fn collect_direct_call_context_sites(source: &str) -> Vec<DirectCallContextSite> {
-    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let normalized = surface_normalized_parse_source(source);
     with_source_line_index(&normalized, || {
         let Ok(parsed) = parse_module(&normalized) else {
             return Vec::new();
@@ -146,7 +146,7 @@ pub fn collect_expression_use_sites(source: &str) -> Vec<ExpressionUseSite> {
 
 #[must_use]
 pub fn collect_nested_direct_call_context_sites(source: &str) -> Vec<DirectCallContextSite> {
-    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let normalized = surface_normalized_parse_source(source);
     with_source_line_index(&normalized, || {
         let Ok(parsed) = parse_module(&normalized) else {
             return Vec::new();
@@ -165,7 +165,7 @@ pub fn collect_nested_direct_call_context_sites(source: &str) -> Vec<DirectCallC
 
 #[must_use]
 pub fn collect_typed_dict_mutation_sites(source: &str) -> Vec<TypedDictMutationSite> {
-    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let normalized = surface_normalized_parse_source(source);
     with_source_line_index(&normalized, || {
         let Ok(parsed) = parse_module(&normalized) else {
             return Vec::new();
@@ -336,6 +336,14 @@ pub fn collect_module_surface_metadata(source: &str) -> ModuleSurfaceMetadata {
 }
 
 fn module_surface_metadata_parse_source(source: &str) -> String {
+    surface_normalized_parse_source(source)
+}
+
+// Normalize a source for ruff parsing, lowering TypePython-only surface syntax
+// (sealed class, interface, data class, typealias, ...) when the raw text is
+// not valid Python. Collectors that skip this fallback silently lose all
+// sites for any module using TypePython surface keywords.
+fn surface_normalized_parse_source(source: &str) -> String {
     let normalized = normalize_annotated_lambda_source_lossy(source);
     if parse_module(&normalized).is_ok() {
         return normalized;
@@ -439,7 +447,7 @@ pub fn collect_conditional_return_sites(source: &str) -> Vec<ConditionalReturnSi
 pub fn collect_unsupported_dual_emit_async_construct_sites(
     source: &str,
 ) -> Vec<UnsupportedDualEmitAsyncConstructSite> {
-    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let normalized = surface_normalized_parse_source(source);
     with_source_line_index(&normalized, || {
         let Ok(parsed) = parse_module(&normalized) else {
             return Vec::new();
@@ -579,7 +587,7 @@ pub(super) fn collect_direct_function_param_sites(
 
 #[must_use]
 pub fn collect_frozen_field_mutation_sites(source: &str) -> Vec<FrozenFieldMutationSite> {
-    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let normalized = surface_normalized_parse_source(source);
     with_source_line_index(&normalized, || {
         let Ok(parsed) = parse_module(&normalized) else {
             return Vec::new();
