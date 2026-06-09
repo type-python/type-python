@@ -1201,3 +1201,53 @@ fn check_reports_method_call_on_missing_interface_member() {
     assert!(rendered.contains("has no member `missing`"), "{rendered}");
     assert!(!rendered.contains("has no member `close`"), "{rendered}");
 }
+
+#[test]
+fn check_accepts_parameter_forwarding_in_function_scope_call_args() {
+    let result = check_temp_typepython_source(concat!(
+        "class Client:\n",
+        "    name: str\n\n",
+        "def takes_client(client: Client) -> None:\n",
+        "    ...\n\n",
+        "def takes_int(value: int) -> None:\n",
+        "    ...\n\n",
+        "def forward(c: Client, n: int) -> None:\n",
+        "    takes_client(c)\n",
+        "    takes_int(n)\n",
+        "    takes_int(value=n)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4001"), "{rendered}");
+}
+
+#[test]
+fn check_reports_parameter_forwarding_type_mismatch_with_actual_type() {
+    let result = check_temp_typepython_source(concat!(
+        "def takes_int(value: int) -> None:\n",
+        "    ...\n\n",
+        "def forward(text: str) -> None:\n",
+        "    takes_int(text)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("passes `str` where parameter expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_optional_parameter_forwarding_without_narrowing() {
+    let result = check_temp_typepython_source(concat!(
+        "def takes_int(value: int) -> None:\n",
+        "    ...\n\n",
+        "def forward(n: int | None) -> None:\n",
+        "    takes_int(n)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(
+        rendered.contains("passes `Union[int, None]` where parameter expects `int`"),
+        "{rendered}"
+    );
+}

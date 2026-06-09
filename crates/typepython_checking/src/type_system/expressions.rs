@@ -1118,6 +1118,30 @@ fn resolve_descriptor_get_semantic_type(
     declaration_signature_return_semantic_type(get)
 }
 
+// Builtin class names that may appear in expression position (for example as
+// a `NewType` base or an `isinstance` argument). A bare reference denotes the
+// class object itself.
+pub(super) fn builtin_class_name(name: &str) -> bool {
+    matches!(
+        name,
+        "bool"
+            | "bytearray"
+            | "bytes"
+            | "complex"
+            | "dict"
+            | "float"
+            | "frozenset"
+            | "int"
+            | "list"
+            | "object"
+            | "range"
+            | "set"
+            | "str"
+            | "tuple"
+            | "type"
+    )
+}
+
 pub(super) fn resolve_member_access_owner_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -1351,6 +1375,13 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
     // than falling through to the unresolved-import boundary type.
     if name_is_match_capture_in_scope(node, current_owner_name, value_name) {
         return None;
+    }
+
+    if builtin_class_name(value_name) {
+        return Some(SemanticType::Generic {
+            head: String::from("type"),
+            args: vec![SemanticType::Name(value_name.to_owned())],
+        });
     }
 
     if let Some(boundary_type) =

@@ -645,19 +645,30 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         .flat_map(|result| result.diagnostics)
     }));
     let options = context.assignability_options();
-    let resolved_keyword_arg_types = resolved_keyword_arg_semantic_types_with_options(
+    let call_scope = context
+        .load_direct_call_context_sites(node)
+        .into_iter()
+        .find(|site| site.line == call.line && site.callee == call.callee);
+    let scope_owner_name = call_scope.as_ref().and_then(|site| site.owner_name.as_deref());
+    let scope_owner_type_name =
+        call_scope.as_ref().and_then(|site| site.owner_type_name.as_deref());
+    let resolved_keyword_arg_types = resolved_keyword_arg_semantic_types_in_scope_with_options(
         node,
         nodes,
         call,
         &expected_keyword_arg_types,
+        scope_owner_name,
+        scope_owner_type_name,
         options,
     );
     let (expanded_arg_types, variadic_starred_types) =
-        expanded_positional_arg_semantic_types_with_options(
+        expanded_positional_arg_semantic_types_in_scope_with_options(
             node,
             nodes,
             call,
             &expected_positional_arg_types,
+            scope_owner_name,
+            scope_owner_type_name,
             options,
         );
     let keyword_expansions = resolved_keyword_expansions_with_context(context, node, nodes, call);
@@ -772,8 +783,36 @@ pub(super) fn expanded_positional_arg_semantic_types_with_options(
     expected_types: &[Option<String>],
     options: AssignabilityOptions,
 ) -> (Vec<SemanticType>, Vec<SemanticType>) {
-    let mut positional_types =
-        resolved_call_arg_semantic_types_with_options(node, nodes, call, expected_types, options);
+    expanded_positional_arg_semantic_types_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        None,
+        None,
+        options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn expanded_positional_arg_semantic_types_in_scope_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> (Vec<SemanticType>, Vec<SemanticType>) {
+    let mut positional_types = resolved_call_arg_semantic_types_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        current_owner_name,
+        current_owner_type_name,
+        options,
+    );
     if positional_types.len() < call.arg_count {
         positional_types.extend(std::iter::repeat_n(
             SemanticType::Name(String::new()),
@@ -868,6 +907,27 @@ pub(super) fn resolved_call_arg_semantic_types_with_options(
     expected_types: &[Option<String>],
     options: AssignabilityOptions,
 ) -> Vec<SemanticType> {
+    resolved_call_arg_semantic_types_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        None,
+        None,
+        options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolved_call_arg_semantic_types_in_scope_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> Vec<SemanticType> {
     let context = checker_context_for_assignability_options(nodes, options);
     let arg_types = call.positional_arg_type_texts();
     if call.arg_values.is_empty() {
@@ -888,7 +948,14 @@ pub(super) fn resolved_call_arg_semantic_types_with_options(
             .map(|result| result.actual_type)
             .or_else(|| {
                 resolve_direct_expression_semantic_type_from_metadata_with_options(
-                    node, nodes, None, None, None, call.line, metadata, options,
+                    node,
+                    nodes,
+                    None,
+                    current_owner_name,
+                    current_owner_type_name,
+                    call.line,
+                    metadata,
+                    options,
                 )
             })
             .unwrap_or_else(|| {
@@ -980,6 +1047,27 @@ pub(super) fn resolved_keyword_arg_semantic_types_with_options(
     expected_types: &[Option<String>],
     options: AssignabilityOptions,
 ) -> Vec<SemanticType> {
+    resolved_keyword_arg_semantic_types_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        None,
+        None,
+        options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolved_keyword_arg_semantic_types_in_scope_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> Vec<SemanticType> {
     let context = checker_context_for_assignability_options(nodes, options);
     let keyword_arg_types = call.keyword_arg_type_texts();
     if call.keyword_arg_values.is_empty() {
@@ -1000,7 +1088,14 @@ pub(super) fn resolved_keyword_arg_semantic_types_with_options(
             .map(|result| result.actual_type)
             .or_else(|| {
                 resolve_direct_expression_semantic_type_from_metadata_with_options(
-                    node, nodes, None, None, None, call.line, metadata, options,
+                    node,
+                    nodes,
+                    None,
+                    current_owner_name,
+                    current_owner_type_name,
+                    call.line,
+                    metadata,
+                    options,
                 )
             })
             .unwrap_or_else(|| {
