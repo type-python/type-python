@@ -380,6 +380,43 @@ pub(in super::super) fn extract_direct_expr_metadata(
         };
     }
 
+    if let Expr::Call(call) = expr
+        && !matches!(call.func.as_ref(), Expr::Name(_))
+    {
+        return DirectExprMetadata {
+            value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: Some(Box::new(extract_direct_expr_metadata(
+                source,
+                call.func.as_ref(),
+            ))),
+            value_binop_right: None,
+            value_binop_operator: Some(String::from("direct-call")),
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
+    }
+
     if let Expr::BoolOp(bool_op) = expr {
         let mut values = bool_op.values.iter();
         let left_expr = values.next();

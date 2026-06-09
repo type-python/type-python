@@ -1832,7 +1832,8 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
 
     if let Some(owner_name) = metadata.value_method_owner_name.as_deref()
         && let Some(method_name) = metadata.value_method_name.as_deref()
-        && direct_operation_owner_resolves_to_unknown(
+    {
+        if direct_operation_owner_resolves_to_unknown(
             context,
             node,
             nodes,
@@ -1842,20 +1843,49 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
             owner_name,
             metadata.value_method_through_instance,
             suppressed_names,
-        )
-    {
-        push_unique_unknown_operation_diagnostic(
-            diagnostics,
-            seen,
-            format!("method:{line}:{owner_name}.{method_name}"),
-            format!(
-                "method call `{}.{}` in module `{}` is unsupported because `{}` has type `unknown`",
+        ) {
+            push_unique_unknown_operation_diagnostic(
+                diagnostics,
+                seen,
+                format!("method:{line}:{owner_name}.{method_name}"),
+                format!(
+                    "method call `{}.{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                    owner_name,
+                    method_name,
+                    node.module_path.display(),
+                    owner_name,
+                ),
+            );
+        } else if !suppressed_names.contains(owner_name)
+            && resolve_direct_member_reference_semantic_type_with_options(
+                node,
+                nodes,
+                None,
+                None,
+                current_owner_name,
+                current_owner_type_name,
+                line,
                 owner_name,
                 method_name,
-                node.module_path.display(),
-                owner_name,
-            ),
-        );
+                metadata.value_method_through_instance,
+                context.assignability_options(),
+            )
+            .is_some_and(|resolved| semantic_type_is_unknown(&resolved))
+        {
+            push_unique_unknown_operation_diagnostic(
+                diagnostics,
+                seen,
+                format!("call:{line}:{owner_name}.{method_name}"),
+                format!(
+                    "call to `{}.{}` in module `{}` is unsupported because `{}.{}` has type `unknown`",
+                    owner_name,
+                    method_name,
+                    node.module_path.display(),
+                    owner_name,
+                    method_name,
+                ),
+            );
+        }
     }
 
     if let Some(target) = metadata.value_subscript_target.as_deref() {
@@ -1898,7 +1928,8 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
     if let Some(operator) = metadata.value_binop_operator.as_deref()
         && let Some((operation, member_name)) = direct_expr_member_operation(operator)
         && let Some(owner) = metadata.value_binop_left.as_deref()
-        && direct_expr_metadata_resolves_to_unknown(
+    {
+        if direct_expr_metadata_resolves_to_unknown(
             context,
             node,
             nodes,
@@ -1907,40 +1938,105 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
             line,
             owner,
             suppressed_names,
+        ) {
+            let owner_label = direct_expr_operation_label(owner);
+            let (key_prefix, message) = match operation {
+                DirectExprMemberOperation::MemberAccess => (
+                    "member",
+                    format!(
+                        "member access `{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                        member_name,
+                        node.module_path.display(),
+                        owner_label,
+                    ),
+                ),
+                DirectExprMemberOperation::MethodCall => (
+                    "method",
+                    format!(
+                        "method call `{}.{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                        owner_label,
+                        member_name,
+                        node.module_path.display(),
+                        owner_label,
+                    ),
+                ),
+            };
+            push_unique_unknown_operation_diagnostic(
+                diagnostics,
+                seen,
+                format!("{key_prefix}:{line}:{owner_label}.{member_name}"),
+                message,
+            );
+        } else if operation == DirectExprMemberOperation::MethodCall
+            && resolve_direct_expression_semantic_type_from_metadata_with_options(
+                node,
+                nodes,
+                None,
+                current_owner_name,
+                current_owner_type_name,
+                line,
+                owner,
+                context.assignability_options(),
+            )
+            .and_then(|owner_type| {
+                resolve_member_semantic_type_on_owner_type(
+                    node,
+                    nodes,
+                    &owner_type,
+                    member_name,
+                    context.assignability_options(),
+                )
+            })
+            .is_some_and(|resolved| semantic_type_is_unknown(&resolved))
+        {
+            let owner_label = direct_expr_operation_label(owner);
+            push_unique_unknown_operation_diagnostic(
+                diagnostics,
+                seen,
+                format!("call:{line}:{owner_label}.{member_name}"),
+                format!(
+                    "call to `{}.{}` in module `{}` is unsupported because `{}.{}` has type `unknown`",
+                    owner_label,
+                    member_name,
+                    node.module_path.display(),
+                    owner_label,
+                    member_name,
+                ),
+            );
+        }
+    }
+
+    if let Some(operator) = metadata.value_binop_operator.as_deref()
+        && operator == DIRECT_CALL_OPERATOR
+        && let Some(callee) = metadata.value_binop_left.as_deref()
+        && direct_expr_metadata_resolves_to_unknown(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            callee,
+            suppressed_names,
         )
     {
-        let owner_label = direct_expr_operation_label(owner);
-        let (key_prefix, message) = match operation {
-            DirectExprMemberOperation::MemberAccess => (
-                "member",
-                format!(
-                    "member access `{}` in module `{}` is unsupported because `{}` has type `unknown`",
-                    member_name,
-                    node.module_path.display(),
-                    owner_label,
-                ),
-            ),
-            DirectExprMemberOperation::MethodCall => (
-                "method",
-                format!(
-                    "method call `{}.{}` in module `{}` is unsupported because `{}` has type `unknown`",
-                    owner_label,
-                    member_name,
-                    node.module_path.display(),
-                    owner_label,
-                ),
-            ),
-        };
+        let label = direct_expr_operation_label(callee);
         push_unique_unknown_operation_diagnostic(
             diagnostics,
             seen,
-            format!("{key_prefix}:{line}:{owner_label}.{member_name}"),
-            message,
+            format!("call:{line}:{label}"),
+            format!(
+                "call to `{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                label,
+                node.module_path.display(),
+                label,
+            ),
         );
     }
 
     if let Some(operator) = metadata.value_binop_operator.as_deref()
         && direct_expr_member_operation(operator).is_none()
+        && operator != DIRECT_CALL_OPERATOR
     {
         let single_operand_operation = direct_expr_operator_is_single_operand(operator)
             || metadata.value_binop_right.is_none();
@@ -2145,6 +2241,8 @@ fn direct_expr_operation_description(operator: &str, single_operand_operation: b
         _ => format!("binary operation `{operator}`"),
     }
 }
+
+pub(crate) const DIRECT_CALL_OPERATOR: &str = "direct-call";
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum DirectExprMemberOperation {
@@ -2417,7 +2515,7 @@ fn direct_expr_metadata_resolves_to_unknown(
         return semantic_type_is_unknown(&resolved);
     }
     if let Some(operator) = metadata.value_binop_operator.as_deref()
-        && direct_expr_member_operation(operator).is_some()
+        && (direct_expr_member_operation(operator).is_some() || operator == DIRECT_CALL_OPERATOR)
         && metadata.value_binop_left.is_some()
         && let Some(resolved) = resolve_direct_expression_semantic_type_from_metadata_with_options(
             node,
@@ -2478,6 +2576,12 @@ fn direct_expr_operation_label(metadata: &typepython_syntax::DirectExprMetadata)
             DirectExprMemberOperation::MemberAccess => format!("{owner_label}.{member_name}"),
             DirectExprMemberOperation::MethodCall => format!("{owner_label}.{member_name}()"),
         };
+    }
+    if let Some(operator) = metadata.value_binop_operator.as_deref()
+        && operator == DIRECT_CALL_OPERATOR
+        && let Some(callee) = metadata.value_binop_left.as_deref()
+    {
+        return format!("{}()", direct_expr_operation_label(callee));
     }
     String::from("expression")
 }

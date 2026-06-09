@@ -1192,6 +1192,82 @@ fn check_reports_unknown_operations_on_nested_attribute_owner_expression() {
 }
 
 #[test]
+fn check_reports_unknown_direct_call_on_attribute_callee() {
+    let result = check_temp_typepython_source(concat!(
+        "class Box:\n",
+        "    payload: unknown\n\n",
+        "def run(box: Box) -> None:\n",
+        "    box.payload()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("call to `box.payload`"), "{rendered}");
+    assert!(rendered.contains("`box.payload` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_direct_call_on_subscript_callee() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(items: list[unknown]) -> None:\n",
+        "    items[0]()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("call to `items[0]`"), "{rendered}");
+    assert!(rendered.contains("`items[0]` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_direct_call_on_nested_attribute_callee() {
+    let result = check_temp_typepython_source(concat!(
+        "class Inner:\n",
+        "    payload: unknown\n\n",
+        "class Outer:\n",
+        "    inner: Inner\n\n",
+        "def run(outer: Outer) -> None:\n",
+        "    outer.inner.payload()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("call to `outer.inner.payload`"), "{rendered}");
+    assert!(rendered.contains("`outer.inner.payload` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unknown_operation_on_subscript_callee_result() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable\n\n",
+        "def run(fns: list[Callable[[], unknown]]) -> None:\n",
+        "    fns[0]() + 1\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4003"), "{rendered}");
+    assert!(rendered.contains("binary operation `+`"), "{rendered}");
+    assert!(rendered.contains("`fns[0]()` has type `unknown`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_method_and_typed_callable_element_calls() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable\n\n",
+        "class Box:\n",
+        "    label: str\n",
+        "    def ping(self) -> str:\n",
+        "        return self.label\n\n",
+        "def run(box: Box, fns: list[Callable[[], int]]) -> None:\n",
+        "    box.ping()\n",
+        "    fns[0]()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4003"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_typed_nested_attribute_chain_operations() {
     let result = check_temp_typepython_source(concat!(
         "class Profile:\n",
