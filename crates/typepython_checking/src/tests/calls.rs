@@ -1056,3 +1056,63 @@ fn check_accepts_standard_object_members_on_optional_owners() {
     let rendered = result.diagnostics.as_text();
     assert!(!rendered.contains("TPY4002"), "{rendered}");
 }
+
+#[test]
+fn check_reports_method_call_on_optional_owner_without_narrowing() {
+    let result = check_temp_typepython_source(concat!(
+        "class Client:\n",
+        "    name: str\n",
+        "    def ping(self) -> str:\n",
+        "        return self.name\n\n",
+        "def run(client: Client | None) -> None:\n",
+        "    client.ping()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `ping` on every union branch"), "{rendered}");
+}
+
+#[test]
+fn check_reports_builtin_method_call_on_optional_owner_without_narrowing() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(x: int | None) -> int:\n",
+        "    return x.bit_length()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `bit_length` on every union branch"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_method_call_on_optional_owner_after_narrowing() {
+    let result = check_temp_typepython_source(concat!(
+        "class Client:\n",
+        "    name: str\n",
+        "    def ping(self) -> str:\n",
+        "        return self.name\n\n",
+        "def run(client: Client | None, x: int | None) -> str:\n",
+        "    if client is not None:\n",
+        "        client.ping()\n",
+        "    if isinstance(x, int):\n",
+        "        x.bit_length()\n",
+        "    return \"\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_object_member_method_call_on_optional_owner() {
+    let result = check_temp_typepython_source(concat!(
+        "class Client:\n",
+        "    name: str\n\n",
+        "def run(client: Client | None) -> None:\n",
+        "    client.__str__()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}

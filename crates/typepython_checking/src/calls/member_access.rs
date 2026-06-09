@@ -28,55 +28,16 @@ pub(super) fn direct_member_access_diagnostics(
             }
 
             let owner_type = resolve_member_access_owner_semantic_type(node, nodes, access)?;
-            if let Some(branches) = semantic_union_branches(&owner_type) {
-                let member_required_branches = branches
-                    .iter()
-                    .filter(|branch| context.strict_nulls || !semantic_branch_is_none(branch))
-                    .collect::<Vec<_>>();
-                let available = branches
-                    .iter()
-                    .filter(|branch| context.strict_nulls || !semantic_branch_is_none(branch))
-                    .filter_map(|branch| {
-                        let branch_name = semantic_nominal_owner_name(branch)?;
-                        type_has_readable_member_with_context(
-                            context,
-                            node,
-                            &branch_name,
-                            &access.member,
-                        )
-                        .then_some(branch_name)
-                    })
-                    .collect::<Vec<_>>();
-                if available.len() == member_required_branches.len() {
-                    return None;
-                }
-                let mut diagnostic = Diagnostic::error(
-                    "TPY4002",
-                    format!(
-                        "type `{}` in module `{}` has no member `{}` on every union branch",
-                        diagnostic_type_text(&owner_type),
-                        node.module_path.display(),
-                        access.member
-                    ),
-                );
-                if let Some((span, replacement)) = union_member_guard_suggestion(
+            if semantic_union_branches(&owner_type).is_some() {
+                return union_owner_member_diagnostic(
+                    context,
+                    node,
                     source.as_deref(),
-                    &node.module_path,
-                    access,
-                    &available,
-                )
-                {
-                    diagnostic = diagnostic.with_suggestion(
-                        format!(
-                            "Insert `isinstance` guard for `{}` before accessing `{}`",
-                            access.owner_name, access.member
-                        ),
-                        span,
-                        replacement,
-                        SuggestionApplicability::MachineApplicable,
-                    );
-                }
-                return Some(diagnostic);
+                    &owner_type,
+                    &access.owner_name,
+                    &access.member,
+                    access.line,
+                );
             }
             let owner_type_name = semantic_nominal_owner_name(&owner_type)?;
             let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
@@ -138,6 +99,54 @@ pub(super) fn direct_member_access_diagnostics(
 
 fn semantic_branch_is_none(branch: &SemanticType) -> bool {
     matches!(branch.strip_annotated(), SemanticType::Name(name) if name == "None")
+}
+
+fn union_owner_member_diagnostic(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    source: Option<&str>,
+    owner_type: &SemanticType,
+    owner_name: &str,
+    member: &str,
+    line: usize,
+) -> Option<Diagnostic> {
+    let branches = semantic_union_branches(owner_type)?;
+    let member_required_branches = branches
+        .iter()
+        .filter(|branch| context.strict_nulls || !semantic_branch_is_none(branch))
+        .collect::<Vec<_>>();
+    let available = branches
+        .iter()
+        .filter(|branch| context.strict_nulls || !semantic_branch_is_none(branch))
+        .filter_map(|branch| {
+            let branch_name = semantic_nominal_owner_name(branch)?;
+            type_has_readable_member_with_context(context, node, &branch_name, member)
+                .then_some(branch_name)
+        })
+        .collect::<Vec<_>>();
+    if available.len() == member_required_branches.len() {
+        return None;
+    }
+    let mut diagnostic = Diagnostic::error(
+        "TPY4002",
+        format!(
+            "type `{}` in module `{}` has no member `{}` on every union branch",
+            diagnostic_type_text(owner_type),
+            node.module_path.display(),
+            member
+        ),
+    );
+    if let Some((span, replacement)) =
+        union_member_guard_suggestion(source, &node.module_path, owner_name, line, &available)
+    {
+        diagnostic = diagnostic.with_suggestion(
+            format!("Insert `isinstance` guard for `{owner_name}` before accessing `{member}`"),
+            span,
+            replacement,
+            SuggestionApplicability::MachineApplicable,
+        );
+    }
+    Some(diagnostic)
 }
 
 #[allow(dead_code)]
@@ -204,7 +213,8 @@ pub(super) fn standard_object_member(member: &str) -> bool {
 pub(super) fn union_member_guard_suggestion(
     source: Option<&str>,
     module_path: &std::path::Path,
-    access: &typepython_binding::MemberAccessSite,
+    owner_name: &str,
+    line: usize,
     available_branches: &[String],
 ) -> Option<(Span, String)> {
     let guard_types = available_branches
@@ -215,7 +225,7 @@ pub(super) fn union_member_guard_suggestion(
         return None;
     }
     let source = source?;
-    let line_text = source.lines().nth(access.line.checked_sub(1)?)?;
+    let line_text = source.lines().nth(line.checked_sub(1)?)?;
     let indent = leading_space_count(line_text);
     let guard = if guard_types.len() == 1 {
         guard_types[0].clone()
@@ -223,8 +233,8 @@ pub(super) fn union_member_guard_suggestion(
         format!("({})", guard_types.join(", "))
     };
     Some((
-        Span::new(module_path.display().to_string(), access.line, 1, access.line, 1),
-        format!("{}assert isinstance({}, {})\n", " ".repeat(indent), access.owner_name, guard),
+        Span::new(module_path.display().to_string(), line, 1, line, 1),
+        format!("{}assert isinstance({}, {})\n", " ".repeat(indent), owner_name, guard),
     ))
 }
 
@@ -256,6 +266,24 @@ pub(super) fn direct_method_call_diagnostics(
             continue;
         }
 
+        if let Some(scope_owner_type) =
+            resolve_method_call_owner_scope_semantic_type(context, node, nodes, call)
+            && semantic_union_branches(&scope_owner_type).is_some()
+        {
+            let source = context.load_source_text(node);
+            if let Some(diagnostic) = union_owner_member_diagnostic(
+                context,
+                node,
+                source.as_deref(),
+                &scope_owner_type,
+                &call.owner_name,
+                &call.method,
+                call.line,
+            ) {
+                diagnostics.push(diagnostic);
+            }
+            continue;
+        }
         let Some(owner_type) = resolve_method_call_owner_type(context, node, nodes, call) else {
             continue;
         };
@@ -456,4 +484,26 @@ pub(super) fn resolve_method_call_owner_type(
         &call.owner_name,
     )
     .or_else(|| Some(SemanticType::Name(call.owner_name.clone())))
+}
+
+fn resolve_method_call_owner_scope_semantic_type(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::MethodCallSite,
+) -> Option<SemanticType> {
+    if call.through_instance {
+        return resolve_direct_callable_return_semantic_type(node, nodes, &call.owner_name);
+    }
+    resolve_direct_name_reference_semantic_type_with_context(
+        context,
+        node,
+        nodes,
+        None,
+        None,
+        call.current_owner_name.as_deref(),
+        call.current_owner_type_name.as_deref(),
+        call.line,
+        &call.owner_name,
+    )
 }
