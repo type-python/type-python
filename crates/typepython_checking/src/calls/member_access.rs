@@ -89,6 +89,7 @@ pub(super) fn direct_member_access_diagnostics(
             .is_some()
                 || !find_owned_callable_declarations(nodes, class_node, class_decl, &access.member)
                     .is_empty()
+                || standard_object_member(&access.member)
                 || framework_generated_member_semantic_type_with_context(
                     context,
                     node,
@@ -156,6 +157,9 @@ pub(super) fn type_has_readable_member_with_context(
     type_name: &str,
     member: &str,
 ) -> bool {
+    if standard_object_member(member) {
+        return true;
+    }
     let Some((class_node, class_decl)) = resolve_direct_base(context.nodes, node, type_name) else {
         return false;
     };
@@ -164,6 +168,37 @@ pub(super) fn type_has_readable_member_with_context(
             .is_empty()
         || framework_generated_member_semantic_type_with_context(context, node, type_name, member)
             .is_some()
+}
+
+// Apparent members of every type per spec section 14.4: the standard `object`
+// surface mirrored from the bundled stdlib `builtins.pyi` stub.
+pub(super) fn standard_object_member(member: &str) -> bool {
+    matches!(
+        member,
+        "__annotations__"
+            | "__class__"
+            | "__delattr__"
+            | "__dict__"
+            | "__dir__"
+            | "__doc__"
+            | "__eq__"
+            | "__format__"
+            | "__getattribute__"
+            | "__getstate__"
+            | "__hash__"
+            | "__init__"
+            | "__init_subclass__"
+            | "__module__"
+            | "__ne__"
+            | "__new__"
+            | "__reduce__"
+            | "__reduce_ex__"
+            | "__repr__"
+            | "__setattr__"
+            | "__sizeof__"
+            | "__str__"
+            | "__subclasshook__"
+    )
 }
 
 pub(super) fn union_member_guard_suggestion(

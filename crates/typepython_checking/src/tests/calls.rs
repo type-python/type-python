@@ -1030,3 +1030,29 @@ fn check_reports_missing_member_after_method_reference_support() {
     assert!(rendered.contains("TPY4002"), "{rendered}");
     assert!(rendered.contains("has no member `nonexistent`"), "{rendered}");
 }
+
+#[test]
+fn check_accepts_standard_object_members_on_user_classes() {
+    let result = check_temp_typepython_source(concat!(
+        "class Client:\n",
+        "    name: str\n\n",
+        "def run(client: Client) -> None:\n",
+        "    client.__class__\n",
+        "    client.__doc__\n",
+        "    client.__str__\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_standard_object_members_on_optional_owners() {
+    let result = check_temp_typepython_source(concat!(
+        "def run(x: int | None) -> None:\n",
+        "    x.__str__\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
