@@ -1817,6 +1817,8 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
             suppressed_names,
         )
     {
+        let owner_label =
+            direct_owner_operation_label(owner_name, metadata.value_member_through_instance);
         push_unique_unknown_operation_diagnostic(
             diagnostics,
             seen,
@@ -1825,7 +1827,7 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
                 "member access `{}` in module `{}` is unsupported because `{}` has type `unknown`",
                 member_name,
                 node.module_path.display(),
-                owner_name,
+                owner_label,
             ),
         );
     }
@@ -1833,6 +1835,8 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
     if let Some(owner_name) = metadata.value_method_owner_name.as_deref()
         && let Some(method_name) = metadata.value_method_name.as_deref()
     {
+        let owner_label =
+            direct_owner_operation_label(owner_name, metadata.value_method_through_instance);
         if direct_operation_owner_resolves_to_unknown(
             context,
             node,
@@ -1850,10 +1854,10 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
                 format!("method:{line}:{owner_name}.{method_name}"),
                 format!(
                     "method call `{}.{}` in module `{}` is unsupported because `{}` has type `unknown`",
-                    owner_name,
+                    owner_label,
                     method_name,
                     node.module_path.display(),
-                    owner_name,
+                    owner_label,
                 ),
             );
         } else if !suppressed_names.contains(owner_name)
@@ -1878,10 +1882,10 @@ fn collect_unknown_direct_expression_operation_diagnostics_with_suppressed(
                 format!("call:{line}:{owner_name}.{method_name}"),
                 format!(
                     "call to `{}.{}` in module `{}` is unsupported because `{}.{}` has type `unknown`",
-                    owner_name,
+                    owner_label,
                     method_name,
                     node.module_path.display(),
-                    owner_name,
+                    owner_label,
                     method_name,
                 ),
             );
@@ -2540,21 +2544,27 @@ fn semantic_type_is_unknown(ty: &SemanticType) -> bool {
     matches!(ty.strip_annotated(), SemanticType::Name(name) if name == "unknown")
 }
 
+fn direct_owner_operation_label(owner_name: &str, through_instance: bool) -> String {
+    if through_instance { format!("{owner_name}()") } else { owner_name.to_owned() }
+}
+
 fn direct_expr_operation_label(metadata: &typepython_syntax::DirectExprMetadata) -> String {
     if let Some(name) = metadata.value_name.as_deref() {
         return name.to_owned();
     }
     if let Some(callee) = metadata.value_callee.as_deref() {
-        return callee.to_owned();
+        return format!("{callee}()");
     }
     if let Some(owner) = metadata.value_member_owner_name.as_deref()
         && let Some(member) = metadata.value_member_name.as_deref()
     {
+        let owner = direct_owner_operation_label(owner, metadata.value_member_through_instance);
         return format!("{owner}.{member}");
     }
     if let Some(owner) = metadata.value_method_owner_name.as_deref()
         && let Some(method) = metadata.value_method_name.as_deref()
     {
+        let owner = direct_owner_operation_label(owner, metadata.value_method_through_instance);
         return format!("{owner}.{method}()");
     }
     if let Some(target) = metadata.value_subscript_target.as_deref() {

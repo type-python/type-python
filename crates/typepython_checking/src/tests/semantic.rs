@@ -627,7 +627,7 @@ fn check_reports_unknown_subscript_from_real_parse_pipeline() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4003"), "{rendered}");
     assert!(rendered.contains("subscript access"), "{rendered}");
-    assert!(rendered.contains("`get_value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("`get_value()` has type `unknown`"), "{rendered}");
     assert!(rendered.contains("`value` has type `unknown`"), "{rendered}");
 }
 
@@ -643,8 +643,8 @@ fn check_reports_unknown_arithmetic_from_real_parse_pipeline() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4003"), "{rendered}");
     assert!(rendered.contains("binary operation `+`"), "{rendered}");
-    assert!(rendered.contains("left operand `get_value` has type `unknown`"), "{rendered}");
-    assert!(rendered.contains("right operand `get_value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("left operand `get_value()` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("right operand `get_value()` has type `unknown`"), "{rendered}");
 }
 
 #[test]
@@ -675,8 +675,8 @@ fn check_reports_unknown_bare_expression_operations_from_real_parse_pipeline() {
     assert!(rendered.contains("TPY4003"), "{rendered}");
     assert!(rendered.contains("subscript access"), "{rendered}");
     assert!(rendered.contains("binary operation `+`"), "{rendered}");
-    assert!(rendered.contains("left operand `get_value` has type `unknown`"), "{rendered}");
-    assert!(rendered.contains("right operand `get_value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("left operand `get_value()` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("right operand `get_value()` has type `unknown`"), "{rendered}");
 }
 
 #[test]
@@ -692,7 +692,7 @@ fn check_reports_unknown_bare_expression_operations_after_typepython_surface_syn
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4003"), "{rendered}");
     assert!(rendered.contains("subscript access"), "{rendered}");
-    assert!(rendered.contains("`get_value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("`get_value()` has type `unknown`"), "{rendered}");
 }
 
 #[test]
@@ -722,7 +722,7 @@ fn check_reports_unknown_guard_expression_operations_from_real_parse_pipeline() 
     assert!(rendered.contains("TPY4003"), "{rendered}");
     assert!(rendered.contains("subscript access"), "{rendered}");
     assert!(rendered.contains("binary operation `+`"), "{rendered}");
-    assert!(rendered.contains("left operand `get_value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("left operand `get_value()` has type `unknown`"), "{rendered}");
 }
 
 #[test]
@@ -759,7 +759,7 @@ fn check_reports_unknown_definition_header_and_raise_expression_operations() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4003"), "{rendered}");
     assert!(rendered.matches("subscript access").count() >= 4, "{rendered}");
-    assert!(rendered.contains("`get_value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("`get_value()` has type `unknown`"), "{rendered}");
 }
 
 #[test]
@@ -825,7 +825,7 @@ fn check_reports_unknown_truthiness_and_boolean_operations() {
     assert!(rendered.contains("unary operation `not`"), "{rendered}");
     assert!(rendered.contains("boolean operation `and`"), "{rendered}");
     assert!(rendered.contains("operand `value` has type `unknown`"), "{rendered}");
-    assert!(rendered.contains("operand `get_value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("operand `get_value()` has type `unknown`"), "{rendered}");
 }
 
 #[test]
@@ -865,7 +865,7 @@ fn check_reports_unknown_expression_operations_with_source_overrides_without_bac
     assert!(rendered.contains("subscript access"), "{rendered}");
     assert!(rendered.contains("truthiness check"), "{rendered}");
     assert!(rendered.contains("`value` has type `unknown`"), "{rendered}");
-    assert!(rendered.contains("`get_value` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("`get_value()` has type `unknown`"), "{rendered}");
 }
 
 #[test]
@@ -1113,9 +1113,9 @@ fn check_reports_unknown_operations_on_callable_unknown_return() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4003"), "{rendered}");
     assert!(rendered.contains("member access `name`"), "{rendered}");
-    assert!(rendered.contains("method call `callback.method`"), "{rendered}");
+    assert!(rendered.contains("method call `callback().method`"), "{rendered}");
     assert!(rendered.contains("subscript access"), "{rendered}");
-    assert!(rendered.contains("`callback` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("`callback()` has type `unknown`"), "{rendered}");
 }
 
 #[test]
@@ -1297,7 +1297,7 @@ fn check_reports_unknown_member_on_callable_attribute_owner_expression() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4003"), "{rendered}");
     assert!(rendered.contains("member access `name`"), "{rendered}");
-    assert!(rendered.contains("`get_box.payload` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("`get_box().payload` has type `unknown`"), "{rendered}");
 }
 
 #[test]
@@ -1313,7 +1313,7 @@ fn check_reports_unknown_operations_on_callable_shadowing_function_return() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4003"), "{rendered}");
     assert!(rendered.contains("member access `name`"), "{rendered}");
-    assert!(rendered.contains("`callback` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("`callback()` has type `unknown`"), "{rendered}");
 }
 
 #[test]
@@ -1329,7 +1329,7 @@ fn check_reports_unknown_operations_on_module_callable_unknown_return() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4003"), "{rendered}");
     assert!(rendered.contains("member access `name`"), "{rendered}");
-    assert!(rendered.contains("`callback` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("`callback()` has type `unknown`"), "{rendered}");
 }
 
 #[test]
@@ -1346,7 +1346,7 @@ fn check_reports_unknown_operations_on_module_callable_unknown_return_in_functio
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4003"), "{rendered}");
     assert!(rendered.contains("member access `name`"), "{rendered}");
-    assert!(rendered.contains("`callback` has type `unknown`"), "{rendered}");
+    assert!(rendered.contains("`callback()` has type `unknown`"), "{rendered}");
 }
 
 #[test]
