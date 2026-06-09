@@ -395,6 +395,13 @@ fn direct_semantic_type_is_assignable(
                 assignable_semantic_generic_bridge(node, nodes, &expected, &actual, options)
             {
                 result
+            } else if let SemanticType::Name(actual_name) = actual.strip_annotated()
+                && let Some(base) = resolve_newtype_base_semantic_type(node, nodes, actual_name)
+            {
+                // Spec 8.12: a NewType value is assignable to its base type,
+                // while the base type is not assignable back without an
+                // explicit construction.
+                direct_semantic_type_is_assignable(node, nodes, &expected, &base, options, visiting)
             } else if actual_is_unknown {
                 false
             } else {
@@ -411,6 +418,34 @@ fn direct_semantic_type_is_assignable(
 
     visiting.remove(&key);
     result
+}
+
+fn resolve_newtype_base_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    name: &str,
+) -> Option<SemanticType> {
+    if let Some(base) = module_newtype_base_semantic_type(node, name) {
+        return Some(base);
+    }
+    let target = resolve_imported_symbol_semantic_target(node, nodes, name)?;
+    module_newtype_base_semantic_type(target.provider_node, name)
+}
+
+fn module_newtype_base_semantic_type(
+    module: &typepython_graph::ModuleNode,
+    name: &str,
+) -> Option<SemanticType> {
+    let assignment = module.assignments.iter().find(|assignment| {
+        assignment.owner_name.is_none()
+            && assignment.name == name
+            && matches!(assignment.value_callee.as_deref(), Some("NewType" | "typing.NewType"))
+    })?;
+    let call = module.calls.iter().find(|call| {
+        call.line == assignment.line && matches!(call.callee.as_str(), "NewType" | "typing.NewType")
+    })?;
+    let base_name = call.arg_values.get(1)?.value_name.as_deref()?;
+    Some(SemanticType::Name(base_name.to_owned()))
 }
 
 fn is_any_semantic_type(ty: &SemanticType) -> bool {

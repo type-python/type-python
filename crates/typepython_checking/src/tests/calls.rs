@@ -1251,3 +1251,46 @@ fn check_reports_optional_parameter_forwarding_without_narrowing() {
         "{rendered}"
     );
 }
+
+#[test]
+fn check_accepts_newtype_value_where_base_type_is_expected() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import NewType\n\n",
+        "UserId = NewType(\"UserId\", int)\n\n",
+        "def takes_int(value: int) -> None:\n",
+        "    ...\n\n",
+        "def run(user_id: UserId) -> int:\n",
+        "    takes_int(user_id)\n",
+        "    return user_id\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4001"), "{rendered}");
+}
+
+#[test]
+fn check_rejects_base_value_where_newtype_is_expected() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import NewType\n\n",
+        "UserId = NewType(\"UserId\", int)\n\n",
+        "def run(raw: int) -> UserId:\n",
+        "    return raw\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("returns `int`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_newtype_construction_from_base_value() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import NewType\n\n",
+        "UserId = NewType(\"UserId\", int)\n\n",
+        "def run(raw: int) -> UserId:\n",
+        "    return UserId(raw)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4001"), "{rendered}");
+}
