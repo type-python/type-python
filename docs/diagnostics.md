@@ -152,9 +152,16 @@ def greet() -> str:
 #### TPY4002 -- Invalid member access
 
 ```python
-x: int = 42
-x.foo              # TPY4002: 'int' has no attribute 'foo'
+class Point:
+    x: int
+
+p = Point()
+p.foo              # TPY4002: type 'Point' has no member 'foo'
 ```
+
+Member existence is enforced for project-defined classes, interfaces, and
+unions whose branches resolve to known declarations. Builtin scalar surfaces
+(for example `int` methods) are not validated in Core v1.
 
 #### TPY4003 -- Operation on unknown
 
