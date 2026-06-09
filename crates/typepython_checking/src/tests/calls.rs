@@ -1146,3 +1146,58 @@ fn check_reports_missing_member_when_hierarchy_is_fully_resolved() {
     assert!(rendered.contains("TPY4002"), "{rendered}");
     assert!(rendered.contains("has no member `nonexistent`"), "{rendered}");
 }
+
+#[test]
+fn check_reports_method_call_on_missing_member() {
+    let result = check_temp_typepython_source(concat!(
+        "class Client:\n",
+        "    name: str\n",
+        "    def ping(self) -> str:\n",
+        "        return self.name\n\n",
+        "def run(client: Client) -> None:\n",
+        "    client.nonexistent()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `nonexistent`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_method_calls_through_fields_dunders_and_open_bases() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable\n\n",
+        "from external_pkg import BaseModel\n\n",
+        "class Client:\n",
+        "    name: str\n",
+        "    handler: Callable[[], str]\n",
+        "    def ping(self) -> str:\n",
+        "        return self.name\n\n",
+        "class User(BaseModel):\n",
+        "    name: str\n\n",
+        "def run(client: Client, user: User) -> None:\n",
+        "    client.ping()\n",
+        "    client.handler()\n",
+        "    client.__str__()\n",
+        "    user.inherited_method()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
+fn check_reports_method_call_on_missing_interface_member() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Closeable:\n",
+        "    def close(self) -> None: ...\n\n",
+        "def run(x: Closeable) -> None:\n",
+        "    x.close()\n",
+        "    x.missing()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `missing`"), "{rendered}");
+    assert!(!rendered.contains("has no member `close`"), "{rendered}");
+}

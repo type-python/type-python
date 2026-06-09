@@ -298,16 +298,17 @@ pub(super) fn direct_method_call_diagnostics(
             continue;
         }
 
-        if let Some(scope_owner_type) =
-            resolve_method_call_owner_scope_semantic_type(context, node, nodes, call)
-            && semantic_union_branches(&scope_owner_type).is_some()
+        let scope_owner_type =
+            resolve_method_call_owner_scope_semantic_type(context, node, nodes, call);
+        if let Some(scope_owner_type) = &scope_owner_type
+            && semantic_union_branches(scope_owner_type).is_some()
         {
             let source = context.load_source_text(node);
             if let Some(diagnostic) = union_owner_member_diagnostic(
                 context,
                 node,
                 source.as_deref(),
-                &scope_owner_type,
+                scope_owner_type,
                 &call.owner_name,
                 &call.method,
                 call.line,
@@ -315,6 +316,52 @@ pub(super) fn direct_method_call_diagnostics(
                 diagnostics.push(diagnostic);
             }
             continue;
+        }
+        if let Some(scope_owner_type) = &scope_owner_type
+            && let Some(scope_owner_type_name) = semantic_nominal_owner_name(scope_owner_type)
+            && let Some((scope_class_node, scope_class_decl)) =
+                resolve_direct_base(nodes, node, &scope_owner_type_name)
+            && find_owned_callable_declarations(
+                nodes,
+                scope_class_node,
+                scope_class_decl,
+                &call.method,
+            )
+            .is_empty()
+        {
+            let has_member = find_owned_readable_member_declaration(
+                nodes,
+                scope_class_node,
+                scope_class_decl,
+                &call.method,
+            )
+            .is_some()
+                || standard_object_member(&call.method)
+                || class_surface_is_open(
+                    nodes,
+                    scope_class_node,
+                    scope_class_decl,
+                    &mut BTreeSet::new(),
+                )
+                || framework_generated_member_semantic_type_with_context(
+                    context,
+                    node,
+                    &scope_owner_type_name,
+                    &call.method,
+                )
+                .is_some();
+            if !has_member {
+                diagnostics.push(Diagnostic::error(
+                    "TPY4002",
+                    format!(
+                        "type `{}` in module `{}` has no member `{}`",
+                        scope_class_decl.name,
+                        node.module_path.display(),
+                        call.method
+                    ),
+                ));
+                continue;
+            }
         }
         let Some(owner_type) = resolve_method_call_owner_type(context, node, nodes, call) else {
             continue;
