@@ -2232,7 +2232,7 @@ fn stub_type_parameter_factory_call_is_allowed(
 }
 
 fn is_stub_type_parameter_factory(callee: &str) -> bool {
-    matches!(callee, "TypeVar" | "ParamSpec" | "TypeVarTuple")
+    matches!(callee, "TypeVar" | "ParamSpec" | "TypeVarTuple" | "NewType")
 }
 
 fn emitted_syntax(path: &Path) -> Option<typepython_syntax::SyntaxTree> {

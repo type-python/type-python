@@ -1485,3 +1485,23 @@ fn remove_temp_dir(path: &Path) {
         fs::remove_dir_all(path).expect("temp directory should be removed");
     }
 }
+
+#[test]
+fn generate_inferred_stub_preserves_type_form_constructor_assignments() {
+    let stub = generate_inferred_stub_source(
+        concat!(
+            "from typing import NewType, TypeVar\n\n",
+            "UserId = NewType(\"UserId\", int)\n",
+            "T = TypeVar(\"T\")\n",
+            "COUNT = 3\n",
+        ),
+        InferredStubMode::Shadow,
+    )
+    .expect("stub generation should succeed");
+
+    assert!(stub.contains("UserId = NewType(\"UserId\", int)"), "{stub}");
+    assert!(stub.contains("T = TypeVar(\"T\")"), "{stub}");
+    assert!(stub.contains("COUNT: int"), "{stub}");
+    assert!(!stub.contains("UserId: object"), "{stub}");
+    assert!(!stub.contains("UserId: unknown"), "{stub}");
+}

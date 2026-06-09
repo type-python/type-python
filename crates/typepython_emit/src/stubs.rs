@@ -508,12 +508,30 @@ fn render_parameter(
 }
 
 fn render_assignment_stub(
-    _source: &str,
+    source: &str,
     targets: &[Expr],
     value: &Expr,
     context: &StubInferenceContext,
     mode: InferredStubMode,
 ) -> Option<String> {
+    // Type-form declarations such as NewType("UserId", int) or TypeVar("T")
+    // are part of the typing surface and must survive in the stub verbatim;
+    // erasing them to an inferred value annotation breaks downstream checkers.
+    if is_type_form_constructor_call(value)
+        && let Some(value_text) = slice_range(source, value.range())
+    {
+        let lines = targets
+            .iter()
+            .filter_map(|target| match target {
+                Expr::Name(name) => Some(format!("{} = {}", name.id.as_str(), value_text)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if !lines.is_empty() {
+            return Some(lines.join("\n"));
+        }
+    }
+
     let mut lines = Vec::new();
     let inferred = infer_expr_type(value, context);
     for target in targets {
@@ -531,6 +549,25 @@ fn render_assignment_stub(
         }
     }
     (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn is_type_form_constructor_call(value: &Expr) -> bool {
+    let Expr::Call(call) = value else {
+        return false;
+    };
+    let callee = match call.func.as_ref() {
+        Expr::Name(name) => name.id.as_str(),
+        Expr::Attribute(attribute)
+            if matches!(
+                attribute.value.as_ref(),
+                Expr::Name(name) if matches!(name.id.as_str(), "typing" | "typing_extensions")
+            ) =>
+        {
+            attribute.attr.as_str()
+        }
+        _ => return false,
+    };
+    matches!(callee, "NewType" | "TypeVar" | "ParamSpec" | "TypeVarTuple")
 }
 
 fn render_annotated_assignment_stub(
