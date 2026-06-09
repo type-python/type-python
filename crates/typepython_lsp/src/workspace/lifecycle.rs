@@ -456,6 +456,7 @@ impl IncrementalWorkspace {
         let source_overrides = Self::source_overrides_for_syntax_trees(&syntax_trees);
         let checker_options = CheckerOptions::from_config(&self.config.config);
         let snapshot_metadata = typepython_incremental::SnapshotMetadata {
+            compiler_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
             target_python: Some(self.config.config.project.target_python.to_string()),
             analysis_python: Some(self.config.analysis_python().to_string()),
             emit_style: Some(self.config.config.emit.emit_style.to_string()),

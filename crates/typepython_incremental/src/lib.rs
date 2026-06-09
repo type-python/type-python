@@ -12,6 +12,12 @@ pub const SNAPSHOT_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SnapshotMetadata {
+    /// Compiler package version that produced the snapshot. Snapshots written
+    /// by a different compiler build must not be reused: cached summaries bake
+    /// in checker behavior, so replaying them across an upgrade keeps stale
+    /// diagnostics alive until sources change.
+    #[serde(default)]
+    pub compiler_version: Option<String>,
     #[serde(default)]
     pub target_python: Option<String>,
     #[serde(default)]
@@ -1404,6 +1410,7 @@ mod tests {
             ],
             stdlib_snapshot: Some(String::from("fnv1a64:stdlib_hash")),
             metadata: SnapshotMetadata {
+                compiler_version: Some(String::from("1.0.0-test")),
                 target_python: Some(String::from("3.10")),
                 analysis_python: Some(String::from("3.12")),
                 emit_style: Some(String::from("compat")),

@@ -536,6 +536,7 @@ fn analyze_pipeline_state(
         None
     };
     let snapshot_metadata = SnapshotMetadata {
+        compiler_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
         target_python: Some(target_python),
         analysis_python: Some(analysis_python.clone()),
         emit_style: Some(config.config.emit.emit_style.to_string()),
