@@ -51,6 +51,7 @@ pub(super) fn direct_member_access_diagnostics(
                 || !find_owned_callable_declarations(nodes, class_node, class_decl, &access.member)
                     .is_empty()
                 || standard_object_member(&access.member)
+                || class_surface_is_open(nodes, class_node, class_decl, &mut BTreeSet::new())
                 || framework_generated_member_semantic_type_with_context(
                     context,
                     node,
@@ -175,8 +176,39 @@ pub(super) fn type_has_readable_member_with_context(
     find_owned_readable_member_declaration(context.nodes, class_node, class_decl, member).is_some()
         || !find_owned_callable_declarations(context.nodes, class_node, class_decl, member)
             .is_empty()
+        || class_surface_is_open(context.nodes, class_node, class_decl, &mut BTreeSet::new())
         || framework_generated_member_semantic_type_with_context(context, node, type_name, member)
             .is_some()
+}
+
+// A class surface is open when any base in its hierarchy cannot be resolved
+// (for example an import typed as `unknown`): the full member set is not
+// statically knowable, so missing-member reports would assert knowledge the
+// checker does not have.
+pub(super) fn class_surface_is_open(
+    nodes: &[typepython_graph::ModuleNode],
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    visited: &mut BTreeSet<(String, String)>,
+) -> bool {
+    if !visited.insert((class_node.module_key.clone(), class_decl.name.clone())) {
+        return false;
+    }
+    for base in class_decl.rendered_class_bases() {
+        let base_head = base.split('[').next().unwrap_or(&base).trim();
+        if matches!(base_head, "object" | "Generic" | "Protocol" | "typing.Generic" | "typing.Protocol")
+        {
+            continue;
+        }
+        let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base_head)
+        else {
+            return true;
+        };
+        if class_surface_is_open(nodes, base_node, base_decl, visited) {
+            return true;
+        }
+    }
+    false
 }
 
 // Apparent members of every type per spec section 14.4: the standard `object`

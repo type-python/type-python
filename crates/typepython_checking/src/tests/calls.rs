@@ -1116,3 +1116,33 @@ fn check_accepts_object_member_method_call_on_optional_owner() {
     let rendered = result.diagnostics.as_text();
     assert!(!rendered.contains("TPY4002"), "{rendered}");
 }
+
+#[test]
+fn check_accepts_inherited_members_through_unresolved_base() {
+    let result = check_temp_typepython_source(concat!(
+        "from external_pkg import BaseModel\n\n",
+        "class User(BaseModel):\n",
+        "    name: str\n\n",
+        "def run(user: User) -> None:\n",
+        "    user.inherited_attr\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
+fn check_reports_missing_member_when_hierarchy_is_fully_resolved() {
+    let result = check_temp_typepython_source(concat!(
+        "class Base:\n",
+        "    name: str\n\n",
+        "class Child(Base):\n",
+        "    extra: int\n\n",
+        "def run(child: Child) -> None:\n",
+        "    child.nonexistent\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `nonexistent`"), "{rendered}");
+}
