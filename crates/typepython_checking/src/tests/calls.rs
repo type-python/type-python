@@ -979,3 +979,54 @@ fn check_accepts_unique_module_symbols() {
 
     assert!(result.diagnostics.is_empty(), "{}", result.diagnostics.as_text());
 }
+
+#[test]
+fn check_accepts_bare_method_reference_member_access() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable\n\n",
+        "class Client:\n",
+        "    name: str\n",
+        "    def ping(self) -> str:\n",
+        "        return self.name\n\n",
+        "def takes_callback(callback: Callable[[], str]) -> None:\n",
+        "    ...\n\n",
+        "def run(client: Client) -> None:\n",
+        "    client.ping\n",
+        "    takes_callback(client.ping)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
+fn check_reports_union_member_access_for_method_reference_on_optional_owner() {
+    let result = check_temp_typepython_source(concat!(
+        "class Client:\n",
+        "    name: str\n",
+        "    def ping(self) -> str:\n",
+        "        return self.name\n\n",
+        "def run(client: Client | None) -> None:\n",
+        "    client.ping\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `ping` on every union branch"), "{rendered}");
+}
+
+#[test]
+fn check_reports_missing_member_after_method_reference_support() {
+    let result = check_temp_typepython_source(concat!(
+        "class Client:\n",
+        "    name: str\n",
+        "    def ping(self) -> str:\n",
+        "        return self.name\n\n",
+        "def run(client: Client) -> None:\n",
+        "    client.nonexistent\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `nonexistent`"), "{rendered}");
+}

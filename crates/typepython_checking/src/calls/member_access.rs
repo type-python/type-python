@@ -87,6 +87,8 @@ pub(super) fn direct_member_access_diagnostics(
                 &access.member,
             )
             .is_some()
+                || !find_owned_callable_declarations(nodes, class_node, class_decl, &access.member)
+                    .is_empty()
                 || framework_generated_member_semantic_type_with_context(
                     context,
                     node,
@@ -158,6 +160,8 @@ pub(super) fn type_has_readable_member_with_context(
         return false;
     };
     find_owned_readable_member_declaration(context.nodes, class_node, class_decl, member).is_some()
+        || !find_owned_callable_declarations(context.nodes, class_node, class_decl, member)
+            .is_empty()
         || framework_generated_member_semantic_type_with_context(context, node, type_name, member)
             .is_some()
 }
