@@ -48,6 +48,12 @@ pub(super) fn direct_member_access_diagnostics(
                 &access.member,
             )
             .is_some()
+                || has_owned_instance_assignment_member_with_context(
+                    context,
+                    class_node,
+                    class_decl,
+                    &access.member,
+                )
                 || !find_owned_callable_declarations(nodes, class_node, class_decl, &access.member)
                     .is_empty()
                 || standard_object_member(&access.member)
@@ -174,6 +180,7 @@ pub(super) fn type_has_readable_member_with_context(
         return false;
     };
     find_owned_readable_member_declaration(context.nodes, class_node, class_decl, member).is_some()
+        || has_owned_instance_assignment_member_with_context(context, class_node, class_decl, member)
         || !find_owned_callable_declarations(context.nodes, class_node, class_decl, member)
             .is_empty()
         || class_surface_is_open(context.nodes, class_node, class_decl, &mut BTreeSet::new())
@@ -336,6 +343,12 @@ pub(super) fn direct_method_call_diagnostics(
                 &call.method,
             )
             .is_some()
+                || has_owned_instance_assignment_member_with_context(
+                    context,
+                    scope_class_node,
+                    scope_class_decl,
+                    &call.method,
+                )
                 || standard_object_member(&call.method)
                 || class_surface_is_open(
                     nodes,

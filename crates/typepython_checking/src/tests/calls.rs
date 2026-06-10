@@ -1187,6 +1187,21 @@ fn check_accepts_method_calls_through_fields_dunders_and_open_bases() {
 }
 
 #[test]
+fn check_accepts_method_calls_through_instance_attributes_initialized_in_init() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable\n\n",
+        "class Task[**P, R]:\n",
+        "    def __init__(self, fn: Callable[P, R]) -> None:\n",
+        "        self._fn = fn\n\n",
+        "    def delay(self, *args: P.args, **kwargs: P.kwargs) -> R:\n",
+        "        return self._fn(*args, **kwargs)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
 fn check_reports_method_call_on_missing_interface_member() {
     let result = check_temp_typepython_source(concat!(
         "interface Closeable:\n",

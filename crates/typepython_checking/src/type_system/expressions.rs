@@ -1013,6 +1013,56 @@ pub(super) fn find_owned_readable_member_declaration<'a>(
     })
 }
 
+pub(super) fn has_owned_instance_assignment_member_with_context(
+    context: &CheckerContext<'_>,
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    member_name: &str,
+) -> bool {
+    let mut visited = BTreeSet::new();
+    has_owned_instance_assignment_member_with_context_and_visited(
+        context,
+        class_node,
+        class_decl,
+        member_name,
+        &mut visited,
+    )
+}
+
+fn has_owned_instance_assignment_member_with_context_and_visited(
+    context: &CheckerContext<'_>,
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    member_name: &str,
+    visited: &mut BTreeSet<(String, String)>,
+) -> bool {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visited.insert(key) {
+        return false;
+    }
+
+    if context.load_frozen_field_mutation_sites(class_node).iter().any(|site| {
+        site.kind == typepython_syntax::FrozenFieldMutationKind::Assignment
+            && site.field_name == member_name
+            && site.owner_type_name.as_deref() == Some(class_decl.name.as_str())
+            && site.target.value_name.as_deref() == Some("self")
+    }) {
+        return true;
+    }
+
+    class_decl.rendered_class_bases().iter().any(|base| {
+        resolve_direct_base(context.nodes, class_node, base).is_some_and(|(base_node, base_decl)| {
+            has_owned_instance_assignment_member_with_context_and_visited(
+                context,
+                base_node,
+                base_decl,
+                member_name,
+                visited,
+            )
+        })
+    })
+}
+
 #[allow(dead_code)]
 pub(super) fn framework_generated_member_semantic_type(
     node: &typepython_graph::ModuleNode,
