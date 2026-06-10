@@ -31,7 +31,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test Workspace Suite
-        run: cargo test --workspace
+        run: cargo test --workspace -- --test-threads=1
 
       - name: Bench compile check
         run: cargo bench --workspace --no-run
