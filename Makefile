@@ -6,6 +6,7 @@ FUZZ_TARGETS ?= parser type_expr lowering_stub
 FUZZ_SMOKE_SECONDS ?= 30
 FUZZ_LONG_SECONDS ?= 300
 COVERAGE_MIN_LINES ?= 20
+COVERAGE_TEST_THREADS ?= 1
 
 .PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers flagship-smoke examples-smoke roadmap-demo-smoke coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare perf-smoke package-check quickstart-smoke beta-release-gate snapshot-review docs ci bump-version
 
@@ -52,7 +53,7 @@ roadmap-demo-smoke:
 coverage:
 	mkdir -p coverage
 	$(CARGO) llvm-cov clean --workspace
-	$(CARGO) llvm-cov --workspace --all-features --no-report
+	$(CARGO) llvm-cov --workspace --all-features --no-report -- --test-threads=$(COVERAGE_TEST_THREADS)
 	$(CARGO) llvm-cov report --lcov --output-path coverage/lcov.info
 	$(CARGO) llvm-cov report --text --output-path coverage/coverage.txt --fail-under-lines $(COVERAGE_MIN_LINES)
 	$(CARGO) llvm-cov report --html
