@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import importlib.metadata
+import json
 import pathlib
 import shutil
 import subprocess
@@ -29,7 +32,54 @@ def resolve_entrypoint() -> str:
     )
 
 
+def assert_bundled_stdlib() -> None:
+    distribution = importlib.metadata.distribution("type-python")
+    root = pathlib.Path(distribution.locate_file("typepython/stdlib"))
+    required = [
+        root / "BASELINE.toml",
+        root / "REFRESH_STATS.json",
+        root / "VERSIONS",
+        root / "builtins.pyi",
+        root / "typing.pyi",
+    ]
+    missing = [path for path in required if not path.is_file()]
+    if missing:
+        formatted = ", ".join(str(path) for path in missing)
+        raise SystemExit(f"installed wheel is missing bundled stdlib files: {formatted}")
+
+    stats = json.loads((root / "REFRESH_STATS.json").read_text(encoding="utf-8"))
+    digest = hashlib.sha256()
+    files = [
+        path
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+        and path.name != ".DS_Store"
+        and path.name not in {"BASELINE.toml", "REFRESH_STATS.json", "VERSIONS"}
+    ]
+    byte_count = 0
+    for path in files:
+        relative = path.relative_to(root).as_posix()
+        contents = path.read_bytes()
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(contents)
+        byte_count += len(contents)
+
+    actual = (len(files), byte_count, digest.hexdigest())
+    expected = (
+        stats["stdlib_files"],
+        stats["stdlib_bytes"],
+        stats["stdlib_sha256"],
+    )
+    if actual != expected:
+        raise SystemExit(
+            "installed wheel bundled stdlib does not match REFRESH_STATS.json: "
+            f"expected {expected}, got {actual}"
+        )
+
+
 def main() -> None:
+    assert_bundled_stdlib()
     entrypoint = resolve_entrypoint()
     run([entrypoint, "--help"])
 

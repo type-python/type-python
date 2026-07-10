@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import importlib.util
 import pathlib
 import tempfile
@@ -15,6 +17,41 @@ SPEC.loader.exec_module(quickstart_smoke)
 
 
 class QuickstartSmokeTests(unittest.TestCase):
+    def test_assert_bundled_stdlib_validates_installed_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="quickstart-stdlib-test-") as tmp:
+            root = pathlib.Path(tmp) / "typepython" / "stdlib"
+            root.mkdir(parents=True)
+            for relative in ("BASELINE.toml", "VERSIONS", "builtins.pyi", "typing.pyi"):
+                (root / relative).write_text("# fixture\n", encoding="utf-8")
+
+            files = [root / "builtins.pyi", root / "typing.pyi"]
+            digest = hashlib.sha256()
+            byte_count = 0
+            for path in files:
+                contents = path.read_bytes()
+                digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(contents)
+                byte_count += len(contents)
+            (root / "REFRESH_STATS.json").write_text(
+                json.dumps(
+                    {
+                        "stdlib_files": len(files),
+                        "stdlib_bytes": byte_count,
+                        "stdlib_sha256": digest.hexdigest(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            distribution = mock.Mock()
+            distribution.locate_file.return_value = root
+            with mock.patch.object(
+                quickstart_smoke.importlib.metadata,
+                "distribution",
+                return_value=distribution,
+            ):
+                quickstart_smoke.assert_bundled_stdlib()
+
     def test_resolve_entrypoint_prefers_active_python_scripts_dir(self) -> None:
         with tempfile.TemporaryDirectory(prefix="quickstart-smoke-test-") as tmp:
             root = pathlib.Path(tmp)
@@ -60,12 +97,15 @@ class QuickstartSmokeTests(unittest.TestCase):
                     (build_root / filename).write_text("", encoding="utf-8")
 
         with (
+            mock.patch.object(quickstart_smoke, "assert_bundled_stdlib") as assert_stdlib,
             mock.patch.object(
                 quickstart_smoke, "resolve_entrypoint", return_value=entrypoint
             ),
             mock.patch.object(quickstart_smoke, "run", side_effect=fake_run),
         ):
             quickstart_smoke.main()
+
+        assert_stdlib.assert_called_once_with()
 
         self.assertEqual(
             [command for command, _ in commands],

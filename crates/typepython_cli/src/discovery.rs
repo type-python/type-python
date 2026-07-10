@@ -42,12 +42,12 @@ pub(crate) fn collect_source_paths(config: &ConfigHandle) -> Result<SourceDiscov
     Ok(SourceDiscovery { sources, diagnostics })
 }
 
-fn cli_bundled_stdlib_root() -> PathBuf {
-    bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"))
+fn cli_bundled_stdlib_root() -> Result<PathBuf> {
+    bundled_stdlib_root()
 }
 
 pub(crate) fn bundled_stdlib_sources(target_python: &str) -> Result<Vec<DiscoveredSource>> {
-    shared_bundled_stdlib_sources_for_root(&cli_bundled_stdlib_root(), target_python)
+    shared_bundled_stdlib_sources_for_root(&cli_bundled_stdlib_root()?, target_python)
 }
 
 #[cfg(test)]
@@ -59,7 +59,7 @@ pub(crate) fn bundled_stdlib_sources_for_root(
 }
 
 pub(crate) fn bundled_stdlib_snapshot_identity(target_python: &str) -> Result<String> {
-    bundled_stdlib_snapshot_identity_for_root(&cli_bundled_stdlib_root(), target_python)
+    bundled_stdlib_snapshot_identity_for_root(&cli_bundled_stdlib_root()?, target_python)
 }
 
 pub(crate) fn bundled_stdlib_snapshot_identity_for_root(

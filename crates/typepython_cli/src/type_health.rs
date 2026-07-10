@@ -3,6 +3,7 @@ use std::{fs, path::Path, process::Command as ProcessCommand, process::ExitCode}
 use anyhow::{Context, Result};
 use serde::Serialize;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
+use typepython_project::bundled_stdlib_root;
 use typepython_target::PythonTarget;
 
 use crate::{
@@ -194,7 +195,7 @@ fn typing_extensions_version(config_dir: &Path, type_roots: &[String]) -> Result
 }
 
 fn bundled_typeshed_commit() -> Result<Option<String>> {
-    let baseline_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/BASELINE.toml");
+    let baseline_path = bundled_stdlib_root()?.join("BASELINE.toml");
     let baseline = fs::read_to_string(&baseline_path)
         .with_context(|| format!("unable to read {}", baseline_path.display()))?;
     Ok(baseline.lines().find_map(|line| {

@@ -54,6 +54,8 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn('return ("py3", "none", plat)', setup)
         self.assertIn("Rust 1.94.0", setup)
         self.assertIn("prebuilt type-python wheel", setup)
+        self.assertIn("_copy_bundled_stdlib", setup)
+        self.assertIn("typepython/stdlib/", packaging)
 
         for text in (packaging, getting_started, beta, readme, pypi_readme):
             normalized = " ".join(text.split())

@@ -4,10 +4,11 @@ use std::{
     num::Wrapping,
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
+    sync::OnceLock,
     time::UNIX_EPOCH,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use glob::Pattern;
 use serde::{Deserialize, Serialize};
 use typepython_config::{ConfigHandle, command_value_is_path_like};
@@ -477,8 +478,63 @@ pub fn source_kind_name(kind: SourceKind) -> &'static str {
     }
 }
 
-pub fn bundled_stdlib_root(manifest_dir: &str) -> PathBuf {
-    PathBuf::from(manifest_dir).join("../../stdlib")
+pub fn bundled_stdlib_root() -> Result<PathBuf> {
+    static ROOT: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    match ROOT.get_or_init(|| {
+        let executable = std::env::current_exe()
+            .context("unable to locate the TypePython executable")
+            .and_then(|executable| bundled_stdlib_root_for_executable(&executable));
+        executable.map_err(|error| format!("{error:#}"))
+    }) {
+        Ok(root) => Ok(root.clone()),
+        Err(error) => bail!(error.clone()),
+    }
+}
+
+fn bundled_stdlib_root_for_executable(executable: &Path) -> Result<PathBuf> {
+    let packaged_root =
+        executable.parent().and_then(Path::parent).map(|package_root| package_root.join("stdlib"));
+
+    if let Some(candidate) = packaged_root.as_deref()
+        && is_complete_bundled_stdlib_root(candidate)
+    {
+        return canonical_bundled_stdlib_root(candidate);
+    }
+
+    // A wheel always invokes `typepython/bin/typepython`. Do not let that
+    // installed layout fall back to a build-machine path embedded by Cargo:
+    // missing package data must be reported, and wheels must be relocatable.
+    let is_installed_package_layout =
+        executable.parent().and_then(Path::file_name).is_some_and(|directory| directory == "bin");
+    if !is_installed_package_layout {
+        for ancestor in executable.parent().into_iter().flat_map(Path::ancestors) {
+            let candidate = ancestor.join("stdlib");
+            if is_complete_bundled_stdlib_root(&candidate) {
+                return canonical_bundled_stdlib_root(&candidate);
+            }
+        }
+    }
+
+    let packaged_display = packaged_root
+        .as_deref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| String::from("<unavailable>"));
+    bail!(
+        "unable to locate the bundled TypePython stdlib; checked packaged resource {packaged_display}"
+    )
+}
+
+fn canonical_bundled_stdlib_root(root: &Path) -> Result<PathBuf> {
+    fs::canonicalize(root)
+        .with_context(|| format!("unable to resolve bundled stdlib root {}", root.display()))
+}
+
+fn is_complete_bundled_stdlib_root(root: &Path) -> bool {
+    root.is_dir()
+        && root.join("BASELINE.toml").is_file()
+        && root.join("VERSIONS").is_file()
+        && root.join("builtins.pyi").is_file()
+        && root.join("typing.pyi").is_file()
 }
 
 pub fn bundled_stdlib_sources_for_root(
@@ -546,7 +602,7 @@ pub fn support_source_index(
     config: &ConfigHandle,
     target_python: &str,
 ) -> Result<SupportSourceIndex> {
-    let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
+    let stdlib_root = bundled_stdlib_root()?;
     let external_roots = configured_external_type_roots(config)?;
     let cache_path = support_source_index_cache_path(config, target_python);
 
@@ -572,7 +628,7 @@ pub fn support_source_index(
 }
 
 pub fn bundled_support_source_index(target_python: &str) -> Result<SupportSourceIndex> {
-    let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
+    let stdlib_root = bundled_stdlib_root()?;
     Ok(SupportSourceIndex::from_sources(bundled_stdlib_sources_for_root(
         &stdlib_root,
         target_python,
@@ -580,14 +636,14 @@ pub fn bundled_support_source_index(target_python: &str) -> Result<SupportSource
 }
 
 pub fn is_bundled_stdlib_support_source(source: &DiscoveredSource) -> bool {
-    source.root == bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"))
+    bundled_stdlib_root().is_ok_and(|root| source.root == root)
 }
 
 pub fn support_source_snapshot_identity(
     config: &ConfigHandle,
     target_python: &str,
 ) -> Result<String> {
-    let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
+    let stdlib_root = bundled_stdlib_root()?;
     let external_roots = configured_external_type_roots(config)?;
     let cache_path = support_source_index_cache_path(config, target_python);
     let mut files = bundled_stdlib_sources_for_root(&stdlib_root, target_python)?
@@ -1429,6 +1485,69 @@ mod tests {
         let _ = fs::remove_dir_all(path);
     }
 
+    fn write_minimal_bundled_stdlib(root: &Path) {
+        fs::create_dir_all(root).expect("stdlib root should be created");
+        for relative in ["BASELINE.toml", "VERSIONS", "builtins.pyi", "typing.pyi"] {
+            fs::write(root.join(relative), "# test fixture\n")
+                .expect("stdlib sentinel should be written");
+        }
+    }
+
+    #[test]
+    fn bundled_stdlib_root_prefers_resource_next_to_installed_executable() {
+        let root = temp_project_dir("bundled-stdlib-installed-resource");
+        let executable = root.join("site-packages/typepython/bin/typepython");
+        fs::create_dir_all(executable.parent().expect("binary should have a parent"))
+            .expect("binary directory should be created");
+        fs::write(&executable, []).expect("binary fixture should be written");
+
+        let packaged_root = root.join("site-packages/typepython/stdlib");
+        write_minimal_bundled_stdlib(&packaged_root);
+        write_minimal_bundled_stdlib(&root.join("stdlib"));
+
+        let resolved = bundled_stdlib_root_for_executable(&executable)
+            .expect("installed resource should resolve");
+        assert_eq!(
+            resolved,
+            fs::canonicalize(&packaged_root).expect("packaged root should canonicalize")
+        );
+
+        remove_temp_project_dir(&root);
+    }
+
+    #[test]
+    fn installed_bundled_stdlib_root_never_uses_source_checkout_fallback() {
+        let root = temp_project_dir("bundled-stdlib-missing-resource");
+        let executable = root.join("site-packages/typepython/bin/typepython");
+        write_minimal_bundled_stdlib(&root.join("stdlib"));
+
+        let error = bundled_stdlib_root_for_executable(&executable)
+            .expect_err("installed package must not use a source checkout fallback");
+        assert!(
+            error.to_string().contains("unable to locate the bundled TypePython stdlib"),
+            "{error:#}"
+        );
+
+        remove_temp_project_dir(&root);
+    }
+
+    #[test]
+    fn development_bundled_stdlib_root_resolves_from_executable_ancestors() {
+        let root = temp_project_dir("bundled-stdlib-development-resource");
+        let executable = root.join("target/debug/typepython");
+        let source_root = root.join("stdlib");
+        write_minimal_bundled_stdlib(&source_root);
+
+        let resolved = bundled_stdlib_root_for_executable(&executable)
+            .expect("development resource should resolve");
+        assert_eq!(
+            resolved,
+            fs::canonicalize(&source_root).expect("source root should canonicalize")
+        );
+
+        remove_temp_project_dir(&root);
+    }
+
     #[cfg(unix)]
     #[test]
     fn support_source_index_writes_cache_file() {
@@ -1495,7 +1614,7 @@ mod tests {
             )
             .expect("typepython.toml should be written");
             let config = typepython_config::load(&project_dir).expect("config should load");
-            let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
+            let stdlib_root = bundled_stdlib_root().expect("bundled stdlib should resolve");
             let external_roots =
                 configured_external_type_roots(&config).expect("external roots should resolve");
             let cache_path = support_source_index_cache_path(
@@ -1552,7 +1671,7 @@ mod tests {
             .expect("typepython.toml should be written");
             let config = typepython_config::load(&project_dir).expect("config should load");
             let target_python = config.config.project.target_python.to_string();
-            let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
+            let stdlib_root = bundled_stdlib_root().expect("bundled stdlib should resolve");
             let external_roots =
                 configured_external_type_roots(&config).expect("external roots should resolve");
             let cache_path = support_source_index_cache_path(&config, &target_python);
@@ -1613,7 +1732,7 @@ mod tests {
             .expect("typepython.toml should be written");
             let config = typepython_config::load(&project_dir).expect("config should load");
             let target_python = config.config.project.target_python.to_string();
-            let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
+            let stdlib_root = bundled_stdlib_root().expect("bundled stdlib should resolve");
             let external_roots =
                 configured_external_type_roots(&config).expect("external roots should resolve");
             let cache_path = support_source_index_cache_path(&config, &target_python);

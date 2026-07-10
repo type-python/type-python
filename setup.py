@@ -32,6 +32,7 @@ class build_py(_build_py):
     def run(self) -> None:
         super().run()
         self._copy_rust_cli()
+        self._copy_bundled_stdlib()
 
     def _copy_rust_cli(self) -> None:
         cargo = shutil.which("cargo")
@@ -58,6 +59,16 @@ class build_py(_build_py):
         destination = destination_dir / binary_name
         shutil.copy2(built_binary, destination)
         destination.chmod(0o755)
+
+    def _copy_bundled_stdlib(self) -> None:
+        source = ROOT / "stdlib"
+        if not source.joinpath("BASELINE.toml").is_file():
+            raise FileNotFoundError(f"missing bundled TypePython stdlib at {source}")
+
+        destination = pathlib.Path(self.build_lib) / "typepython" / "stdlib"
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(source, destination)
 
 
 cmdclass = cast(dict[str, type[Command]], {"build_py": build_py})

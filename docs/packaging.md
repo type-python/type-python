@@ -5,9 +5,12 @@ TypePython's Python package is a thin launcher around the Rust CLI binary.
 ## Wheel Strategy
 
 Release wheels are platform-specific because they bundle the Rust executable
-under `typepython/bin/`. The Python wrapper itself is pure Python and does not
-bind to a CPython ABI, so the build uses a CPython host in cibuildwheel but
-overrides the final wheel tag to `py3-none-<platform>`.
+under `typepython/bin/`. They also bundle the pinned typeshed stdlib under
+`typepython/stdlib/`; the executable resolves that package resource at runtime
+and does not require the source checkout used to build the wheel. The Python
+wrapper itself is pure Python and does not bind to a CPython ABI, so the build
+uses a CPython host in cibuildwheel but overrides the final wheel tag to
+`py3-none-<platform>`.
 
 Current policy:
 
@@ -15,7 +18,7 @@ Current policy:
 - `setup.py` marks the wheel as platform-specific;
 - `bdist_wheel.get_tag()` returns `py3-none-<platform>`;
 - supported release wheels must run `scripts/quickstart_smoke.py` without
-  requiring `cargo` at runtime.
+  requiring `cargo` or access to the build checkout at runtime.
 
 ## Source Distribution
 
