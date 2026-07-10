@@ -35,6 +35,24 @@ Commands may add command-specific top-level fields in schema version `1`
 they must not remove or change the meaning of `schema_version`, `summary`, or
 `diagnostics` without bumping the schema version.
 
+If argument parsing, tracing initialization, or project configuration fails before
+a command summary can be built, `--format json` still emits a valid envelope to
+standard error. In that case `summary` is `null`, `diagnostics` is empty, and an
+`error` object carries `kind`, `message`, and `exit_code`:
+
+```json
+{
+  "schema_version": 1,
+  "summary": null,
+  "diagnostics": { "diagnostics": [] },
+  "error": {
+    "kind": "command",
+    "message": "unable to load project configuration",
+    "exit_code": 1
+  }
+}
+```
+
 ## Diagnostics
 
 The `diagnostics` value is a `DiagnosticReport`:

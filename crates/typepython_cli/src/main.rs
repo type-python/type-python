@@ -65,23 +65,47 @@ struct CommandSummary {
 }
 
 fn main() -> ExitCode {
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => {
+            let exit_code = u8::try_from(error.exit_code()).unwrap_or(2);
+            if exit_code == 0 || requested_output_format(env::args_os()) == OutputFormat::Text {
+                let _ = error.print();
+            } else {
+                eprintln!("{}", render_error_json("cli", &error.to_string(), exit_code));
+            }
+            return ExitCode::from(exit_code);
+        }
+    };
+    let format = cli.command.output_format();
+
     if let Err(error) = init_tracing() {
-        eprintln!("failed to initialize tracing: {error:#}");
+        render_command_error(
+            format,
+            "initialization",
+            &anyhow::anyhow!("failed to initialize tracing: {error:#}"),
+            2,
+        );
         return ExitCode::from(2);
     }
 
-    match run() {
+    match run(cli) {
         Ok(code) => code,
         Err(error) => {
-            eprintln!("{error:#}");
+            let numeric_exit_code = numeric_exit_code_for_error(&error);
+            render_command_error(format, "command", &error, numeric_exit_code);
             exit_code_for_error(&error)
         }
     }
 }
 
 fn exit_code_for_error(error: &anyhow::Error) -> ExitCode {
+    ExitCode::from(numeric_exit_code_for_error(error))
+}
+
+fn numeric_exit_code_for_error(error: &anyhow::Error) -> u8 {
     if error.chain().any(|cause| cause.downcast_ref::<ConfigError>().is_some()) {
-        return ExitCode::from(1);
+        return 1;
     }
 
     if error
@@ -89,10 +113,51 @@ fn exit_code_for_error(error: &anyhow::Error) -> ExitCode {
         .map(ToString::to_string)
         .any(|message| message.contains("already exists; rerun with --force"))
     {
-        return ExitCode::from(1);
+        return 1;
     }
 
-    ExitCode::from(2)
+    2
+}
+
+fn requested_output_format(
+    args: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>,
+) -> OutputFormat {
+    let args =
+        args.into_iter().map(|arg| arg.as_ref().to_string_lossy().into_owned()).collect::<Vec<_>>();
+    if args.windows(2).any(|pair| pair[0] == "--format" && pair[1] == "json")
+        || args.iter().any(|arg| arg == "--format=json")
+    {
+        OutputFormat::Json
+    } else {
+        OutputFormat::Text
+    }
+}
+
+fn render_command_error(format: OutputFormat, kind: &str, error: &anyhow::Error, exit_code: u8) {
+    match format {
+        OutputFormat::Text => eprintln!("{error:#}"),
+        OutputFormat::Json => {
+            eprintln!("{}", render_error_json(kind, &format!("{error:#}"), exit_code));
+        }
+    }
+}
+
+fn render_error_json(kind: &str, message: &str, exit_code: u8) -> String {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "schema_version": CLI_JSON_SCHEMA_VERSION,
+        "summary": null,
+        "diagnostics": { "diagnostics": [] },
+        "error": {
+            "kind": kind,
+            "message": message,
+            "exit_code": exit_code,
+        },
+    }))
+    .unwrap_or_else(|_| {
+        String::from(
+            r#"{"schema_version":1,"summary":null,"diagnostics":{"diagnostics":[]},"error":{"kind":"serialization","message":"unable to serialize CLI error","exit_code":2}}"#,
+        )
+    })
 }
 
 fn init_tracing() -> Result<()> {
@@ -128,8 +193,8 @@ fn tracing_filter() -> EnvFilter {
         .unwrap_or_else(|| EnvFilter::new("typepython_cli=info,typepython_config=info"))
 }
 
-fn run() -> Result<ExitCode> {
-    match Cli::parse().command {
+fn run(cli: Cli) -> Result<ExitCode> {
+    match cli.command {
         Command::Init(args) => init_project(args),
         Command::Check(args) => run_with_pipeline("check", args, false, Vec::new()),
         Command::Build(args) => run_build(args),

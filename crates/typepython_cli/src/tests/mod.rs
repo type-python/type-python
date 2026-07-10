@@ -30,8 +30,9 @@ pub(super) use super::verification::{
     verify_runtime_public_name_parity, verify_runtime_public_name_parity_for_artifact,
 };
 pub(super) use super::{
-    Cli, Command, InitArgs, OutputFormat, RunArgs, bytecode_path_for, embedded_config_template,
-    exit_code_for_error, init_project, plan_watch_target_update, run_watch_rebuild,
+    CLI_JSON_SCHEMA_VERSION, Cli, Command, InitArgs, OutputFormat, RunArgs, bytecode_path_for,
+    embedded_config_template, exit_code_for_error, init_project, plan_watch_target_update,
+    render_error_json, requested_output_format, run_watch_rebuild,
 };
 pub(super) use crate::cli::{
     AdapterValidateArgs, ApiDiffArgs, CleanArgs, CompatArgs, MigrateArgs, TypeHealthArgs,
@@ -59,6 +60,33 @@ pub(super) use typepython_graph::build as build_graph;
 pub(super) use typepython_incremental::IncrementalState;
 pub(super) use typepython_target::PythonTarget;
 pub(super) use zip::{ZipWriter, write::FileOptions};
+
+#[test]
+fn early_cli_error_json_uses_the_versioned_envelope() {
+    let rendered = render_error_json("command", "invalid project configuration", 1);
+    let payload: serde_json::Value =
+        serde_json::from_str(&rendered).expect("error output should be valid JSON");
+
+    assert_eq!(payload["schema_version"], serde_json::json!(CLI_JSON_SCHEMA_VERSION));
+    assert!(payload["summary"].is_null());
+    assert_eq!(payload["diagnostics"], serde_json::json!({ "diagnostics": [] }));
+    assert_eq!(payload["error"]["kind"], "command");
+    assert_eq!(payload["error"]["message"], "invalid project configuration");
+    assert_eq!(payload["error"]["exit_code"], 1);
+}
+
+#[test]
+fn malformed_cli_still_detects_an_explicit_json_format() {
+    assert_eq!(
+        requested_output_format(["typepython", "check", "--format", "json", "--unknown"]),
+        OutputFormat::Json
+    );
+    assert_eq!(
+        requested_output_format(["typepython", "check", "--format=json", "--unknown"]),
+        OutputFormat::Json
+    );
+    assert_eq!(requested_output_format(["typepython", "check", "--unknown"]), OutputFormat::Text);
+}
 
 #[test]
 fn collect_source_paths_includes_implicit_namespace_packages() {

@@ -37,6 +37,23 @@ pub(crate) enum Command {
     Adapter(AdapterArgs),
 }
 
+impl Command {
+    pub(crate) fn output_format(&self) -> OutputFormat {
+        match self {
+            Self::Check(args) | Self::Build(args) | Self::Watch(args) | Self::Lsp(args) => {
+                args.format
+            }
+            Self::Verify(args) => args.run.format,
+            Self::Compat(args) => args.run.format,
+            Self::ApiDiff(args) => args.format,
+            Self::TypeHealth(args) => args.run.format,
+            Self::Migrate(args) => args.run.format,
+            Self::Adapter(AdapterArgs { command: AdapterCommand::Validate(args) }) => args.format,
+            Self::Init(_) | Self::Clean(_) => OutputFormat::Text,
+        }
+    }
+}
+
 #[derive(Debug, Args)]
 pub(crate) struct AdapterArgs {
     #[command(subcommand)]
