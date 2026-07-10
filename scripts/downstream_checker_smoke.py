@@ -66,6 +66,56 @@ def validate_expected_failure_allowlist(
     return allowlist_reason
 
 
+def normalize_expected_failure_patterns(
+    name: str,
+    raw_patterns: object,
+    expected_failures: tuple[str, ...],
+) -> dict[str, tuple[str, ...]] | None:
+    if not expected_failures:
+        if raw_patterns is not None:
+            raise SystemExit(
+                f"fixture `{name}` expected_failure_patterns requires an expected checker failure"
+            )
+        return None
+    if not isinstance(raw_patterns, dict) or not raw_patterns:
+        raise SystemExit(
+            f"fixture `{name}` expected failures require non-empty expected_failure_patterns"
+        )
+
+    normalized: dict[str, tuple[str, ...]] = {}
+    for invocation, patterns in raw_patterns.items():
+        if not isinstance(invocation, str) or not invocation.strip():
+            raise SystemExit(
+                f"fixture `{name}` expected_failure_patterns keys must be non-empty strings"
+            )
+        if not isinstance(patterns, list) or not patterns:
+            raise SystemExit(
+                f"fixture `{name}` expected_failure_patterns[{invocation!r}] must be a non-empty list"
+            )
+        validated: list[str] = []
+        for pattern in patterns:
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise SystemExit(
+                    f"fixture `{name}` expected failure patterns must be non-empty strings"
+                )
+            try:
+                re.compile(pattern)
+            except re.error as error:
+                raise SystemExit(
+                    f"fixture `{name}` has invalid expected failure regex `{pattern}`: {error}"
+                ) from error
+            validated.append(pattern)
+        normalized[invocation] = tuple(validated)
+
+    for expected in expected_failures:
+        checker = expected.split(":", 1)[0]
+        if not any(key in normalized for key in (expected, checker, "*")):
+            raise SystemExit(
+                f"fixture `{name}` has no expected failure pattern for `{expected}`"
+            )
+    return normalized
+
+
 def load_fixture_matrix(path: pathlib.Path = MATRIX_PATH) -> dict[str, FixtureCase]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     fixtures: dict[str, FixtureCase] = {}
@@ -93,20 +143,18 @@ def load_fixture_matrix(path: pathlib.Path = MATRIX_PATH) -> dict[str, FixtureCa
             raw_case.get("allowlist_reason"),
             allowlist_expires,
         )
+        normalized_failure_patterns = normalize_expected_failure_patterns(
+            name,
+            expected_failure_patterns,
+            expected_failure_ids,
+        )
         fixtures[name] = FixtureCase(
             name=name,
             targets=targets,
             profiles=profiles,
             expect_checker_failure=expect_checker_failure,
             expected_checker_failures=expected_checker_failures,
-            expected_failure_patterns=(
-                None
-                if expected_failure_patterns is None
-                else {
-                    key: tuple(patterns)
-                    for key, patterns in expected_failure_patterns.items()
-                }
-            ),
+            expected_failure_patterns=normalized_failure_patterns,
             allowlist_reason=allowlist_reason,
             allowlist_expires=allowlist_expires,
             expected_stub_fragments=(
@@ -155,6 +203,10 @@ def run_expect_failure(
     cwd: pathlib.Path | None = None,
     expected_patterns: tuple[str, ...] = (),
 ) -> None:
+    if not expected_patterns:
+        raise SystemExit(
+            f"expected downstream checker failure is missing diagnostic patterns: {' '.join(command)}"
+        )
     location = f" (cwd={cwd})" if cwd is not None else ""
     print(f"+ {' '.join(command)} # expected failure{location}")
     completed = subprocess.run(

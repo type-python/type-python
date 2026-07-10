@@ -145,6 +145,9 @@
       "name": "negative-pydantic-strictness-package",
       "targets": ["3.12"],
       "expected_checker_failures": ["mypy", "pyright", "basedpyright", "ty"],
+      "expected_failure_patterns": {
+        "*": ["checker_consumer\\.py(?::5|:5:)", "(?i)unexpected"]
+      },
       "allowlist_reason": "all downstream checkers intentionally reject this consumer because the fixture exercises stricter constructor expectations than the generated Pydantic-like stub permits",
       "allowlist_expires": "2026-12-31",
       "expected_stub_fragments": {
@@ -271,6 +274,9 @@
       "name": "negative-consumer-package",
       "targets": ["3.10"],
       "expect_checker_failure": true,
+      "expected_failure_patterns": {
+        "*": ["checker_consumer\\.py:(?:6|7)", "(?i)(?:int|str)"]
+      },
       "allowlist_reason": "negative consumer fixture proves downstream checkers reject an intentionally invalid emitted-surface consumer",
       "allowlist_expires": "2026-12-31"
     }

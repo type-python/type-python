@@ -174,7 +174,8 @@ surfaces, and overload-heavy APIs.
 Known checker disagreements must stay explicit in `test-fixtures/downstream-checkers/matrix.json`
 with `allowlist_reason` and a non-expired `allowlist_expires` date. The smoke runner rejects expired
 allowlists before invoking external checkers so release candidates cannot silently carry stale
-checker disagreements.
+checker disagreements. Every negative fixture also declares `expected_failure_patterns`; a non-zero
+checker exit without the intended consumer diagnostic fails the smoke run.
 
 ## Industrial performance baseline
 

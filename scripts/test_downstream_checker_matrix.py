@@ -98,6 +98,55 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
                 self.assertRegex(raw_case.get("allowlist_expires", ""), r"^20\d{2}-\d{2}-\d{2}$")
                 self.assertIsNotNone(case.allowlist_reason)
                 self.assertIsNotNone(case.allowlist_expires)
+                self.assertTrue(case.expected_failure_patterns)
+
+    def test_negative_fixture_requires_diagnostic_patterns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            matrix_path = pathlib.Path(tmp) / "matrix.json"
+            matrix_path.write_text(
+                """
+                {
+                  "fixtures": [
+                    {
+                      "name": "negative-missing-pattern",
+                      "targets": ["3.12"],
+                      "expected_checker_failures": ["mypy"],
+                      "allowlist_reason": "synthetic disagreement",
+                      "allowlist_expires": "2099-01-01"
+                    }
+                  ]
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(SystemExit, "expected_failure_patterns"):
+                downstream_checker_smoke.load_fixture_matrix(matrix_path)
+
+    def test_unrelated_nonzero_checker_exit_is_not_an_expected_failure(self) -> None:
+        command = [
+            sys.executable,
+            "-c",
+            "import sys; sys.stderr.write('checker configuration failed'); sys.exit(2)",
+        ]
+
+        with self.assertRaisesRegex(SystemExit, "to match"):
+            downstream_checker_smoke.run_expect_failure(
+                command,
+                expected_patterns=(r"checker_consumer\.py", r"unexpected"),
+            )
+
+    def test_expected_checker_failure_requires_all_diagnostic_patterns(self) -> None:
+        command = [
+            sys.executable,
+            "-c",
+            "import sys; sys.stderr.write('checker_consumer.py:5: unexpected argument'); sys.exit(1)",
+        ]
+
+        downstream_checker_smoke.run_expect_failure(
+            command,
+            expected_patterns=(r"checker_consumer\.py:5", r"unexpected"),
+        )
 
     def test_partial_expected_failures_still_run_consumer_for_other_checkers(self) -> None:
         case = downstream_checker_smoke.FixtureCase(

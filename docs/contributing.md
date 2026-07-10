@@ -429,7 +429,7 @@ The downstream checker smoke suite currently covers:
 - `ecosystem_corpus.baseline_categories` in `test-fixtures/downstream-checkers/matrix.json`, which keeps the v1 corpus categories machine-checkable
 - strict downstream profiles for mypy, pyright, basedpyright, and ty by default; pyright-family configs focus on type portability rather than lint-only diagnostics
 - emitted fragment assertions before external checkers run, including non-`app/__init__.pyi` namespace package stubs
-- checker disagreement allowlists with `allowlist_reason` and a non-expired `allowlist_expires` date
+- checker disagreement allowlists with `allowlist_reason`, a non-expired `allowlist_expires` date, and `expected_failure_patterns` that prove the checker rejected the intended consumer diagnostic rather than failing for an unrelated reason
 - Parser and bundled stdlib baselines are recorded in `stdlib/BASELINE.toml`; keep that file in sync when touching parser dependency versions or refreshing the bundled stdlib snapshot
 - Bundled stdlib refreshes are pinned to the upstream typeshed commit in `stdlib/BASELINE.toml`; run `python3 scripts/refresh_stdlib_stubs.py --typeshed-root <typeshed-checkout> --write` after copying a reviewed typeshed snapshot, then run `make stdlib-baseline-check` to verify `stdlib/REFRESH_STATS.json` and `stdlib/VERSIONS` are current
 
