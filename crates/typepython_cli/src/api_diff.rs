@@ -80,7 +80,7 @@ pub(crate) fn run_api_diff(args: ApiDiffArgs) -> Result<ExitCode> {
             lowered_modules: 0,
             planned_artifacts: report.added.len() + report.removed.len() + report.changed.len(),
             tracked_modules: report.module_count(),
-            notes: vec![String::from("compared public symbols from .pyi trees")],
+            notes: vec![String::from("compared public symbols from typed source trees")],
         };
         print_summary(args.format, &summary, &diagnostics)?;
     }
@@ -290,10 +290,17 @@ fn collect_surface(root: &Path) -> Result<BTreeMap<String, BTreeMap<String, Publ
     }
 
     let mut files = Vec::new();
+    collect_source_surface_files(root, &mut files)?;
     collect_pyi_files(root, &mut files)?;
-    if files.is_empty() {
-        collect_source_surface_files(root, &mut files)?;
-    }
+    files.sort_by(|left, right| {
+        surface_source_priority(
+            SurfaceSourceKind::from_path(left).unwrap_or(SurfaceSourceKind::Python),
+        )
+        .cmp(&surface_source_priority(
+            SurfaceSourceKind::from_path(right).unwrap_or(SurfaceSourceKind::Python),
+        ))
+        .then_with(|| left.cmp(right))
+    });
     let mut modules = BTreeMap::new();
     for path in files {
         let module = module_name(root, &path)?;
@@ -320,6 +327,8 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
     let mut archive = ZipArchive::new(file)
         .with_context(|| format!("unable to read zip artifact {}", path.display()))?;
     let mut modules = BTreeMap::new();
+    let mut typed_roots = Vec::new();
+    let mut sources = Vec::new();
     for index in 0..archive.len() {
         let mut file = archive.by_index(index).with_context(|| {
             format!("unable to read entry {index} from zip artifact {}", path.display())
@@ -327,18 +336,35 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
         let entry_name = file.name().to_owned();
         if entry_name.ends_with("py.typed") {
             insert_py_typed_marker(&mut modules);
+            typed_roots.push(archive_typed_root(&entry_name));
             continue;
         }
-        if !entry_name.ends_with(".pyi") || entry_name.contains(".dist-info/") {
+        let Some(kind) = surface_source_kind_from_archive_entry(&entry_name) else {
+            continue;
+        };
+        if entry_name.contains(".dist-info/") {
             continue;
         }
         let mut source = String::new();
         file.read_to_string(&mut source).with_context(|| {
-            format!("unable to read stub entry {entry_name} from {}", path.display())
+            format!("unable to read typed source entry {entry_name} from {}", path.display())
         })?;
+        sources.push((entry_name, source, kind));
+    }
+    sources.sort_by(|left, right| {
+        surface_source_priority(left.2)
+            .cmp(&surface_source_priority(right.2))
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    for (entry_name, source, kind) in sources {
+        if kind != SurfaceSourceKind::Stub
+            && !archive_entry_is_under_typed_root(&entry_name, &typed_roots)
+        {
+            continue;
+        }
         modules.insert(
             module_name_from_archive_entry(&entry_name),
-            public_symbols(&source, SurfaceSourceKind::Stub).with_context(|| {
+            public_symbols(&source, kind).with_context(|| {
                 format!(
                     "unable to parse public API surface entry {entry_name} in {}",
                     path.display()
@@ -355,6 +381,8 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
     let decoder = GzDecoder::new(file);
     let mut archive = TarArchive::new(decoder);
     let mut modules = BTreeMap::new();
+    let mut typed_roots = Vec::new();
+    let mut sources = Vec::new();
     for entry in archive
         .entries()
         .with_context(|| format!("unable to read tar artifact {}", path.display()))?
@@ -368,18 +396,32 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
             .into_owned();
         if entry_path.ends_with("py.typed") {
             insert_py_typed_marker(&mut modules);
+            typed_roots.push(archive_typed_root(&entry_path));
             continue;
         }
-        if !entry_path.ends_with(".pyi") {
+        let Some(kind) = surface_source_kind_from_archive_entry(&entry_path) else {
             continue;
-        }
+        };
         let mut source = String::new();
         entry.read_to_string(&mut source).with_context(|| {
-            format!("unable to read stub entry {entry_path} from {}", path.display())
+            format!("unable to read typed source entry {entry_path} from {}", path.display())
         })?;
+        sources.push((entry_path, source, kind));
+    }
+    sources.sort_by(|left, right| {
+        surface_source_priority(left.2)
+            .cmp(&surface_source_priority(right.2))
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    for (entry_path, source, kind) in sources {
+        if kind != SurfaceSourceKind::Stub
+            && !archive_entry_is_under_typed_root(&entry_path, &typed_roots)
+        {
+            continue;
+        }
         modules.insert(
             module_name_from_archive_entry(&entry_path),
-            public_symbols(&source, SurfaceSourceKind::Stub).with_context(|| {
+            public_symbols(&source, kind).with_context(|| {
                 format!(
                     "unable to parse public API surface entry {entry_path} in {}",
                     path.display()
@@ -388,6 +430,29 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
         );
     }
     Ok(modules)
+}
+
+fn surface_source_kind_from_archive_entry(entry: &str) -> Option<SurfaceSourceKind> {
+    if entry.ends_with(".pyi") {
+        Some(SurfaceSourceKind::Stub)
+    } else if entry.ends_with(".tpy") {
+        Some(SurfaceSourceKind::TypePython)
+    } else if entry.ends_with(".py") {
+        Some(SurfaceSourceKind::Python)
+    } else {
+        None
+    }
+}
+
+fn archive_typed_root(marker: &str) -> String {
+    marker.strip_suffix("py.typed").unwrap_or(marker).trim_end_matches('/').to_owned()
+}
+
+fn archive_entry_is_under_typed_root(entry: &str, roots: &[String]) -> bool {
+    roots.iter().any(|root| {
+        root.is_empty()
+            || entry.strip_prefix(root).is_some_and(|relative| relative.starts_with('/'))
+    })
 }
 
 fn contains_py_typed_marker(root: &Path) -> Result<bool> {
@@ -515,6 +580,14 @@ impl SurfaceSourceKind {
             Some("tpy") => Some(Self::TypePython),
             _ => None,
         }
+    }
+}
+
+fn surface_source_priority(kind: SurfaceSourceKind) -> u8 {
+    match kind {
+        SurfaceSourceKind::Python => 0,
+        SurfaceSourceKind::TypePython => 1,
+        SurfaceSourceKind::Stub => 2,
     }
 }
 

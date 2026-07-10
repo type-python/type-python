@@ -101,6 +101,38 @@ fn diff_api_surfaces_accepts_wheel_and_sdist_stub_inputs() {
 }
 
 #[test]
+fn diff_api_surfaces_reads_inline_typed_archive_sources() {
+    let project_dir = temp_project_dir("diff_api_surfaces_reads_inline_typed_archive_sources");
+    let report = {
+        let old_wheel = project_dir.join("demo-0.1.0-py3-none-any.whl");
+        let new_sdist = project_dir.join("demo-0.2.0.tar.gz");
+        write_zip_archive(
+            &old_wheel,
+            &[
+                ("app/py.typed", ""),
+                ("app/__init__.py", "def parse(value: str) -> int:\n    return 1\n"),
+            ],
+        );
+        write_tar_gz_archive(
+            &new_sdist,
+            "demo-0.2.0",
+            &[
+                ("app/py.typed", ""),
+                ("app/__init__.py", "def parse(value: str) -> str:\n    return \"1\"\n"),
+            ],
+        );
+
+        diff_api_surfaces(&old_wheel, &new_sdist)
+            .expect("api diff should read inline-typed archives")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].module, "app");
+    assert_eq!(report.changed[0].symbol, "parse");
+}
+
+#[test]
 fn diff_api_surfaces_accepts_source_directory_inputs_when_stubs_are_absent() {
     let project_dir = temp_project_dir("diff_api_surfaces_accepts_source_directory_inputs");
     let report = {
@@ -126,6 +158,61 @@ fn diff_api_surfaces_accepts_source_directory_inputs_when_stubs_are_absent() {
     assert_eq!(report.changed.len(), 1);
     assert_eq!(report.changed[0].module, "app");
     assert_eq!(report.changed[0].symbol, "parse");
+}
+
+#[test]
+fn diff_api_surfaces_merges_partial_stub_and_source_modules() {
+    let project_dir = temp_project_dir("diff_api_surfaces_merges_partial_stub_and_source_modules");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        for root in [&old_dir, &new_dir] {
+            fs::create_dir_all(root.join("app")).expect("package should be created");
+            fs::write(root.join("app/__init__.pyi"), "def stable() -> None: ...\n")
+                .expect("stub should be written");
+        }
+        fs::write(old_dir.join("app/runtime.py"), "def parse(value: str) -> int:\n    return 1\n")
+            .expect("old runtime source should be written");
+        fs::write(
+            new_dir.join("app/runtime.py"),
+            "def parse(value: str) -> str:\n    return \"1\"\n",
+        )
+        .expect("new runtime source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should merge partial stub trees")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].module, "app.runtime");
+    assert_eq!(report.changed[0].symbol, "parse");
+}
+
+#[test]
+fn diff_api_surfaces_prefers_stub_for_the_same_module() {
+    let project_dir = temp_project_dir("diff_api_surfaces_prefers_stub_for_the_same_module");
+    let report = {
+        let old_dir = project_dir.join("old/app");
+        let new_dir = project_dir.join("new/app");
+        fs::create_dir_all(&old_dir).expect("old package should be created");
+        fs::create_dir_all(&new_dir).expect("new package should be created");
+        fs::write(old_dir.join("__init__.pyi"), "def parse() -> int: ...\n")
+            .expect("old stub should be written");
+        fs::write(new_dir.join("__init__.pyi"), "def parse() -> int: ...\n")
+            .expect("new stub should be written");
+        fs::write(old_dir.join("__init__.py"), "def parse():\n    return 1\n")
+            .expect("old runtime should be written");
+        fs::write(new_dir.join("__init__.py"), "def parse():\n    return \"changed\"\n")
+            .expect("new runtime should be written");
+
+        diff_api_surfaces(&project_dir.join("old"), &project_dir.join("new"))
+            .expect("api diff should prefer matching stubs")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
 }
 
 #[test]
