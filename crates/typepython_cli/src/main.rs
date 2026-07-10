@@ -13,7 +13,7 @@ mod verification;
 use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::ExitCode,
     sync::{
         Mutex,
@@ -496,8 +496,31 @@ fn project_start_dir(project: Option<&PathBuf>) -> Result<PathBuf> {
     } else {
         candidate
     };
-    fs::canonicalize(&start)
-        .with_context(|| format!("unable to resolve project path {}", start.display()))
+    Ok(normalize_lexical_path(&start))
+}
+
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    let mut has_root = false;
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => {
+                normalized.push(component.as_os_str());
+                has_root = true;
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if normalized.file_name().is_some_and(|name| name != "..") {
+                    normalized.pop();
+                } else if !has_root {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
 }
 
 fn write_file(path: &Path, content: &str, force: bool) -> Result<()> {

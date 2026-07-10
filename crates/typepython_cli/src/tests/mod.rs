@@ -112,12 +112,32 @@ fn relative_project_paths_resolve_to_absolute_directories() {
         project_start_dir(Some(&relative_project)).expect("project directory should resolve");
 
     assert!(resolved.is_absolute());
-    assert_eq!(
-        resolved,
-        fs::canonicalize(&project_dir).expect("test project directory should canonicalize")
-    );
+    assert_eq!(resolved, project_dir);
     assert_eq!(resolved_directory, resolved);
     fs::remove_dir_all(&project_dir).expect("test project directory should be removed");
+}
+
+#[cfg(unix)]
+#[test]
+fn project_start_dir_preserves_symlink_workspace_identity() {
+    let root = temp_project_dir("project_start_dir_preserves_symlink_workspace_identity");
+    let real_project = root.join("real-project");
+    let linked_project = root.join("linked-project");
+    fs::create_dir_all(&real_project).expect("real project directory should be created");
+    fs::write(real_project.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+        .expect("test configuration should be written");
+    std::os::unix::fs::symlink(&real_project, &linked_project)
+        .expect("project symlink should be created");
+
+    let resolved =
+        project_start_dir(Some(&linked_project)).expect("symlink project path should resolve");
+
+    assert_eq!(resolved, linked_project);
+    assert_ne!(
+        resolved,
+        fs::canonicalize(&real_project).expect("real project should canonicalize")
+    );
+    remove_temp_project_dir(&root);
 }
 
 #[test]
