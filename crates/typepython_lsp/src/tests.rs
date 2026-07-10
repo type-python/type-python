@@ -1201,6 +1201,21 @@ fn formatter_paths_with_forward_slashes_resolve_from_workspace_portably() {
 }
 
 #[test]
+fn formatter_programs_with_backslashes_resolve_from_workspace_portably() {
+    let config = temp_workspace_with_config(
+        "formatter_programs_with_backslashes_resolve_from_workspace_portably",
+        "[project]\nsrc = [\"src\"]\n",
+        &[("src/app/__init__.tpy", "pass\n")],
+    );
+
+    assert_eq!(
+        resolve_formatter_program(&config, r"Scripts\formatter.exe"),
+        config.config_dir.join("Scripts").join("formatter.exe")
+    );
+    fs::remove_dir_all(&config.config_dir).expect("workspace should be removed");
+}
+
+#[test]
 fn import_binding_definition_and_hover_resolve_to_original_declaration() {
     let config = temp_workspace(
         "import_binding_definition_and_hover_resolve_to_original_declaration",

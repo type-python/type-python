@@ -105,11 +105,7 @@ pub(super) fn expand_formatter_argument(
 }
 
 pub(super) fn resolve_formatter_program(config: &ConfigHandle, program: &str) -> PathBuf {
-    let path = Path::new(program);
-    if path.is_absolute() || !typepython_config::command_value_is_path_like(program) {
-        return path.to_path_buf();
-    }
-    config.config_dir.join(path)
+    typepython_config::resolve_command_path(&config.config_dir, program)
 }
 
 pub(super) fn run_formatter(

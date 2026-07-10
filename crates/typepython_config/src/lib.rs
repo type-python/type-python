@@ -1137,7 +1137,7 @@ fn validate_python_executable(
     python_executable: &str,
     analysis_python: PythonTarget,
 ) -> Result<(), ConfigError> {
-    let executable_path = resolve_python_executable(config_dir, python_executable);
+    let executable_path = resolve_command_path(config_dir, python_executable);
     let output = Command::new(&executable_path)
         .args([
             "-c",
@@ -1206,15 +1206,6 @@ fn validate_formatter_config(config_path: &Path, format: &FormatConfig) -> Resul
     Ok(())
 }
 
-fn resolve_python_executable(config_dir: &Path, python_executable: &str) -> PathBuf {
-    let executable = Path::new(python_executable);
-    if executable.is_absolute() || !command_value_is_path_like(python_executable) {
-        return executable.to_path_buf();
-    }
-
-    config_dir.join(executable)
-}
-
 /// Returns whether a command value explicitly names a filesystem path on either major platform.
 ///
 /// Configuration files commonly move between Unix and Windows, so both separator styles must be
@@ -1222,6 +1213,37 @@ fn resolve_python_executable(config_dir: &Path, python_executable: &str) -> Path
 #[must_use]
 pub fn command_value_is_path_like(value: &str) -> bool {
     value.contains('/') || value.contains('\\')
+}
+
+/// Resolves an explicitly path-like command relative to its configuration directory.
+///
+/// Both separator styles are normalized for the current host so a checked-in configuration can
+/// be consumed after moving between Unix and Windows. Bare command names remain suitable for
+/// `PATH` lookup.
+#[must_use]
+pub fn resolve_command_path(config_dir: &Path, value: &str) -> PathBuf {
+    let normalized = if std::path::MAIN_SEPARATOR == '/' {
+        value.replace('\\', "/")
+    } else {
+        value.replace('/', "\\")
+    };
+    let command = PathBuf::from(normalized);
+    if command.is_absolute()
+        || windows_drive_path_is_absolute(value)
+        || !command_value_is_path_like(value)
+    {
+        return command;
+    }
+
+    config_dir.join(command)
+}
+
+fn windows_drive_path_is_absolute(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\')
 }
 
 fn format_stderr_suffix(stderr: &str) -> String {
@@ -1243,6 +1265,21 @@ mod tests {
         assert!(super::command_value_is_path_like("bin/python"));
         assert!(super::command_value_is_path_like(r"Scripts\python.exe"));
         assert!(!super::command_value_is_path_like("python3"));
+    }
+
+    #[test]
+    fn command_paths_normalize_foreign_separators_before_resolving() {
+        let config_dir = Path::new("project");
+
+        assert_eq!(
+            super::resolve_command_path(config_dir, r"Scripts\python.exe"),
+            config_dir.join("Scripts").join("python.exe")
+        );
+        assert_eq!(
+            super::resolve_command_path(config_dir, "bin/python"),
+            config_dir.join("bin").join("python")
+        );
+        assert_eq!(super::resolve_command_path(config_dir, "python3"), PathBuf::from("python3"));
     }
 
     #[cfg(unix)]
