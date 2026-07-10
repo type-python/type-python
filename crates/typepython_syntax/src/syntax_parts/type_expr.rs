@@ -72,9 +72,10 @@ impl ShapeProjectionField {
             .annotation
             .clone()
             .or_else(|| member.annotation_expr.as_ref().map(TypeExpr::render));
-        let required = type_level_shape_field_required(annotation.as_deref(), total_default);
+        let qualifiers = annotation.as_deref().map(shape_annotation_qualifiers).unwrap_or_default();
+        let required = qualifiers.required.unwrap_or(total_default);
         let annotation = annotation.map(|annotation| {
-            if !required && type_level_shape_field_required(Some(&annotation), true) {
+            if !required && qualifiers.required.is_none() {
                 format!("NotRequired[{annotation}]")
             } else {
                 annotation
@@ -84,7 +85,7 @@ impl ShapeProjectionField {
             name: member.name.clone(),
             public_alias: member.name.clone(),
             required,
-            readonly: annotation.as_deref().is_some_and(shape_annotation_is_readonly),
+            readonly: qualifiers.readonly,
             annotation,
             source_kind: ShapeProjectionFieldSourceKind::SourceField,
         }
@@ -182,13 +183,8 @@ impl ShapeProjection {
     pub fn partial(&self) -> Self {
         self.with_projected_fields(self.fields.iter().cloned().map(|mut field| {
             let annotation = field.annotation.as_deref().unwrap_or("object");
-            field.annotation = Some(if annotation.contains("NotRequired[") {
-                annotation.to_owned()
-            } else if annotation.starts_with("Required_[") {
-                annotation.replace("Required_[", "NotRequired[")
-            } else {
-                format!("NotRequired[{annotation}]")
-            });
+            let annotation = strip_shape_annotation_qualifiers(annotation, true, false);
+            field.annotation = Some(format!("NotRequired[{annotation}]"));
             field.required = false;
             field.projected()
         }))
@@ -197,12 +193,7 @@ impl ShapeProjection {
     pub fn required_fields(&self) -> Self {
         self.with_projected_fields(self.fields.iter().cloned().map(|mut field| {
             let annotation = field.annotation.as_deref().unwrap_or("object");
-            field.annotation = Some(
-                bracket_inner(annotation, "NotRequired")
-                    .map(str::trim)
-                    .unwrap_or(annotation)
-                    .to_owned(),
-            );
+            field.annotation = Some(strip_shape_annotation_qualifiers(annotation, true, false));
             field.required = true;
             field.projected()
         }))
@@ -211,7 +202,7 @@ impl ShapeProjection {
     pub fn readonly_fields(&self) -> Self {
         self.with_projected_fields(self.fields.iter().cloned().map(|mut field| {
             let annotation = field.annotation.as_deref().unwrap_or("object");
-            field.annotation = Some(if annotation.contains("ReadOnly[") {
+            field.annotation = Some(if shape_annotation_qualifiers(annotation).readonly {
                 annotation.to_owned()
             } else {
                 format!("ReadOnly[{annotation}]")
@@ -224,12 +215,7 @@ impl ShapeProjection {
     pub fn mutable_fields(&self) -> Self {
         self.with_projected_fields(self.fields.iter().cloned().map(|mut field| {
             let annotation = field.annotation.as_deref().unwrap_or("object");
-            field.annotation = Some(
-                bracket_inner(annotation, "ReadOnly")
-                    .map(str::trim)
-                    .unwrap_or(annotation)
-                    .to_owned(),
-            );
+            field.annotation = Some(strip_shape_annotation_qualifiers(annotation, false, true));
             field.readonly = false;
             field.projected()
         }))
@@ -291,21 +277,92 @@ impl ShapeProjection {
 }
 
 pub fn type_level_shape_field_required(annotation: Option<&str>, total_default: bool) -> bool {
-    match annotation.and_then(annotation_wrapper_head) {
-        Some("Required" | "Required_") => true,
-        Some("NotRequired") => false,
-        _ => total_default,
+    annotation
+        .map(shape_annotation_qualifiers)
+        .and_then(|qualifiers| qualifiers.required)
+        .unwrap_or(total_default)
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+struct ShapeAnnotationQualifiers {
+    required: Option<bool>,
+    readonly: bool,
+}
+
+fn shape_annotation_qualifiers(annotation: &str) -> ShapeAnnotationQualifiers {
+    let Some(annotation) = TypeExpr::parse(annotation) else {
+        return ShapeAnnotationQualifiers::default();
+    };
+    let mut qualifiers = ShapeAnnotationQualifiers::default();
+    collect_shape_annotation_qualifiers(&annotation, &mut qualifiers);
+    qualifiers
+}
+
+fn collect_shape_annotation_qualifiers(
+    annotation: &TypeExpr,
+    qualifiers: &mut ShapeAnnotationQualifiers,
+) {
+    match annotation {
+        TypeExpr::Generic { head, args } if args.len() == 1 => {
+            match head.rsplit('.').next().unwrap_or(head).trim() {
+                "Required" | "Required_" => qualifiers.required = Some(true),
+                "NotRequired" => qualifiers.required = Some(false),
+                "ReadOnly" => qualifiers.readonly = true,
+                _ => return,
+            }
+            collect_shape_annotation_qualifiers(&args[0], qualifiers);
+        }
+        TypeExpr::Annotated { value, .. } => {
+            collect_shape_annotation_qualifiers(value, qualifiers);
+        }
+        _ => {}
     }
 }
 
-fn shape_annotation_is_readonly(annotation: &str) -> bool {
-    annotation_wrapper_head(annotation) == Some("ReadOnly")
+fn strip_shape_annotation_qualifiers(
+    annotation: &str,
+    requiredness: bool,
+    readonly: bool,
+) -> String {
+    TypeExpr::parse(annotation).map_or_else(
+        || annotation.to_owned(),
+        |annotation| {
+            strip_shape_annotation_qualifiers_from_expr(annotation, requiredness, readonly).render()
+        },
+    )
 }
 
-fn annotation_wrapper_head(annotation: &str) -> Option<&str> {
-    let trimmed = annotation.trim();
-    let (head, _) = trimmed.split_once('[')?;
-    trimmed.ends_with(']').then(|| head.rsplit('.').next().unwrap_or(head).trim())
+fn strip_shape_annotation_qualifiers_from_expr(
+    annotation: TypeExpr,
+    requiredness: bool,
+    readonly: bool,
+) -> TypeExpr {
+    match annotation {
+        TypeExpr::Generic { head, mut args } if args.len() == 1 => {
+            let qualifier = head.rsplit('.').next().unwrap_or(&head).trim();
+            let is_requiredness = matches!(qualifier, "Required" | "Required_" | "NotRequired");
+            let is_readonly = qualifier == "ReadOnly";
+            if !is_requiredness && !is_readonly {
+                return TypeExpr::Generic { head, args };
+            }
+            let inner =
+                strip_shape_annotation_qualifiers_from_expr(args.remove(0), requiredness, readonly);
+            if (requiredness && is_requiredness) || (readonly && is_readonly) {
+                inner
+            } else {
+                TypeExpr::Generic { head, args: vec![inner] }
+            }
+        }
+        TypeExpr::Annotated { value, metadata } => TypeExpr::Annotated {
+            value: Box::new(strip_shape_annotation_qualifiers_from_expr(
+                *value,
+                requiredness,
+                readonly,
+            )),
+            metadata,
+        },
+        other => other,
+    }
 }
 
 pub fn typed_dict_total_default_from_header_suffix(header_suffix: &str) -> bool {
@@ -1028,6 +1085,7 @@ mod type_expr_tests {
         assert_eq!(projected.fields[0].name, "name");
         assert!(!projected.fields[0].required);
         assert!(!projected.fields[0].readonly);
+        assert_eq!(projected.fields[0].annotation.as_deref(), Some("NotRequired[str]"));
         assert_eq!(projected.fields[0].normalized_annotation(), "str");
         assert_eq!(
             projected.fields[0].source_kind,

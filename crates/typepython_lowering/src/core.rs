@@ -231,11 +231,8 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             _ => None,
         })
         .collect();
-    let typed_dicts_by_name: std::collections::BTreeMap<_, _> = class_defs
-        .values()
-        .filter(|statement| statement.bases.iter().any(|b| is_typed_dict_base(b)))
-        .map(|statement| (statement.name.as_str(), *statement))
-        .collect();
+    let classes_by_name: std::collections::BTreeMap<_, _> =
+        class_defs.values().map(|statement| (statement.name.as_str(), *statement)).collect();
     let data_classes_by_name: std::collections::BTreeMap<_, _> =
         data_classes.values().map(|statement| (statement.name.as_str(), *statement)).collect();
     let function_defs: std::collections::BTreeMap<_, _> = tree
@@ -368,7 +365,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         required_imports.push(String::from("from typing import TypeAlias"));
     }
     let type_level_fields = type_level_shape_fields(
-        &typed_dicts_by_name,
+        &classes_by_name,
         &data_classes_by_name,
         options.experimental_shape_transforms,
     );
@@ -408,7 +405,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             || v.starts_with("Required_[")
             || transform_generates_notrequired(
                 v,
-                &typed_dicts_by_name,
+                &classes_by_name,
                 &data_classes_by_name,
                 options.experimental_shape_transforms,
             )
@@ -448,7 +445,6 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     let mut lowered_line_number = 1usize;
     let mut source_map = Vec::new();
     let mut span_map = Vec::new();
-
     for (index, line) in normalized_source.lines().enumerate() {
         let line_number = index + 1;
         let (replacement_lines, preserve_variadic_syntax) = if let Some(statement) =
@@ -456,7 +452,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         {
             if let Some(expanded) = try_expand_typeddict_transform(
                 &statement.value,
-                &typed_dicts_by_name,
+                &classes_by_name,
                 &data_classes_by_name,
                 options.experimental_shape_transforms,
                 line,
@@ -469,7 +465,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
                         statement,
                         options,
                         declaration_type_param_rewrites.get(&line_number),
-                        &typed_dicts_by_name,
+                        &classes_by_name,
                         &data_classes_by_name,
                         options.experimental_shape_transforms,
                     )],
@@ -1818,7 +1814,7 @@ fn rewrite_typealias_line(
     statement: &typepython_syntax::TypeAliasStatement,
     options: &LoweringOptions,
     type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
-    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     experimental_shape_transforms: bool,
 ) -> String {
@@ -1828,7 +1824,7 @@ fn rewrite_typealias_line(
         .unwrap_or_else(|| statement.value.clone());
     let value = reduce_restricted_type_level_alias_text(
         &value,
-        typed_dicts,
+        classes,
         data_classes,
         experimental_shape_transforms,
     )
@@ -1854,12 +1850,12 @@ fn rewrite_typealias_line(
 
 fn reduce_restricted_type_level_alias_text(
     value: &str,
-    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     experimental_shape_transforms: bool,
 ) -> Option<String> {
     let trimmed = value.trim();
-    let fields = type_level_shape_fields(typed_dicts, data_classes, experimental_shape_transforms);
+    let fields = type_level_shape_fields(classes, data_classes, experimental_shape_transforms);
     reduce_restricted_type_level_alias_text_with_fields(trimmed, &fields)
 }
 
@@ -1889,14 +1885,20 @@ fn render_literal_key_set(keys: Vec<String>) -> String {
 }
 
 fn type_level_shape_fields(
-    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     experimental_shape_transforms: bool,
 ) -> Vec<typepython_syntax::TypeLevelShapeField> {
-    let mut fields = typed_dicts
-        .values()
-        .copied()
-        .flat_map(|shape| type_level_shape_fields_for_block(shape, typed_dict_total_default(shape)))
+    let mut fields = resolved_local_typed_dict_shapes(classes)
+        .into_iter()
+        .flat_map(|shape| {
+            shape.fields.into_iter().map(move |field| typepython_syntax::TypeLevelShapeField {
+                owner: shape.name.clone(),
+                name: field.public_alias,
+                required: field.required,
+                annotation: field.annotation,
+            })
+        })
         .collect::<Vec<_>>();
     if experimental_shape_transforms {
         fields.extend(
@@ -1930,10 +1932,6 @@ fn type_level_shape_fields_for_block(
             }
         })
         .collect()
-}
-
-fn typed_dict_total_default(shape: &typepython_syntax::NamedBlockStatement) -> bool {
-    typepython_syntax::typed_dict_total_default_from_header_suffix(&shape.header_suffix)
 }
 
 fn rewrite_typevar_line(

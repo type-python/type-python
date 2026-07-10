@@ -121,6 +121,57 @@ fn resolve_known_shape_from_type_returns_shared_typed_dict_shape() {
 }
 
 #[test]
+fn resolve_known_shape_flattens_inherited_fields_and_legal_readonly_override() {
+    let source_text = concat!(
+        "from typing import ReadOnly, TypedDict\n\n",
+        "class Base(TypedDict, total=False):\n",
+        "    id: int\n",
+        "    label: ReadOnly[object]\n",
+        "    frozen: ReadOnly[bytes]\n\n",
+        "class Mid(Base):\n",
+        "    count: int\n\n",
+        "class Leaf(Mid):\n",
+        "    label: str\n",
+        "    active: bool\n",
+    );
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+    let context = crate::CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
+
+    let shape =
+        crate::resolve_known_shape_from_type_with_context(&context, node, &graph.nodes, "Leaf")
+            .expect("inherited TypedDict shape should resolve");
+
+    assert_eq!(shape.fields.len(), 5);
+    assert!(shape.field("id").is_some_and(|field| !field.required && !field.readonly));
+    assert!(shape.field("frozen").is_some_and(|field| !field.required && field.readonly));
+    assert!(shape.field("count").is_some_and(|field| field.required));
+    assert!(shape.field("active").is_some_and(|field| field.required));
+    let label = shape.field("label").expect("overridden inherited field should be present");
+    assert!(label.required);
+    assert!(!label.readonly);
+    assert_eq!(
+        label.semantic_type.as_ref().map(crate::render_semantic_type).as_deref(),
+        Some("str")
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn shared_shape_can_wrap_dataclass_transform_fields() {
     let shape = crate::Shape::from_dataclass_transform_class_shape(
         "User",

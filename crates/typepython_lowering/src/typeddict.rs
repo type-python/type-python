@@ -12,7 +12,7 @@ type SharedShapeProjection = typepython_syntax::ShapeProjection;
 /// Otherwise returns None.
 pub(super) fn try_expand_typeddict_transform(
     value: &str,
-    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     experimental_shape_transforms: bool,
     source_line: &str,
@@ -44,21 +44,20 @@ pub(super) fn try_expand_typeddict_transform(
         if TYPEDICT_TRANSFORMS.contains(&inner_transform) && inner_args.len() >= 2 {
             let inner_target = resolve_transform_shape(
                 inner_args[1],
-                typed_dicts,
+                classes,
                 data_classes,
                 experimental_shape_transforms,
-            )?;
+            )
+            .ok()
+            .flatten()?;
             apply_transform_to_shape(inner_transform, &inner_target, &inner_args[2..])
         } else {
             return None;
         }
     } else {
-        resolve_transform_shape(
-            target_arg,
-            typed_dicts,
-            data_classes,
-            experimental_shape_transforms,
-        )?
+        resolve_transform_shape(target_arg, classes, data_classes, experimental_shape_transforms)
+            .ok()
+            .flatten()?
     };
 
     let indentation = source_line.len() - source_line.trim_start().len();
@@ -261,11 +260,13 @@ pub(super) fn transform_targets_data_class(
 
 pub(super) fn transform_generates_notrequired(
     value: &str,
-    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     experimental_shape_transforms: bool,
 ) -> bool {
-    resolve_transform_shape(value.trim(), typed_dicts, data_classes, experimental_shape_transforms)
+    resolve_transform_shape(value.trim(), classes, data_classes, experimental_shape_transforms)
+        .ok()
+        .flatten()
         .is_some_and(|shape| {
             shape.fields.iter().any(|field| {
                 field
@@ -296,15 +297,11 @@ pub(super) fn collect_lowering_diagnostics_with_options(
     options: &LoweringOptions,
 ) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
-    let typed_dicts_by_name: std::collections::BTreeMap<_, _> = tree
+    let classes_by_name: std::collections::BTreeMap<_, _> = tree
         .statements
         .iter()
         .filter_map(|statement| match statement {
-            SyntaxStatement::ClassDef(statement)
-                if statement.bases.iter().any(|base| is_typed_dict_base(base)) =>
-            {
-                Some((statement.name.as_str(), statement))
-            }
+            SyntaxStatement::ClassDef(statement) => Some((statement.name.as_str(), statement)),
             _ => None,
         })
         .collect();
@@ -327,7 +324,7 @@ pub(super) fn collect_lowering_diagnostics_with_options(
                     &tree.source.path,
                     statement.line,
                     &statement.value,
-                    &typed_dicts_by_name,
+                    &classes_by_name,
                     &data_classes_by_name,
                     options.experimental_shape_transforms,
                 ) {
@@ -373,7 +370,7 @@ fn collect_typed_dict_transform_diagnostics(
     path: &std::path::Path,
     line: usize,
     value: &str,
-    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     experimental_shape_transforms: bool,
 ) -> Vec<Diagnostic> {
@@ -388,12 +385,12 @@ fn collect_typed_dict_transform_diagnostics(
     let key_args = &args[2..];
     let target_shape = match resolve_transform_shape(
         target_arg,
-        typed_dicts,
+        classes,
         data_classes,
         experimental_shape_transforms,
     ) {
-        Some(result) => result,
-        None => {
+        Ok(Some(result)) => result,
+        Ok(None) => {
             return vec![typed_dict_transform_error(
                 path,
                 line,
@@ -401,6 +398,16 @@ fn collect_typed_dict_transform_diagnostics(
                     "type transform `{}` targets `{}` which is not a known TypedDict or experimental shape source",
                     transform,
                     target_arg.trim()
+                ),
+                None,
+            )];
+        }
+        Err(error) => {
+            return vec![typed_dict_transform_error(
+                path,
+                line,
+                format!(
+                    "type transform `{transform}` cannot resolve its TypedDict target: {error}"
                 ),
                 None,
             )];
@@ -437,10 +444,10 @@ fn collect_typed_dict_transform_diagnostics(
 
 fn resolve_transform_shape(
     value: &str,
-    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     data_classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
     experimental_shape_transforms: bool,
-) -> Option<SharedShapeProjection> {
+) -> Result<Option<SharedShapeProjection>, TypedDictInheritanceError> {
     if let Some((transform, args)) = parse_transform_expr(value.trim())
         && TYPEDICT_TRANSFORMS.contains(&transform)
         && args.len() >= 2
@@ -448,27 +455,135 @@ fn resolve_transform_shape(
         let target_arg = args[1];
         let key_args = &args[2..];
         if transform == "MapValues" && !map_values_wrapper_supported(key_args) {
-            return None;
+            return Ok(None);
         }
         let base_shape = resolve_transform_shape(
             target_arg,
-            typed_dicts,
+            classes,
             data_classes,
             experimental_shape_transforms,
         )?;
-        return Some(apply_transform_to_shape(transform, &base_shape, key_args));
+        return Ok(base_shape.map(|shape| apply_transform_to_shape(transform, &shape, key_args)));
     }
 
-    if let Some(target) = typed_dicts.get(value.trim()) {
-        return Some(SharedShapeProjection::from_typed_dict_block(target));
+    if classes.contains_key(value.trim()) {
+        return resolve_local_typed_dict_shape(value.trim(), classes);
     }
     if experimental_shape_transforms && let Some(target) = data_classes.get(value.trim()) {
-        return Some(SharedShapeProjection::from_named_block(
+        return Ok(Some(SharedShapeProjection::from_named_block(
             target,
             typepython_syntax::ShapeProjectionSourceKind::DataClass,
-        ));
+        )));
     }
-    None
+    Ok(None)
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum TypedDictInheritanceError {
+    UnknownBase { owner: String, base: String },
+    Cycle { classes: Vec<String> },
+}
+
+impl std::fmt::Display for TypedDictInheritanceError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownBase { owner, base } => {
+                write!(formatter, "class `{owner}` has unknown base `{base}`")
+            }
+            Self::Cycle { classes } => {
+                write!(formatter, "cyclic TypedDict inheritance: {}", classes.join(" -> "))
+            }
+        }
+    }
+}
+
+pub(super) fn resolved_local_typed_dict_shapes(
+    classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+) -> Vec<SharedShapeProjection> {
+    classes
+        .keys()
+        .filter_map(|name| resolve_local_typed_dict_shape(name, classes).ok().flatten())
+        .collect()
+}
+
+fn resolve_local_typed_dict_shape(
+    name: &str,
+    classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+) -> Result<Option<SharedShapeProjection>, TypedDictInheritanceError> {
+    resolve_local_typed_dict_shape_inner(name, classes, &mut Vec::new())
+}
+
+fn resolve_local_typed_dict_shape_inner(
+    name: &str,
+    classes: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    stack: &mut Vec<String>,
+) -> Result<Option<SharedShapeProjection>, TypedDictInheritanceError> {
+    if let Some(cycle_start) = stack.iter().position(|entry| entry == name) {
+        let mut cycle = stack[cycle_start..].to_vec();
+        cycle.push(name.to_owned());
+        return Err(TypedDictInheritanceError::Cycle { classes: cycle });
+    }
+
+    let Some(block) = classes.get(name).copied() else {
+        return Ok(None);
+    };
+    stack.push(name.to_owned());
+
+    let mut fields = Vec::new();
+    let mut is_typed_dict = block.bases.iter().any(|base| is_typed_dict_base(base));
+    for base in &block.bases {
+        if is_typed_dict_base(base) || is_typed_dict_support_base(base) {
+            continue;
+        }
+        let base_name = local_base_name(base);
+        let Some(_base_block) = classes.get(base_name) else {
+            stack.pop();
+            return Err(TypedDictInheritanceError::UnknownBase {
+                owner: block.name.clone(),
+                base: base.trim().to_owned(),
+            });
+        };
+        if let Some(base_shape) = resolve_local_typed_dict_shape_inner(base_name, classes, stack)? {
+            is_typed_dict = true;
+            merge_projection_fields(&mut fields, base_shape.fields);
+        }
+    }
+
+    if is_typed_dict {
+        let local_shape = SharedShapeProjection::from_typed_dict_block(block);
+        merge_projection_fields(&mut fields, local_shape.fields);
+    }
+    stack.pop();
+
+    Ok(is_typed_dict.then(|| SharedShapeProjection {
+        name: block.name.clone(),
+        source_kind: typepython_syntax::ShapeProjectionSourceKind::TypedDict,
+        fields,
+    }))
+}
+
+fn local_base_name(base: &str) -> &str {
+    base.trim().split_once('[').map_or(base.trim(), |(head, _)| head.trim())
+}
+
+fn is_typed_dict_support_base(base: &str) -> bool {
+    matches!(
+        local_base_name(base),
+        "Generic" | "typing.Generic" | "typing_extensions.Generic" | "object"
+    )
+}
+
+fn merge_projection_fields(
+    fields: &mut Vec<typepython_syntax::ShapeProjectionField>,
+    incoming: Vec<typepython_syntax::ShapeProjectionField>,
+) {
+    for field in incoming {
+        if let Some(index) = fields.iter().position(|existing| existing.name == field.name) {
+            fields[index] = field;
+        } else {
+            fields.push(field);
+        }
+    }
 }
 
 fn map_values_wrapper_supported(key_args: &[&str]) -> bool {

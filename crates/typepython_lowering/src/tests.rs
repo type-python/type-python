@@ -37,6 +37,14 @@ fn experimental_dual_emit_options() -> LoweringOptions {
     LoweringOptions { experimental_sync_async_dual_emit: true, ..LoweringOptions::default() }
 }
 
+fn emitted_class_block<'a>(source: &'a str, name: &str) -> &'a str {
+    let marker = format!("class {name}(");
+    let start = source.find(&marker).unwrap_or_else(|| panic!("missing emitted class `{name}`"));
+    let tail = &source[start..];
+    let end = tail[1..].find("\nclass ").map_or(tail.len(), |offset| offset + 1);
+    &tail[..end]
+}
+
 #[test]
 fn lower_dual_emit_decorator_generates_sync_and_async_pair() {
     let source = concat!(
@@ -2794,6 +2802,116 @@ fn lower_preserves_total_false_requiredness_in_shape_transforms() {
     assert!(lowered.module.python_source.contains("from typing_extensions import NotRequired"));
     assert!(lowered.module.python_source.contains("class PublicPatch(TypedDict):"));
     assert!(lowered.module.python_source.contains("    id: NotRequired[int]"));
+}
+
+#[test]
+fn lower_flattens_multilevel_inherited_typed_dict_transforms() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("inherited-typed-dict.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "from typing import ReadOnly, TypedDict\n",
+            "class Base(TypedDict, total=False):\n",
+            "    id: int\n",
+            "    name: ReadOnly[object]\n",
+            "    frozen: ReadOnly[bytes]\n\n",
+            "class Mid(Base):\n",
+            "    count: int\n\n",
+            "class Leaf(Mid):\n",
+            "    name: str\n",
+            "    active: bool\n\n",
+            "typealias MidPublic = Pick[Mid, \"id\", \"count\"]\n",
+            "typealias LeafPatch = Partial[Leaf]\n",
+            "typealias LeafPublic = Pick[Leaf, \"id\", \"name\", \"frozen\", \"active\"]\n",
+            "typealias LeafWithoutId = Omit[Leaf, \"id\"]\n",
+            "typealias LeafRequired = Required_[Leaf]\n",
+            "typealias LeafMutable = Mutable[Leaf]\n",
+            "typealias LeafKeys = KeyOf[Leaf]\n",
+            "typealias LeafOptionalKeys = OptionalKeys[Leaf]\n",
+        )),
+    });
+
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+    let rendered = lowered.diagnostics.as_text();
+    assert!(!lowered.diagnostics.has_errors(), "{rendered}");
+
+    let mid_public = emitted_class_block(&lowered.module.python_source, "MidPublic");
+    assert!(mid_public.contains("id: NotRequired[int]"), "{mid_public}");
+    assert!(mid_public.contains("count: int"), "{mid_public}");
+    assert!(!mid_public.contains("name:"), "{mid_public}");
+
+    let patch = emitted_class_block(&lowered.module.python_source, "LeafPatch");
+    assert!(patch.contains("id: NotRequired[int]"), "{patch}");
+    assert!(patch.contains("name: NotRequired[str]"), "{patch}");
+    assert!(patch.contains("frozen: NotRequired[ReadOnly[bytes]]"), "{patch}");
+    assert!(patch.contains("count: NotRequired[int]"), "{patch}");
+    assert!(patch.contains("active: NotRequired[bool]"), "{patch}");
+
+    let public = emitted_class_block(&lowered.module.python_source, "LeafPublic");
+    assert!(public.contains("id: NotRequired[int]"), "{public}");
+    assert!(public.contains("name: str"), "{public}");
+    assert!(public.contains("frozen: NotRequired[ReadOnly[bytes]]"), "{public}");
+    assert!(public.contains("active: bool"), "{public}");
+    assert!(!public.contains("count:"), "{public}");
+
+    let without_id = emitted_class_block(&lowered.module.python_source, "LeafWithoutId");
+    assert!(!without_id.contains("id:"), "{without_id}");
+    assert!(without_id.contains("name: str"), "{without_id}");
+    assert!(without_id.contains("frozen: NotRequired[ReadOnly[bytes]]"), "{without_id}");
+    assert!(without_id.contains("count: int"), "{without_id}");
+    assert!(without_id.contains("active: bool"), "{without_id}");
+
+    let required = emitted_class_block(&lowered.module.python_source, "LeafRequired");
+    assert!(required.contains("id: int"), "{required}");
+    assert!(required.contains("frozen: ReadOnly[bytes]"), "{required}");
+    assert!(!required.contains("NotRequired"), "{required}");
+
+    let mutable = emitted_class_block(&lowered.module.python_source, "LeafMutable");
+    assert!(mutable.contains("id: NotRequired[int]"), "{mutable}");
+    assert!(mutable.contains("frozen: NotRequired[bytes]"), "{mutable}");
+    assert!(!mutable.contains("ReadOnly"), "{mutable}");
+
+    assert!(lowered.module.python_source.contains(
+        "LeafKeys: TypeAlias = Literal[\"active\", \"count\", \"frozen\", \"id\", \"name\"]"
+    ));
+    assert!(
+        lowered
+            .module
+            .python_source
+            .contains("LeafOptionalKeys: TypeAlias = Literal[\"frozen\", \"id\"]")
+    );
+}
+
+#[test]
+fn lower_reports_unknown_and_cyclic_typed_dict_inheritance() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("invalid-inherited-typed-dict.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "class Broken(MissingBase):\n",
+            "    value: int\n\n",
+            "class A(B):\n",
+            "    a: int\n\n",
+            "class B(A):\n",
+            "    b: int\n\n",
+            "typealias BrokenPatch = Partial[Broken]\n",
+            "typealias CyclicPublic = Pick[A, \"a\"]\n",
+        )),
+    });
+
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+    let diagnostics = lowered
+        .diagnostics
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "TPY4017")
+        .collect::<Vec<_>>();
+    assert_eq!(diagnostics.len(), 2, "{}", lowered.diagnostics.as_text());
+    let rendered = lowered.diagnostics.as_text();
+    assert!(rendered.contains("class `Broken` has unknown base `MissingBase`"), "{rendered}");
+    assert!(rendered.contains("cyclic TypedDict inheritance: A -> B -> A"), "{rendered}");
 }
 
 #[test]
