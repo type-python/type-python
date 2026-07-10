@@ -194,6 +194,25 @@ class AnnotationCompatTests(unittest.TestCase):
         self.assertEqual({finding.code for finding in audit.findings}, {"TPY-A002"})
         self.assertIn("TYPE_CHECKING-only", audit.findings[0].message)
 
+    def test_audit_source_flags_all_type_checking_only_bindings(self) -> None:
+        audit = annotation_compat.audit_source(
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    Alias = object\n"
+            "    class Model:\n"
+            "        pass\n"
+            "    def Factory():\n"
+            "        pass\n\n"
+            "def load(alias: 'Alias', model: 'Model', factory: 'Factory') -> None:\n"
+            "    return None\n"
+        )
+
+        findings = [finding for finding in audit.findings if finding.code == "TPY-A002"]
+        self.assertEqual(len(findings), 3)
+        rendered = "\n".join(finding.message for finding in findings)
+        for name in ("Alias", "Model", "Factory"):
+            self.assertIn(name, rendered)
+
     def test_type_checking_imports_follow_lexical_scope(self) -> None:
         audit = annotation_compat.audit_source(
             "from typing import TYPE_CHECKING\n\n"
