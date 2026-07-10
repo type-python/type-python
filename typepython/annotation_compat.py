@@ -65,6 +65,7 @@ class _AuditScope:
     type_checking_only_names: frozenset[str]
     resolved_names: dict[str, str]
     definitely_bound_names: set[str]
+    resolution_overrides: set[str]
 
 
 def supported_formats() -> AnnotationSupport:
@@ -320,6 +321,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                 type_checking_only_names=frozenset(),
                 resolved_names={},
                 definitely_bound_names=set(parameters),
+                resolution_overrides=set(),
             )
         )
         self.visit(node.body)
@@ -355,6 +357,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                 type_checking_only_names=frozenset(),
                 resolved_names={},
                 definitely_bound_names=set(),
+                resolution_overrides=set(),
             )
         )
         for index, generator in enumerate(node.generators):
@@ -508,7 +511,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         for scope in reversed(self._scopes):
             if kind == "function" and scope.kind == "class":
                 continue
-            for name in scope.runtime_names:
+            for name in scope.runtime_names | scope.resolution_overrides:
                 if name not in visible_resolved_names:
                     visible_resolved_names[name] = scope.resolved_names.get(name)
         runtime_names, type_checking_only_names = _scope_names(
@@ -534,6 +537,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                 type_checking_only_names=frozenset(type_checking_only_names),
                 resolved_names={},
                 definitely_bound_names=set(parameters or ()),
+                resolution_overrides=set(),
             )
         )
         for statement in statements:
@@ -549,6 +553,11 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         for scope in reversed(self._scopes):
             if inside_function and scope.kind == "class":
                 continue
+            if root in scope.resolution_overrides:
+                resolved_root = scope.resolved_names.get(root)
+                if resolved_root is None:
+                    return None
+                return resolved_root if not separator else f"{resolved_root}.{suffix}"
             if root not in scope.runtime_names:
                 continue
             resolved_root = scope.resolved_names.get(root)
@@ -580,6 +589,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         if not self._scopes:
             return
         self._scopes[-1].definitely_bound_names.add(name)
+        self._scopes[-1].resolution_overrides.add(name)
         if resolved is None:
             self._scopes[-1].resolved_names.pop(name, None)
         else:
@@ -596,34 +606,44 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
     def _unbind_runtime_name(self, name: str) -> None:
         if not self._scopes:
             return
-        self._scopes[-1].definitely_bound_names.discard(name)
-        self._scopes[-1].resolved_names.pop(name, None)
-
-    def _current_scope_state(self) -> tuple[set[str], dict[str, str]]:
-        if not self._scopes:
-            return set(), {}
         scope = self._scopes[-1]
-        return set(scope.definitely_bound_names), dict(scope.resolved_names)
+        scope.definitely_bound_names.discard(name)
+        scope.resolved_names.pop(name, None)
+        if name in scope.runtime_names:
+            scope.resolution_overrides.discard(name)
+        else:
+            scope.resolution_overrides.add(name)
+
+    def _current_scope_state(self) -> tuple[set[str], dict[str, str], set[str]]:
+        if not self._scopes:
+            return set(), {}, set()
+        scope = self._scopes[-1]
+        return (
+            set(scope.definitely_bound_names),
+            dict(scope.resolved_names),
+            set(scope.resolution_overrides),
+        )
 
     def _restore_current_scope_state(
         self,
-        state: tuple[set[str], dict[str, str]],
+        state: tuple[set[str], dict[str, str], set[str]],
     ) -> None:
         if not self._scopes:
             return
-        definitely_bound_names, resolved_names = state
+        definitely_bound_names, resolved_names, resolution_overrides = state
         self._scopes[-1].definitely_bound_names = set(definitely_bound_names)
         self._scopes[-1].resolved_names = dict(resolved_names)
+        self._scopes[-1].resolution_overrides = set(resolution_overrides)
 
     def _merge_current_scope_states(
         self,
-        left: tuple[set[str], dict[str, str]],
-        right: tuple[set[str], dict[str, str]],
+        left: tuple[set[str], dict[str, str], set[str]],
+        right: tuple[set[str], dict[str, str], set[str]],
     ) -> None:
         if not self._scopes:
             return
-        left_bound, left_resolved = left
-        right_bound, right_resolved = right
+        left_bound, left_resolved, left_overrides = left
+        right_bound, right_resolved, right_overrides = right
         common_bound = left_bound & right_bound
         common_resolved = {
             name: canonical
@@ -632,10 +652,11 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         }
         self._scopes[-1].definitely_bound_names = common_bound
         self._scopes[-1].resolved_names = common_resolved
+        self._scopes[-1].resolution_overrides = left_overrides & right_overrides
 
     def _merge_multiple_current_scope_states(
         self,
-        states: list[tuple[set[str], dict[str, str]]],
+        states: list[tuple[set[str], dict[str, str], set[str]]],
     ) -> None:
         if not states:
             return

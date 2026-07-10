@@ -269,6 +269,51 @@ class AnnotationCompatTests(unittest.TestCase):
             (annotation_compat.AnnotationConsumer.TYPING_GET_TYPE_HINTS,),
         )
 
+    def test_audit_source_respects_global_and_nonlocal_rebindings(self) -> None:
+        audit = annotation_compat.audit_source(
+            "from typing import TYPE_CHECKING, get_type_hints\n"
+            "def custom(value):\n    return value\n\n"
+            "def global_scope():\n"
+            "    global get_type_hints\n"
+            "    get_type_hints = custom\n"
+            "    get_type_hints(int)\n\n"
+            "def deleted_global():\n"
+            "    global get_type_hints\n"
+            "    del get_type_hints\n"
+            "    get_type_hints(int)\n\n"
+            "def outer():\n"
+            "    from typing import get_type_hints\n"
+            "    def inner():\n"
+            "        nonlocal get_type_hints\n"
+            "        get_type_hints = custom\n"
+            "        get_type_hints(int)\n"
+            "    return inner\n\n"
+            "def shadow_guard():\n"
+            "    global TYPE_CHECKING\n"
+            "    TYPE_CHECKING = True\n"
+            "    def nested():\n"
+            "        if TYPE_CHECKING:\n"
+            "            from models import User\n"
+            "        def load(item: 'User') -> None:\n"
+            "            return None\n"
+            "        return load\n"
+            "    return nested\n"
+        )
+
+        self.assertEqual(audit.consumers, ())
+        self.assertFalse(any(finding.code == "TPY-A002" for finding in audit.findings))
+
+        before_assignment = annotation_compat.audit_source(
+            "from typing import get_type_hints\n"
+            "def load():\n"
+            "    global get_type_hints\n"
+            "    get_type_hints(int)\n"
+        )
+        self.assertEqual(
+            before_assignment.consumers,
+            (annotation_compat.AnnotationConsumer.TYPING_GET_TYPE_HINTS,),
+        )
+
     def test_audit_source_does_not_treat_relative_imports_as_consumers(self) -> None:
         audit = annotation_compat.audit_source(
             "import typing\n"
