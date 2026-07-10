@@ -132,7 +132,7 @@ A Beta release candidate must pass the tracked release gate before the classifie
 - industrial performance evidence: `python scripts/industrial_perf_smoke.py` on the release
   candidate, recording cold check, warm check, single-file implementation edit, public surface edit,
   and peak RSS; plus the 512-module `typepython_lsp` incremental Criterion suite with p95/p99
-  hover-session latency evidence
+  hover-session latency evidence in the uploaded `perf/lsp-latency.json` artifact
 - experimental scope contract: `python3 -m unittest scripts.test_repo_contracts.RepoContractsTests.test_experimental_scope_is_guarded`
   so Experimental opt-in and Roadmap / prototype features cannot drift into Core v1 claims silently
 
@@ -191,3 +191,8 @@ The minimum recorded fields are cold check time, warm check time, single-file im
 latency, public surface edit latency, peak RSS, target Python version, module count, external stub
 package count, and the TypePython command used. If a platform cannot report RSS or p95/p99, the
 release note must say so explicitly instead of implying coverage.
+
+The authoritative CI gate runs `make lsp-latency-evidence`, requires at least 20
+one-session Flat Criterion samples for each 512-module edit-session shape,
+calculates p95/p99 from those measurements, and uploads the JSON plus Criterion
+reports.

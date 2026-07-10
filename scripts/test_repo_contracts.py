@@ -415,6 +415,7 @@ class RepoContractsTests(unittest.TestCase):
         workflow = read_text(".github/workflows/rust.yml")
         project = read_text("crates/typepython_project/src/lib.rs")
         lsp_bench = read_text("crates/typepython_lsp/benches/incremental.rs")
+        lsp_evidence = read_text("scripts/lsp_latency_evidence.py")
 
         self.assertIn("scripts/industrial_perf_smoke.py", benchmarks)
         self.assertIn("cold check", benchmarks)
@@ -431,6 +432,18 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("industrial-performance-smoke:", workflow)
         self.assertIn("scripts/industrial_perf_smoke.py --json-out", workflow)
         self.assertIn("industrial-performance-smoke", workflow.split("beta-release-gate:", 1)[1])
+
+        self.assertIn("lsp-latency-evidence:", makefile)
+        self.assertIn("lsp-latency-evidence", makefile.split("beta-release-gate:", 1)[1])
+        self.assertIn("lsp-latency-evidence:", workflow)
+        self.assertIn("make lsp-latency-evidence", workflow)
+        self.assertIn("perf/lsp-latency.json", workflow)
+        self.assertIn("lsp-latency-evidence", workflow.split("beta-release-gate:", 1)[1])
+        self.assertIn("scripts/test_lsp_latency_evidence.py", makefile)
+        self.assertIn("scripts/test_lsp_latency_evidence.py", workflow)
+        self.assertIn('"p95_ms"', lsp_evidence)
+        self.assertIn('"p99_ms"', lsp_evidence)
+        self.assertIn("min_samples", lsp_evidence)
 
         self.assertIn("lsp_incremental_impl_edit_session_512_modules", benchmarks)
         self.assertIn("lsp_incremental_public_edit_session_512_modules", benchmarks)

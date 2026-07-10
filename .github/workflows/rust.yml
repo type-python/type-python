@@ -55,6 +55,7 @@ jobs:
           scripts/test_downstream_checker_matrix.py
           scripts/test_research_roadmap_demo_smoke.py
           scripts/test_industrial_perf_smoke.py
+          scripts/test_lsp_latency_evidence.py
           scripts/test_editor_integrations.py
           scripts/test_packaging_contracts.py
           scripts/test_sdist_smoke.py
@@ -111,6 +112,36 @@ jobs:
         with:
           name: industrial-performance-smoke
           path: perf/industrial-smoke.json
+          if-no-files-found: error
+
+  lsp-latency-evidence:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.94.0
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal
+          rustup default 1.94.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Measure 512-module LSP edit sessions
+        run: make lsp-latency-evidence
+
+      - name: Upload LSP latency evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsp-latency-evidence
+          path: |
+            perf/lsp-latency.json
+            target/criterion/lsp_incremental_impl_edit_session_512_modules/report/
+            target/criterion/lsp_incremental_public_edit_session_512_modules/report/
           if-no-files-found: error
 
   security-audit:
@@ -386,6 +417,7 @@ jobs:
     needs:
       - workspace-fast
       - industrial-performance-smoke
+      - lsp-latency-evidence
       - security-audit
       - coverage
       - fuzz-smoke

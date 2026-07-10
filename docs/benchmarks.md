@@ -119,18 +119,27 @@ python scripts/industrial_perf_smoke.py \
 ```
 
 For LSP latency claims, record the 512-module implementation-edit and
-public-surface-edit Criterion runs and capture p95/p99 hover-session latency
-evidence from the benchmark output or the external profiling tool used for the
-release candidate.
+public-surface-edit Criterion runs and calculate p95/p99 hover-session latency
+evidence from Criterion's per-iteration samples:
 
-Compile-check benchmarks without running them (used in CI):
+```sh
+make lsp-latency-evidence
+```
+
+The target requires at least 20 one-session Flat samples for both 512-module
+session shapes and writes `perf/lsp-latency.json`. CI uploads that JSON together
+with both Criterion HTML reports; a missing, malformed, batched, or undersized
+sample set fails the release gate.
+
+Compile-check benchmarks without running them:
 
 ```sh
 cargo bench --workspace --no-run
 ```
 
 `cargo bench --workspace --no-run` compiles every benchmark target in the
-workspace, including the LSP incremental bench.
+workspace. CI additionally runs the 512-module LSP benchmarks through
+`make lsp-latency-evidence`; compile success alone is not performance evidence.
 
 ## Baselines
 
@@ -163,3 +172,4 @@ suites. The LSP incremental benchmark is intentionally documented separately.
 | `make bench-baseline` | Save the v0.1.0 baseline for the core suites          |
 | `make bench-compare`  | Compare the core suites against the v0.1.0 baseline   |
 | `make perf-smoke`     | Run the industrial CLI cold/warm/edit smoke           |
+| `make lsp-latency-evidence` | Run 512-module LSP sessions and emit p95/p99 JSON |

@@ -11,8 +11,12 @@ COVERAGE_MIN_REGIONS ?= 60
 COVERAGE_MIN_FUNCTIONS ?= 60
 COVERAGE_MIN_BRANCHES ?= 50
 COVERAGE_TEST_THREADS ?= 1
+LSP_LATENCY_SAMPLE_SIZE ?= 20
+LSP_LATENCY_WARMUP_SECONDS ?= 1
+LSP_LATENCY_MEASUREMENT_SECONDS ?= 1
+LSP_LATENCY_JSON ?= perf/lsp-latency.json
 
-.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers flagship-smoke examples-smoke roadmap-demo-smoke security-audit coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare perf-smoke package-check quickstart-smoke sdist-smoke beta-release-gate snapshot-review docs ci bump-version
+.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers flagship-smoke examples-smoke roadmap-demo-smoke security-audit coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare perf-smoke lsp-latency-evidence package-check quickstart-smoke sdist-smoke beta-release-gate snapshot-review docs ci bump-version
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -82,7 +86,7 @@ diagnostic-coverage-check:
 	$(PYTHON) scripts/diagnostic_test_coverage.py --check
 
 repo-contracts:
-	$(PYTHON) -m unittest scripts/test_repo_contracts.py scripts/test_coverage_gate.py scripts/test_downstream_checker_matrix.py scripts/test_flagship_core_smoke.py scripts/test_examples_smoke.py scripts/test_research_roadmap_demo_smoke.py scripts/test_industrial_perf_smoke.py scripts/test_editor_integrations.py scripts/test_packaging_contracts.py scripts/test_sdist_smoke.py
+	$(PYTHON) -m unittest scripts/test_repo_contracts.py scripts/test_coverage_gate.py scripts/test_downstream_checker_matrix.py scripts/test_flagship_core_smoke.py scripts/test_examples_smoke.py scripts/test_research_roadmap_demo_smoke.py scripts/test_industrial_perf_smoke.py scripts/test_lsp_latency_evidence.py scripts/test_editor_integrations.py scripts/test_packaging_contracts.py scripts/test_sdist_smoke.py
 
 bench:
 	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker
@@ -106,7 +110,7 @@ quickstart-smoke: package-check
 sdist-smoke: package-check
 	$(PYTHON) scripts/sdist_smoke.py dist/*.tar.gz
 
-beta-release-gate: fmt-check lint test test-cli-verification test-downstream-checkers flagship-smoke examples-smoke roadmap-demo-smoke perf-smoke security-audit fuzz-smoke package-check quickstart-smoke sdist-smoke stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts
+beta-release-gate: fmt-check lint test test-cli-verification test-downstream-checkers flagship-smoke examples-smoke roadmap-demo-smoke perf-smoke lsp-latency-evidence security-audit fuzz-smoke package-check quickstart-smoke sdist-smoke stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts
 
 bump-version:
 	@test -n "$(VERSION)" || (echo "Usage: make bump-version VERSION=0.0.8" && exit 1)
@@ -120,6 +124,10 @@ bench-compare:
 
 perf-smoke:
 	$(PYTHON) scripts/industrial_perf_smoke.py
+
+lsp-latency-evidence:
+	$(CARGO) bench -p typepython-lsp --bench incremental -- 512_modules --sample-size $(LSP_LATENCY_SAMPLE_SIZE) --warm-up-time $(LSP_LATENCY_WARMUP_SECONDS) --measurement-time $(LSP_LATENCY_MEASUREMENT_SECONDS)
+	$(PYTHON) scripts/lsp_latency_evidence.py --min-samples $(LSP_LATENCY_SAMPLE_SIZE) --json-out $(LSP_LATENCY_JSON)
 
 snapshot-review:
 	$(CARGO) insta review
