@@ -222,6 +222,141 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         else_state = self._current_scope_state()
         self._merge_current_scope_states(body_state, else_state)
 
+    def visit_For(self, node: ast.For) -> None:
+        self._visit_loop(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self._visit_loop(node)
+
+    def _visit_loop(self, node: ast.For | ast.AsyncFor) -> None:
+        self.visit(node.iter)
+        before = self._current_scope_state()
+        self._bind_assignment_target(node.target, None)
+        for statement in node.body:
+            self.visit(statement)
+        body_state = self._current_scope_state()
+        self._merge_current_scope_states(before, body_state)
+        without_else = self._current_scope_state()
+        for statement in node.orelse:
+            self.visit(statement)
+        else_state = self._current_scope_state()
+        self._merge_current_scope_states(without_else, else_state)
+
+    def visit_While(self, node: ast.While) -> None:
+        self.visit(node.test)
+        before = self._current_scope_state()
+        for statement in node.body:
+            self.visit(statement)
+        body_state = self._current_scope_state()
+        self._merge_current_scope_states(before, body_state)
+        without_else = self._current_scope_state()
+        for statement in node.orelse:
+            self.visit(statement)
+        else_state = self._current_scope_state()
+        self._merge_current_scope_states(without_else, else_state)
+
+    def visit_Try(self, node: ast.Try) -> None:
+        self._visit_try(node)
+
+    def visit_TryStar(self, node: ast.AST) -> None:
+        self._visit_try(node)
+
+    def _visit_try(self, node: ast.AST) -> None:
+        before = self._current_scope_state()
+        for statement in getattr(node, "body", ()):
+            self.visit(statement)
+        for statement in getattr(node, "orelse", ()):
+            self.visit(statement)
+        states = [before, self._current_scope_state()]
+        for handler in getattr(node, "handlers", ()):
+            self._restore_current_scope_state(before)
+            if handler.type is not None:
+                self.visit(handler.type)
+            if handler.name is not None:
+                self._bind_runtime_name(handler.name, None)
+            for statement in handler.body:
+                self.visit(statement)
+            if handler.name is not None:
+                self._unbind_runtime_name(handler.name)
+            states.append(self._current_scope_state())
+        self._merge_multiple_current_scope_states(states)
+        for statement in getattr(node, "finalbody", ()):
+            self.visit(statement)
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> None:
+        if not node.values:
+            return
+        self.visit(node.values[0])
+        for value in node.values[1:]:
+            before = self._current_scope_state()
+            self.visit(value)
+            after = self._current_scope_state()
+            self._merge_current_scope_states(before, after)
+
+    def visit_IfExp(self, node: ast.IfExp) -> None:
+        self.visit(node.test)
+        before = self._current_scope_state()
+        self.visit(node.body)
+        body_state = self._current_scope_state()
+        self._restore_current_scope_state(before)
+        self.visit(node.orelse)
+        else_state = self._current_scope_state()
+        self._merge_current_scope_states(body_state, else_state)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        for default in [*node.args.defaults, *node.args.kw_defaults]:
+            if default is not None:
+                self.visit(default)
+        before = self._current_scope_state()
+        self.visit(node.body)
+        self._restore_current_scope_state(before)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension(node, (node.elt,))
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension(node, (node.elt,))
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension(node, (node.elt,))
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._visit_comprehension(node, (node.key, node.value))
+
+    def _visit_comprehension(
+        self,
+        node: ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp,
+        values: tuple[ast.expr, ...],
+    ) -> None:
+        if not node.generators:
+            return
+        self.visit(node.generators[0].iter)
+        before = self._current_scope_state()
+        for index, generator in enumerate(node.generators):
+            if index > 0:
+                self.visit(generator.iter)
+            for condition in generator.ifs:
+                self.visit(condition)
+        for value in values:
+            self.visit(value)
+        after = self._current_scope_state()
+        self._merge_current_scope_states(before, after)
+
+    def visit_Match(self, node: ast.AST) -> None:
+        self.visit(getattr(node, "subject"))
+        before = self._current_scope_state()
+        states = [before]
+        for case in getattr(node, "cases", ()):
+            self._restore_current_scope_state(before)
+            for name in _match_pattern_names(case.pattern):
+                self._bind_runtime_name(name, None)
+            if case.guard is not None:
+                self.visit(case.guard)
+            for statement in case.body:
+                self.visit(statement)
+            states.append(self._current_scope_state())
+        self._merge_multiple_current_scope_states(states)
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         for decorator in node.decorator_list:
             consumer = self._decorator_consumer(decorator)
@@ -289,6 +424,10 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
         self.visit(node.value)
         self._bind_assignment_target(node.target, None)
+
+    def visit_Delete(self, node: ast.Delete) -> None:
+        for target in node.targets:
+            self._unbind_assignment_target(target)
 
     def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
         self.visit(node.value)
@@ -374,6 +513,20 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         else:
             self._scopes[-1].resolved_names[name] = resolved
 
+    def _unbind_assignment_target(self, target: ast.expr) -> None:
+        if isinstance(target, ast.Name):
+            self._unbind_runtime_name(target.id)
+            return
+        if isinstance(target, (ast.List, ast.Tuple)):
+            for element in target.elts:
+                self._unbind_assignment_target(element)
+
+    def _unbind_runtime_name(self, name: str) -> None:
+        if not self._scopes:
+            return
+        self._scopes[-1].definitely_bound_names.discard(name)
+        self._scopes[-1].resolved_names.pop(name, None)
+
     def _current_scope_state(self) -> tuple[set[str], dict[str, str]]:
         if not self._scopes:
             return set(), {}
@@ -407,6 +560,19 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         }
         self._scopes[-1].definitely_bound_names = common_bound
         self._scopes[-1].resolved_names = common_resolved
+
+    def _merge_multiple_current_scope_states(
+        self,
+        states: list[tuple[set[str], dict[str, str]]],
+    ) -> None:
+        if not states:
+            return
+        merged = states[0]
+        for state in states[1:]:
+            self._restore_current_scope_state(merged)
+            self._merge_current_scope_states(merged, state)
+            merged = self._current_scope_state()
+        self._restore_current_scope_state(merged)
 
     def _decorator_consumer(self, decorator: ast.expr) -> AnnotationConsumer | None:
         expression = decorator.func if isinstance(decorator, ast.Call) else decorator
@@ -652,6 +818,16 @@ def _annotation_names(annotation: ast.expr) -> set[str]:
         except SyntaxError:
             return set()
     return {child.id for child in ast.walk(annotation) if isinstance(child, ast.Name)}
+
+
+def _match_pattern_names(pattern: ast.AST) -> set[str]:
+    return {
+        name
+        for child in ast.walk(pattern)
+        if type(child).__name__ in {"MatchAs", "MatchStar"}
+        for name in [getattr(child, "name", None)]
+        if name is not None
+    }
 
 
 def _is_type_checking_guard(test: ast.expr) -> bool:

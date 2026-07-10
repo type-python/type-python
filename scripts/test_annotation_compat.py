@@ -270,6 +270,53 @@ class AnnotationCompatTests(unittest.TestCase):
         self.assertTrue(any("User" in finding.message for finding in findings))
         self.assertTrue(any("Group" in finding.message for finding in findings))
 
+    def test_conditional_control_flow_bindings_do_not_hide_type_only_names(self) -> None:
+        cases = {
+            "try body": "try:\n    User = object\nexcept Exception:\n    pass\n",
+            "except handler": "try:\n    pass\nexcept Exception:\n    User = object\n",
+            "while body": "while condition():\n    User = object\n    break\n",
+            "for body": "for _ in []:\n    User = object\n",
+            "short circuit": "False and (User := object)\n",
+            "comprehension": "[(User := object) for _ in []]\n",
+            "lambda body": "factory = lambda: (User := object)\n",
+            "delete": "User = object\ndel User\n",
+        }
+        prefix = (
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from models import User\n"
+        )
+        suffix = "def load(item: 'User') -> None:\n    return None\n"
+
+        for name, statements in cases.items():
+            with self.subTest(name=name):
+                audit = annotation_compat.audit_source(prefix + statements + suffix)
+                findings = [
+                    finding for finding in audit.findings if finding.code == "TPY-A002"
+                ]
+                self.assertEqual(len(findings), 1, audit.findings)
+                self.assertIn("User", findings[0].message)
+
+    def test_definite_control_flow_bindings_satisfy_type_only_names(self) -> None:
+        cases = {
+            "both if branches": (
+                "if condition():\n    User = object\nelse:\n    User = object\n"
+            ),
+            "finally": "try:\n    pass\nfinally:\n    User = object\n",
+            "first bool operand": "(User := object) and False\n",
+        }
+        prefix = (
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from models import User\n"
+        )
+        suffix = "def load(item: 'User') -> None:\n    return None\n"
+
+        for name, statements in cases.items():
+            with self.subTest(name=name):
+                audit = annotation_compat.audit_source(prefix + statements + suffix)
+                self.assertTrue(audit.safe_for_runtime_introspection, audit.findings)
+
     def test_type_checking_guard_import_aliases_are_resolved(self) -> None:
         audit = annotation_compat.audit_source(
             "import typing as t\n"
