@@ -878,12 +878,105 @@ class _TypeCheckingImportCollector(ast.NodeVisitor):
 
 
 def _annotation_names(annotation: ast.expr) -> set[str]:
+    return _annotation_names_impl(annotation, set(), 0)
+
+
+def _annotation_names_impl(
+    annotation: ast.expr,
+    seen_forward_refs: set[str],
+    depth: int,
+) -> set[str]:
+    if depth > 20:
+        return set()
     if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
-        try:
-            annotation = ast.parse(annotation.value, mode="eval").body
-        except SyntaxError:
+        return _parsed_forward_ref_names(annotation.value, seen_forward_refs, depth)
+
+    names = {child.id for child in ast.walk(annotation) if isinstance(child, ast.Name)}
+    names.update(_nested_forward_ref_names(annotation, seen_forward_refs, depth))
+    return names
+
+
+def _parsed_forward_ref_names(
+    value: str,
+    seen_forward_refs: set[str],
+    depth: int,
+) -> set[str]:
+    if value in seen_forward_refs:
+        return set()
+    seen_forward_refs.add(value)
+    try:
+        parsed = ast.parse(value, mode="eval").body
+    except SyntaxError:
+        return set()
+    return _annotation_names_impl(parsed, seen_forward_refs, depth + 1)
+
+
+def _nested_forward_ref_names(
+    expression: ast.expr,
+    seen_forward_refs: set[str],
+    depth: int,
+) -> set[str]:
+    if isinstance(expression, ast.Constant):
+        return set()
+    if isinstance(expression, ast.Subscript):
+        dotted = _dotted_name(expression.value)
+        elements = (
+            list(expression.slice.elts)
+            if isinstance(expression.slice, (ast.List, ast.Tuple))
+            else [expression.slice]
+        )
+        if dotted in {"Literal", "typing.Literal", "typing_extensions.Literal"}:
             return set()
-    return {child.id for child in ast.walk(annotation) if isinstance(child, ast.Name)}
+        if dotted in {"Annotated", "typing.Annotated", "typing_extensions.Annotated"}:
+            elements = elements[:1]
+        return set().union(
+            *(
+                _type_position_forward_ref_names(element, seen_forward_refs, depth)
+                for element in elements
+            )
+        )
+    if isinstance(expression, ast.Call) and _dotted_name(expression.func) in {
+        "ForwardRef",
+        "typing.ForwardRef",
+        "typing_extensions.ForwardRef",
+    }:
+        if expression.args:
+            return _type_position_forward_ref_names(
+                expression.args[0],
+                seen_forward_refs,
+                depth,
+            )
+        return set()
+    if isinstance(expression, ast.BinOp):
+        return _type_position_forward_ref_names(
+            expression.left,
+            seen_forward_refs,
+            depth,
+        ) | _type_position_forward_ref_names(
+            expression.right,
+            seen_forward_refs,
+            depth,
+        )
+    if isinstance(expression, (ast.List, ast.Tuple)):
+        return set().union(
+            *(
+                _type_position_forward_ref_names(element, seen_forward_refs, depth)
+                for element in expression.elts
+            )
+        )
+    if isinstance(expression, ast.Starred):
+        return _type_position_forward_ref_names(expression.value, seen_forward_refs, depth)
+    return set()
+
+
+def _type_position_forward_ref_names(
+    expression: ast.expr,
+    seen_forward_refs: set[str],
+    depth: int,
+) -> set[str]:
+    if isinstance(expression, ast.Constant) and isinstance(expression.value, str):
+        return _parsed_forward_ref_names(expression.value, seen_forward_refs, depth)
+    return _nested_forward_ref_names(expression, seen_forward_refs, depth)
 
 
 def _match_pattern_names(pattern: ast.AST) -> set[str]:

@@ -251,6 +251,32 @@ class AnnotationCompatTests(unittest.TestCase):
         self.assertEqual({finding.code for finding in audit.findings}, {"TPY-A002"})
         self.assertIn("TYPE_CHECKING-only", audit.findings[0].message)
 
+    def test_audit_source_flags_nested_string_forward_references(self) -> None:
+        audit = annotation_compat.audit_source(
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from models import User\n\n"
+            "def optional(value: Optional['User']) -> None:\n    return None\n"
+            "def collection(value: list['User']) -> None:\n    return None\n"
+            "def explicit(value: ForwardRef('User')) -> None:\n    return None\n"
+            "def annotated(value: Annotated['User', 'User']) -> None:\n    return None\n"
+        )
+
+        findings = [finding for finding in audit.findings if finding.code == "TPY-A002"]
+        self.assertEqual(len(findings), 4, audit.findings)
+        self.assertTrue(all("User" in finding.message for finding in findings))
+
+    def test_audit_source_ignores_string_values_in_annotation_metadata(self) -> None:
+        audit = annotation_compat.audit_source(
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from models import User\n\n"
+            "def literal(value: Literal['User']) -> None:\n    return None\n"
+            "def annotated(value: Annotated[int, 'User']) -> None:\n    return None\n"
+        )
+
+        self.assertFalse(any(finding.code == "TPY-A002" for finding in audit.findings))
+
     def test_audit_source_flags_all_type_checking_only_bindings(self) -> None:
         audit = annotation_compat.audit_source(
             "from typing import TYPE_CHECKING\n"
