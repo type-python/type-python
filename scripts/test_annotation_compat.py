@@ -350,6 +350,48 @@ class AnnotationCompatTests(unittest.TestCase):
         findings = [finding for finding in audit.findings if finding.code == "TPY-A002"]
         self.assertEqual(len(findings), 2)
 
+    def test_type_checking_guards_respect_shadowing_and_import_identity(self) -> None:
+        sources = {
+            "unimported name": (
+                "TYPE_CHECKING = True\n"
+                "if TYPE_CHECKING:\n"
+                "    from models import User\n"
+            ),
+            "shadowed typing import": (
+                "from typing import TYPE_CHECKING\n"
+                "TYPE_CHECKING = True\n"
+                "if TYPE_CHECKING:\n"
+                "    from models import User\n"
+            ),
+            "unrelated typing alias": (
+                "import fake as typing\n"
+                "if typing.TYPE_CHECKING:\n"
+                "    from models import User\n"
+            ),
+            "function parameter": (
+                "from typing import TYPE_CHECKING\n"
+                "def outer(TYPE_CHECKING):\n"
+                "    if TYPE_CHECKING:\n"
+                "        from models import User\n"
+                "    def load(item: 'User') -> None:\n"
+                "        return None\n"
+                "    return load\n"
+            ),
+        }
+
+        for name, prefix in sources.items():
+            with self.subTest(name=name):
+                suffix = (
+                    ""
+                    if name == "function parameter"
+                    else "def load(item: 'User') -> None:\n    return None\n"
+                )
+                audit = annotation_compat.audit_source(prefix + suffix)
+                self.assertFalse(
+                    any(finding.code == "TPY-A002" for finding in audit.findings),
+                    audit.findings,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
