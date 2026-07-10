@@ -301,6 +301,8 @@ interface Closeable:
 
 The CLI crate (`typepython_cli`) contains end-to-end tests that exercise the full pipeline. These tests create temporary project directories with `typepython.toml` and `.tpy` source files, then run the full init/check/build/verify flow.
 
+Most focused checker tests intentionally use `CheckerOptions::permissive_test_default()` to isolate one rule at a time. `crates/typepython_checking/src/tests/production_defaults.rs` is the required behavior-level guard for the real `check(...)` entrypoint: it verifies strict unsafe boundaries, no implicit dynamic fallback, and equivalence between the public, structured, and config-derived Core defaults.
+
 The downstream checker smoke suite is driven by `test-fixtures/downstream-checkers/matrix.json`, which declares each fixture, target Python version, and expected generated-stub fragments. Keep new downstream checker cases in that matrix rather than hard-coding them in the script.
 
 ### Coverage
