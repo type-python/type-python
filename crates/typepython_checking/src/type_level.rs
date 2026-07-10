@@ -281,7 +281,7 @@ pub(crate) fn evaluate_restricted_type_level_aliases(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-) -> Vec<(String, Result<TypeLevelValue, TypeLevelEvalError>)> {
+) -> Vec<(String, Option<usize>, Result<TypeLevelValue, TypeLevelEvalError>)> {
     node.declarations
         .iter()
         .filter(|declaration| declaration.kind == DeclarationKind::TypeAlias)
@@ -290,7 +290,11 @@ pub(crate) fn evaluate_restricted_type_level_aliases(
             let semantic = lower_type_expr(alias_value.expr.clone());
             contains_restricted_type_level_form(&semantic).then(|| {
                 let mut evaluator = TypeLevelEvaluator::new(context, node, nodes);
-                (declaration.name.clone(), evaluator.evaluate_type(&semantic))
+                (
+                    declaration.name.clone(),
+                    declaration.type_alias_line(),
+                    evaluator.evaluate_type(&semantic),
+                )
             })
         })
         .collect()
@@ -303,8 +307,9 @@ pub(crate) fn restricted_type_level_alias_diagnostics(
 ) -> Vec<Diagnostic> {
     evaluate_restricted_type_level_aliases(context, node, nodes)
         .into_iter()
-        .filter_map(|(alias, result)| {
+        .filter_map(|(alias, line, result)| {
             result.err().map(|error| {
+                let line = line.unwrap_or(1);
                 Diagnostic::error(
                     "TPY4027",
                     format!(
@@ -312,7 +317,7 @@ pub(crate) fn restricted_type_level_alias_diagnostics(
                         type_level_error_message(&error),
                     ),
                 )
-                .with_span(Span::new(node.module_path.display().to_string(), 1, 1, 1, 1))
+                .with_span(Span::new(node.module_path.display().to_string(), line, 1, line, 1))
                 .with_note("restricted type-level forms must fully reduce to standard Python typing before emit")
             })
         })

@@ -1580,6 +1580,7 @@ fn declaration_semantics_prefer_structured_metadata_over_legacy_detail_text() {
                     style: typepython_syntax::UnionStyle::Shorthand,
                 },
             ),
+            line: None,
         },
         name: String::from("MaybeInt"),
         kind: DeclarationKind::TypeAlias,

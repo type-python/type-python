@@ -546,7 +546,10 @@ fn collections_abc_prelude_node() -> ModuleNode {
 
 fn prelude_type_alias(name: &str, value_text: &str) -> Declaration {
     Declaration {
-        metadata: DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new(value_text) },
+        metadata: DeclarationMetadata::TypeAlias {
+            value: BoundTypeExpr::new(value_text),
+            line: None,
+        },
         name: String::from(name),
         kind: DeclarationKind::TypeAlias,
         value_type_expr: None,

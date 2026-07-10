@@ -58,7 +58,7 @@ pub(super) fn value_metadata(annotation_text: &str) -> DeclarationMetadata {
 }
 
 pub(super) fn type_alias_metadata(value_text: &str) -> DeclarationMetadata {
-    DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new(value_text) }
+    DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new(value_text), line: None }
 }
 
 pub(super) fn import_metadata(target_text: &str) -> DeclarationMetadata {
@@ -735,6 +735,7 @@ fn semantic_incremental_summary_prefers_structured_export_and_fact_types() {
                 declaration! {
                     metadata: typepython_binding::DeclarationMetadata::TypeAlias {
                         value: typepython_binding::BoundTypeExpr::from_expr(maybe_int.clone()),
+                        line: None,
                     },
                     name: String::from("MaybeInt"),
                     kind: DeclarationKind::TypeAlias,

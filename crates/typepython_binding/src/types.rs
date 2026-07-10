@@ -165,6 +165,8 @@ pub enum DeclarationMetadata {
     None,
     TypeAlias {
         value: BoundTypeExpr,
+        /// 1-based declaration line when the alias originates from parsed source.
+        line: Option<usize>,
     },
     Callable {
         signature: BoundCallableSignature,
@@ -770,7 +772,7 @@ impl Declaration {
     pub fn rendered_detail(&self) -> String {
         match &self.metadata {
             DeclarationMetadata::None => String::new(),
-            DeclarationMetadata::TypeAlias { value } => value.render(),
+            DeclarationMetadata::TypeAlias { value, .. } => value.render(),
             DeclarationMetadata::Callable { signature } => signature.rendered(),
             DeclarationMetadata::Import { target } => target.raw_target.clone(),
             DeclarationMetadata::Value { annotation } => {
@@ -793,7 +795,16 @@ impl Declaration {
     #[must_use]
     pub fn type_alias_value(&self) -> Option<&BoundTypeExpr> {
         match &self.metadata {
-            DeclarationMetadata::TypeAlias { value } => Some(value),
+            DeclarationMetadata::TypeAlias { value, .. } => Some(value),
+            _ => None,
+        }
+    }
+
+    /// Returns the source line for a parsed type alias declaration.
+    #[must_use]
+    pub fn type_alias_line(&self) -> Option<usize> {
+        match &self.metadata {
+            DeclarationMetadata::TypeAlias { line, .. } => *line,
             _ => None,
         }
     }

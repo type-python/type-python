@@ -20,6 +20,8 @@ fn check_accepts_supported_restricted_type_level_shape_aliases() {
 #[test]
 fn check_reports_unsupported_restricted_type_level_alias() {
     let result = check_temp_typepython_source(concat!(
+        "# module prelude\n",
+        "\n",
         "class User(TypedDict):\n",
         "    name: str\n\n",
         "typealias Names = MapValues[User, Callable]\n",
@@ -28,6 +30,13 @@ fn check_reports_unsupported_restricted_type_level_alias() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4027"), "{rendered}");
     assert!(rendered.contains("unsupported form `MapValues[Callable]`"), "{rendered}");
+    let diagnostic = result
+        .diagnostics
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "TPY4027")
+        .expect("type-level diagnostic should be present");
+    assert_eq!(diagnostic.span.as_ref().map(|span| span.line), Some(6));
 }
 
 #[test]

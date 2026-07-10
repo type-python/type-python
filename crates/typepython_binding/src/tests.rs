@@ -13,8 +13,8 @@ use typepython_syntax::{
     SyntaxTree, TypeAliasStatement, TypeParam, TypeParamKind, ValueStatement,
 };
 
-fn metadata_type_alias(text: &str) -> DeclarationMetadata {
-    DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new(text) }
+fn metadata_type_alias(text: &str, line: usize) -> DeclarationMetadata {
+    DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new(text), line: Some(line) }
 }
 
 fn metadata_value(annotation: Option<&str>) -> DeclarationMetadata {
@@ -61,7 +61,10 @@ fn declaration_text_accessors_prefer_structured_metadata() {
     assert_eq!(value.value_annotation_text().as_deref(), Some("list[int]"));
 
     let alias = Declaration {
-        metadata: DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new("int | None") },
+        metadata: DeclarationMetadata::TypeAlias {
+            value: BoundTypeExpr::new("int | None"),
+            line: None,
+        },
         name: String::from("MaybeInt"),
         kind: DeclarationKind::TypeAlias,
         value_type_expr: None,
@@ -306,7 +309,7 @@ fn bind_collects_top_level_aliases_classes_and_functions() {
         table.declarations,
         vec![
             Declaration {
-                metadata: metadata_type_alias("Box[T]"),
+                metadata: metadata_type_alias("Box[T]", 1),
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
                 value_type_expr: None,

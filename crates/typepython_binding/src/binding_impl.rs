@@ -407,6 +407,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                     .clone()
                     .map(BoundTypeExpr::from_expr)
                     .unwrap_or_else(|| BoundTypeExpr::new(statement.value.clone())),
+                line: Some(statement.line),
             },
             value_type_expr: None,
             method_kind: None,
