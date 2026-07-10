@@ -33,7 +33,7 @@ pub(super) use super::verification::{
 pub(super) use super::{
     CLI_JSON_SCHEMA_VERSION, Cli, Command, InitArgs, OutputFormat, RunArgs, bytecode_path_for,
     embedded_config_template, exit_code_for_error, init_project, plan_watch_target_update,
-    render_error_json, requested_output_format, run_watch_rebuild,
+    project_start_dir, render_error_json, requested_output_format, run_watch_rebuild,
 };
 pub(super) use crate::cli::{
     AdapterValidateArgs, ApiDiffArgs, CleanArgs, CompatArgs, MigrateArgs, TypeHealthArgs,
@@ -87,6 +87,37 @@ fn malformed_cli_still_detects_an_explicit_json_format() {
         OutputFormat::Json
     );
     assert_eq!(requested_output_format(["typepython", "check", "--unknown"]), OutputFormat::Text);
+}
+
+#[test]
+fn relative_project_paths_resolve_to_absolute_directories() {
+    let current_dir = env::current_dir().expect("current directory should resolve");
+    let project_dir =
+        current_dir.join(format!(".typepython/relative-project-path-test-{}", std::process::id()));
+    fs::create_dir_all(&project_dir).expect("test project directory should be created");
+    let config_path = project_dir.join("typepython.toml");
+    fs::write(&config_path, "[project]\nsrc = [\"src\"]\n")
+        .expect("test configuration should be written");
+    let relative_config = config_path
+        .strip_prefix(&current_dir)
+        .expect("test path should be under the current directory")
+        .to_path_buf();
+    let relative_project = project_dir
+        .strip_prefix(&current_dir)
+        .expect("test directory should be under the current directory")
+        .to_path_buf();
+
+    let resolved = project_start_dir(Some(&relative_config)).expect("project path should resolve");
+    let resolved_directory =
+        project_start_dir(Some(&relative_project)).expect("project directory should resolve");
+
+    assert!(resolved.is_absolute());
+    assert_eq!(
+        resolved,
+        fs::canonicalize(&project_dir).expect("test project directory should canonicalize")
+    );
+    assert_eq!(resolved_directory, resolved);
+    fs::remove_dir_all(&project_dir).expect("test project directory should be removed");
 }
 
 #[test]

@@ -484,13 +484,20 @@ fn load_project_without_python_executable_validation(
 }
 
 fn project_start_dir(project: Option<&PathBuf>) -> Result<PathBuf> {
-    Ok(match project {
-        Some(path) if path.is_file() => {
-            path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."))
+    let candidate = match project {
+        Some(path) if path.is_absolute() => path.clone(),
+        Some(path) => {
+            env::current_dir().context("unable to determine current directory")?.join(path)
         }
-        Some(path) => path.clone(),
         None => env::current_dir().context("unable to determine current directory")?,
-    })
+    };
+    let start = if candidate.is_file() {
+        candidate.parent().map(Path::to_path_buf).unwrap_or(candidate)
+    } else {
+        candidate
+    };
+    fs::canonicalize(&start)
+        .with_context(|| format!("unable to resolve project path {}", start.display()))
 }
 
 fn write_file(path: &Path, content: &str, force: bool) -> Result<()> {
