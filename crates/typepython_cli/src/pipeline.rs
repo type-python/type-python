@@ -1,7 +1,9 @@
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
+    env,
+    ffi::OsString,
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::{Command as ProcessCommand, ExitCode},
 };
 
@@ -192,8 +194,18 @@ pub(crate) fn runtime_write_diagnostic(error: &anyhow::Error) -> Option<Diagnost
 
 pub(crate) fn clean_project(args: CleanArgs) -> Result<ExitCode> {
     let config = load_project(args.project.as_ref())?;
-    let out_dir = config.resolve_relative_path(&config.config.project.out_dir);
-    let cache_dir = config.resolve_relative_path(&config.config.project.cache_dir);
+    // Validate every target before deleting anything so a bad second target cannot
+    // leave an otherwise valid output directory partially cleaned.
+    let out_dir = validated_clean_target(
+        &config.config_dir,
+        &config.resolve_relative_path(&config.config.project.out_dir),
+        "project.out_dir",
+    )?;
+    let cache_dir = validated_clean_target(
+        &config.config_dir,
+        &config.resolve_relative_path(&config.config.project.cache_dir),
+        "project.cache_dir",
+    )?;
 
     remove_dir_if_exists(&out_dir)?;
     remove_dir_if_exists(&cache_dir)?;
@@ -203,6 +215,167 @@ pub(crate) fn clean_project(args: CleanArgs) -> Result<ExitCode> {
     println!("  removed: {}", cache_dir.display());
 
     Ok(ExitCode::SUCCESS)
+}
+
+pub(crate) fn validated_clean_target(
+    project_dir: &Path,
+    target: &Path,
+    field: &str,
+) -> Result<PathBuf> {
+    let lexical_project_dir = absolute_lexical_path(project_dir)?;
+    let lexical_target = absolute_lexical_path(target)?;
+
+    reject_protected_clean_target(&lexical_project_dir, &lexical_target, field, "configured")?;
+
+    let resolved_project_dir = fs::canonicalize(&lexical_project_dir).with_context(|| {
+        format!(
+            "unable to resolve TypePython project directory {} before cleaning",
+            lexical_project_dir.display()
+        )
+    })?;
+    let resolved_project_dir = normalize_lexical_path(&resolved_project_dir);
+    let resolved_target = resolve_existing_path_prefix(&lexical_target).with_context(|| {
+        format!("unable to safely resolve {field} {} before cleaning", lexical_target.display())
+    })?;
+
+    reject_protected_clean_target(&resolved_project_dir, &resolved_target, field, "resolved")?;
+
+    Ok(lexical_target)
+}
+
+fn reject_protected_clean_target(
+    project_dir: &Path,
+    target: &Path,
+    field: &str,
+    path_kind: &str,
+) -> Result<()> {
+    if target == filesystem_root(target) {
+        anyhow::bail!(
+            "refusing to clean {field}: {path_kind} path {} is a filesystem root",
+            target.display()
+        );
+    }
+
+    if known_home_directories().iter().any(|home| home == target) {
+        anyhow::bail!(
+            "refusing to clean {field}: {path_kind} path {} is a home directory",
+            target.display()
+        );
+    }
+
+    if target == project_dir {
+        anyhow::bail!(
+            "refusing to clean {field}: {path_kind} path {} is the project root",
+            target.display()
+        );
+    }
+
+    if project_dir.starts_with(target) {
+        anyhow::bail!(
+            "refusing to clean {field}: {path_kind} path {} is an ancestor of the project root {}",
+            target.display(),
+            project_dir.display()
+        );
+    }
+
+    if !target.starts_with(project_dir) {
+        anyhow::bail!(
+            "refusing to clean {field}: {path_kind} path {} is outside the project root {}",
+            target.display(),
+            project_dir.display()
+        );
+    }
+
+    Ok(())
+}
+
+fn absolute_lexical_path(path: &Path) -> Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()
+            .context("unable to determine current directory before cleaning")?
+            .join(path)
+    };
+    Ok(normalize_lexical_path(&absolute))
+}
+
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    let mut has_root = false;
+
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => {
+                normalized.push(component.as_os_str());
+                has_root = true;
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(normalized.components().next_back(), Some(Component::Normal(_))) {
+                    normalized.pop();
+                } else if !has_root {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+
+    normalized
+}
+
+fn resolve_existing_path_prefix(path: &Path) -> Result<PathBuf> {
+    let mut existing_prefix = path.to_path_buf();
+    let mut missing_components: Vec<OsString> = Vec::new();
+
+    loop {
+        match fs::canonicalize(&existing_prefix) {
+            Ok(mut resolved) => {
+                for component in missing_components.into_iter().rev() {
+                    resolved.push(component);
+                }
+                return Ok(normalize_lexical_path(&resolved));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let component = existing_prefix.file_name().ok_or_else(|| {
+                    anyhow::anyhow!("no existing parent could be resolved for {}", path.display())
+                })?;
+                missing_components.push(component.to_os_string());
+                existing_prefix.pop();
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+fn filesystem_root(path: &Path) -> &Path {
+    path.ancestors().last().unwrap_or(path)
+}
+
+fn known_home_directories() -> Vec<PathBuf> {
+    let mut homes = Vec::new();
+    for variable in ["HOME", "USERPROFILE"] {
+        if let Some(home) = env::var_os(variable) {
+            let path = PathBuf::from(home);
+            if let Ok(path) = absolute_lexical_path(&path) {
+                homes.push(path);
+            }
+        }
+    }
+
+    if let (Some(drive), Some(home_path)) = (env::var_os("HOMEDRIVE"), env::var_os("HOMEPATH")) {
+        let mut home = PathBuf::from(drive);
+        home.push(home_path);
+        if let Ok(path) = absolute_lexical_path(&home) {
+            homes.push(path);
+        }
+    }
+
+    homes.sort();
+    homes.dedup();
+    homes
 }
 
 pub(crate) fn run_lsp(args: RunArgs) -> Result<ExitCode> {

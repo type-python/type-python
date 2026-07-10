@@ -1,6 +1,173 @@
 use super::*;
 
 #[test]
+fn clean_project_removes_only_valid_project_artifact_directories() {
+    let project_dir = temp_project_dir("clean_project_removes_only_valid_artifact_directories");
+    fs::write(
+        project_dir.join("typepython.toml"),
+        "[project]\nsrc = [\"src\"]\nout_dir = \"artifacts/build\"\ncache_dir = \"artifacts/cache\"\n",
+    )
+    .expect("test setup should succeed");
+    fs::create_dir_all(project_dir.join("artifacts/build")).expect("test setup should succeed");
+    fs::create_dir_all(project_dir.join("artifacts/cache")).expect("test setup should succeed");
+    fs::write(project_dir.join("keep.txt"), "keep\n").expect("test setup should succeed");
+
+    let result = clean_project(CleanArgs { project: Some(project_dir.clone()) });
+
+    assert_eq!(result.expect("clean should succeed"), ExitCode::SUCCESS);
+    assert!(!project_dir.join("artifacts/build").exists());
+    assert!(!project_dir.join("artifacts/cache").exists());
+    assert_eq!(
+        fs::read_to_string(project_dir.join("keep.txt")).expect("sentinel should remain"),
+        "keep\n"
+    );
+    remove_temp_project_dir(&project_dir);
+}
+
+#[test]
+fn clean_project_refuses_project_root_without_deleting_it() {
+    let container = temp_project_dir("clean_project_refuses_project_root");
+    let project_dir = container.join("project");
+    fs::create_dir_all(&project_dir).expect("test setup should succeed");
+    fs::write(
+        project_dir.join("typepython.toml"),
+        "[project]\nsrc = [\"src\"]\nout_dir = \".\"\ncache_dir = \"../cache\"\n",
+    )
+    .expect("test setup should succeed");
+    fs::write(project_dir.join("keep.txt"), "keep\n").expect("test setup should succeed");
+
+    let error = clean_project(CleanArgs { project: Some(project_dir.clone()) })
+        .expect_err("clean should refuse the project root");
+
+    assert!(error.to_string().contains("project.out_dir"));
+    assert!(error.to_string().contains("project root"));
+    assert!(project_dir.join("typepython.toml").exists());
+    assert!(project_dir.join("keep.txt").exists());
+    remove_temp_project_dir(&container);
+}
+
+#[test]
+fn clean_project_refuses_project_ancestor_without_deleting_it() {
+    let container = temp_project_dir("clean_project_refuses_project_ancestor");
+    let project_dir = container.join("project");
+    let outside_name = format!(
+        "{}-outside-cache",
+        container.file_name().and_then(|name| name.to_str()).expect("temp path should be UTF-8")
+    );
+    let outside_cache =
+        container.parent().expect("container should have a parent").join(&outside_name);
+    fs::create_dir_all(&project_dir).expect("test setup should succeed");
+    fs::create_dir_all(&outside_cache).expect("test setup should succeed");
+    fs::write(
+        project_dir.join("typepython.toml"),
+        format!(
+            "[project]\nsrc = [\"src\"]\nout_dir = \"..\"\ncache_dir = \"../../{outside_name}\"\n"
+        ),
+    )
+    .expect("test setup should succeed");
+    fs::write(container.join("keep.txt"), "keep\n").expect("test setup should succeed");
+
+    let error = clean_project(CleanArgs { project: Some(project_dir.clone()) })
+        .expect_err("clean should refuse a project ancestor");
+
+    assert!(error.to_string().contains("ancestor of the project root"));
+    assert!(container.join("keep.txt").exists());
+    assert!(outside_cache.exists());
+    remove_temp_project_dir(&container);
+    remove_temp_project_dir(&outside_cache);
+}
+
+#[test]
+fn clean_project_refuses_outside_directory() {
+    let container = temp_project_dir("clean_project_refuses_outside_directory");
+    let project_dir = container.join("project");
+    let outside_dir = container.join("external-output");
+    fs::create_dir_all(&project_dir).expect("test setup should succeed");
+    fs::create_dir_all(&outside_dir).expect("test setup should succeed");
+    fs::write(outside_dir.join("keep.txt"), "keep\n").expect("test setup should succeed");
+    fs::write(
+        project_dir.join("typepython.toml"),
+        "[project]\nsrc = [\"src\"]\nout_dir = \"../external-output\"\ncache_dir = \"cache\"\n",
+    )
+    .expect("test setup should succeed");
+
+    let error = clean_project(CleanArgs { project: Some(project_dir.clone()) })
+        .expect_err("clean should refuse an outside directory");
+
+    assert!(error.to_string().contains("outside the project root"));
+    assert!(outside_dir.join("keep.txt").exists());
+    remove_temp_project_dir(&container);
+}
+
+#[test]
+fn clean_project_validates_all_targets_before_deleting_anything() {
+    let container = temp_project_dir("clean_project_validates_all_targets_first");
+    let project_dir = container.join("project");
+    let out_dir = project_dir.join("build");
+    let outside_cache = container.join("external-cache");
+    fs::create_dir_all(&out_dir).expect("test setup should succeed");
+    fs::create_dir_all(&outside_cache).expect("test setup should succeed");
+    fs::write(out_dir.join("keep.txt"), "keep\n").expect("test setup should succeed");
+    fs::write(
+        project_dir.join("typepython.toml"),
+        "[project]\nsrc = [\"src\"]\nout_dir = \"build\"\ncache_dir = \"../external-cache\"\n",
+    )
+    .expect("test setup should succeed");
+
+    let error = clean_project(CleanArgs { project: Some(project_dir.clone()) })
+        .expect_err("clean should refuse an outside cache directory");
+
+    assert!(error.to_string().contains("project.cache_dir"));
+    assert!(out_dir.join("keep.txt").exists());
+    assert!(outside_cache.exists());
+    remove_temp_project_dir(&container);
+}
+
+#[cfg(unix)]
+#[test]
+fn clean_project_refuses_directory_reached_through_outside_symlink() {
+    let container = temp_project_dir("clean_project_refuses_outside_symlink");
+    let project_dir = container.join("project");
+    let outside_dir = container.join("external-output");
+    fs::create_dir_all(&project_dir).expect("test setup should succeed");
+    fs::create_dir_all(outside_dir.join("build")).expect("test setup should succeed");
+    fs::write(outside_dir.join("build/keep.txt"), "keep\n").expect("test setup should succeed");
+    std::os::unix::fs::symlink(&outside_dir, project_dir.join("linked-output"))
+        .expect("test setup should succeed");
+    fs::write(
+        project_dir.join("typepython.toml"),
+        "[project]\nsrc = [\"src\"]\nout_dir = \"linked-output/build\"\ncache_dir = \"cache\"\n",
+    )
+    .expect("test setup should succeed");
+
+    let error = clean_project(CleanArgs { project: Some(project_dir.clone()) })
+        .expect_err("clean should refuse a symlink escape");
+
+    assert!(error.to_string().contains("resolved path"));
+    assert!(error.to_string().contains("outside the project root"));
+    assert!(outside_dir.join("build/keep.txt").exists());
+    remove_temp_project_dir(&container);
+}
+
+#[test]
+fn clean_target_guard_rejects_filesystem_root_and_home_directory() {
+    let project_dir = temp_project_dir("clean_target_guard_rejects_roots");
+    let filesystem_root =
+        project_dir.ancestors().last().expect("absolute temp path should have root");
+    let root_error = validated_clean_target(&project_dir, filesystem_root, "project.out_dir")
+        .expect_err("filesystem root should be rejected");
+    assert!(root_error.to_string().contains("filesystem root"));
+
+    if let Some(home) = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")) {
+        let home_error = validated_clean_target(&project_dir, Path::new(&home), "project.out_dir")
+            .expect_err("home directory should be rejected");
+        assert!(home_error.to_string().contains("home directory"));
+    }
+
+    remove_temp_project_dir(&project_dir);
+}
+
+#[test]
 fn run_pipeline_reports_incomplete_public_surface_when_required() {
     let project_dir =
         temp_project_dir("run_pipeline_reports_incomplete_public_surface_when_required");
