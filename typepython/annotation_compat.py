@@ -64,6 +64,7 @@ class _AuditScope:
     runtime_names: frozenset[str]
     type_checking_only_names: frozenset[str]
     resolved_names: dict[str, str]
+    definitely_bound_names: set[str]
 
 
 def supported_formats() -> AnnotationSupport:
@@ -210,7 +211,16 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
             for statement in node.orelse:
                 self.visit(statement)
             return
-        self.generic_visit(node)
+        self.visit(node.test)
+        before = self._current_scope_state()
+        for statement in node.body:
+            self.visit(statement)
+        body_state = self._current_scope_state()
+        self._restore_current_scope_state(before)
+        for statement in node.orelse:
+            self.visit(statement)
+        else_state = self._current_scope_state()
+        self._merge_current_scope_states(body_state, else_state)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         for decorator in node.decorator_list:
@@ -315,6 +325,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                 runtime_names=frozenset(runtime_names),
                 type_checking_only_names=frozenset(type_checking_only_names),
                 resolved_names={},
+                definitely_bound_names=set(parameters or ()),
             )
         )
         for statement in statements:
@@ -357,10 +368,45 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
     def _bind_runtime_name(self, name: str, resolved: str | None) -> None:
         if not self._scopes:
             return
+        self._scopes[-1].definitely_bound_names.add(name)
         if resolved is None:
             self._scopes[-1].resolved_names.pop(name, None)
         else:
             self._scopes[-1].resolved_names[name] = resolved
+
+    def _current_scope_state(self) -> tuple[set[str], dict[str, str]]:
+        if not self._scopes:
+            return set(), {}
+        scope = self._scopes[-1]
+        return set(scope.definitely_bound_names), dict(scope.resolved_names)
+
+    def _restore_current_scope_state(
+        self,
+        state: tuple[set[str], dict[str, str]],
+    ) -> None:
+        if not self._scopes:
+            return
+        definitely_bound_names, resolved_names = state
+        self._scopes[-1].definitely_bound_names = set(definitely_bound_names)
+        self._scopes[-1].resolved_names = dict(resolved_names)
+
+    def _merge_current_scope_states(
+        self,
+        left: tuple[set[str], dict[str, str]],
+        right: tuple[set[str], dict[str, str]],
+    ) -> None:
+        if not self._scopes:
+            return
+        left_bound, left_resolved = left
+        right_bound, right_resolved = right
+        common_bound = left_bound & right_bound
+        common_resolved = {
+            name: canonical
+            for name, canonical in left_resolved.items()
+            if name in common_bound and right_resolved.get(name) == canonical
+        }
+        self._scopes[-1].definitely_bound_names = common_bound
+        self._scopes[-1].resolved_names = common_resolved
 
     def _decorator_consumer(self, decorator: ast.expr) -> AnnotationConsumer | None:
         expression = decorator.func if isinstance(decorator, ast.Call) else decorator
@@ -372,9 +418,6 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         return None
 
     def _record_annotation_findings(self, annotations: list[ast.expr]) -> None:
-        type_checking_only_names = set().union(
-            *(scope.type_checking_only_names for scope in self._scopes)
-        )
         enclosing_function_names = set().union(
             *(
                 scope.runtime_names
@@ -384,7 +427,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         )
         for annotation in annotations:
             names = _annotation_names(annotation)
-            blocked = sorted(names & type_checking_only_names)
+            blocked = sorted(name for name in names if self._is_unbound_type_only_name(name))
             if blocked:
                 self.findings.append(
                     AnnotationAuditFinding(
@@ -417,6 +460,14 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                         column=annotation.col_offset + 1,
                     )
                 )
+
+    def _is_unbound_type_only_name(self, name: str) -> bool:
+        for scope in reversed(self._scopes):
+            if name in scope.type_checking_only_names:
+                return name not in scope.definitely_bound_names
+            if name in scope.definitely_bound_names:
+                return False
+        return False
 
     def _annotation_is_deferred(self, annotation: ast.expr) -> bool:
         return self._future_annotations or (
@@ -468,7 +519,6 @@ def _scope_names(statements: list[ast.stmt]) -> tuple[set[str], set[str]]:
     runtime_names = collector.runtime_names - collector.global_or_nonlocal_names
     type_checking_only_names = (
         collector.type_checking_only_names
-        - collector.runtime_names
         - collector.global_or_nonlocal_names
     )
     return runtime_names, type_checking_only_names

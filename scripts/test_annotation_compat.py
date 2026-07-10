@@ -252,6 +252,24 @@ class AnnotationCompatTests(unittest.TestCase):
 
         self.assertTrue(audit.safe_for_runtime_introspection)
 
+    def test_late_or_conditional_runtime_binding_does_not_hide_type_only_name(self) -> None:
+        audit = annotation_compat.audit_source(
+            "from typing import TYPE_CHECKING, get_type_hints\n"
+            "if TYPE_CHECKING:\n"
+            "    from models import Group, User\n\n"
+            "def load_user(item: 'User') -> None:\n    return None\n"
+            "get_type_hints(load_user)\n"
+            "User = object\n\n"
+            "if object():\n"
+            "    Group = object\n"
+            "def load_group(item: 'Group') -> None:\n    return None\n"
+        )
+
+        findings = [finding for finding in audit.findings if finding.code == "TPY-A002"]
+        self.assertEqual(len(findings), 2)
+        self.assertTrue(any("User" in finding.message for finding in findings))
+        self.assertTrue(any("Group" in finding.message for finding in findings))
+
     def test_type_checking_guard_import_aliases_are_resolved(self) -> None:
         audit = annotation_compat.audit_source(
             "import typing as t\n"
