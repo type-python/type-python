@@ -273,6 +273,58 @@ fn scoped_metadata_has_type_param_provenance(
             type_param_name,
         );
     }
+    if let (Some(receiver_name), Some(member_name)) = (
+        metadata.value_member_owner_name.as_deref(),
+        metadata.value_member_name.as_deref(),
+    ) {
+        let receiver_has_provenance = if metadata.value_member_through_instance {
+            scoped_callable_returns_type_param(
+                node,
+                nodes,
+                current_owner_name,
+                current_owner_type_name,
+                receiver_name,
+                type_param_name,
+            )
+        } else {
+            scoped_value_has_type_param_provenance(
+                node,
+                nodes,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                receiver_name,
+                type_param_name,
+                options,
+                visiting,
+            ) || resolve_scope_param_semantic_type(
+                node,
+                current_owner_name,
+                current_owner_type_name,
+                receiver_name,
+            )
+            .is_some_and(|receiver_type| {
+                semantic_type_mentions_name(&receiver_type, type_param_name)
+            })
+        };
+        if !receiver_has_provenance {
+            return false;
+        }
+        return resolve_direct_member_reference_semantic_type_with_options(
+            node,
+            nodes,
+            None,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            receiver_name,
+            member_name,
+            metadata.value_member_through_instance,
+            options,
+        )
+        .is_some_and(|member_type| semantic_type_mentions_name(&member_type, type_param_name));
+    }
     if let (Some(receiver_name), Some(method_name)) = (
         metadata.value_method_owner_name.as_deref(),
         metadata.value_method_name.as_deref(),

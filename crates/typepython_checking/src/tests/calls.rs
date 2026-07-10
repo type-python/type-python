@@ -1820,6 +1820,44 @@ fn check_validates_bounded_type_parameter_methods_through_local_flows() {
 }
 
 #[test]
+fn check_keeps_bounded_type_parameter_provenance_through_member_reads() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Linked:\n",
+        "    next: Self\n",
+        "    def ok(self, value: str) -> None: ...\n\n",
+        "class Holder[V]:\n",
+        "    item: V\n\n",
+        "def inspect[T: Linked](item: T, holder: Holder[T]) -> None:\n",
+        "    linked = item.next\n",
+        "    linked.ok(\"linked\")\n",
+        "    held = holder.item\n",
+        "    held.ok(\"held\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_validates_bounded_methods_after_member_reads() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Linked:\n",
+        "    next: Self\n",
+        "    def ok(self, value: str) -> None: ...\n\n",
+        "class Holder[V]:\n",
+        "    item: V\n\n",
+        "def inspect[T: Linked](item: T, holder: Holder[T]) -> None:\n",
+        "    linked = item.next\n",
+        "    linked.ok(1)\n",
+        "    held = holder.item\n",
+        "    held.ok(1)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 2, "{rendered}");
+}
+
+#[test]
 fn check_does_not_confuse_same_named_class_with_scoped_type_parameter() {
     let result = check_temp_typepython_source(concat!(
         "class T:\n",
