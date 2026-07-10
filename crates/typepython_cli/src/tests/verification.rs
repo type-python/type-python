@@ -3262,6 +3262,33 @@ fn runtime_annotation_compatibility_diagnostics_warns_for_local_scope_annotation
 }
 
 #[test]
+fn runtime_annotation_compatibility_diagnostics_ignores_safe_nested_annotations() {
+    let project_dir = temp_project_dir(
+        "runtime_annotation_compatibility_diagnostics_ignores_safe_nested_annotations",
+    );
+    let diagnostics = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        let runtime_path = project_dir.join("app.py");
+        fs::write(
+            &runtime_path,
+            "class Box:\n    value: int\n    def render(self, value: int) -> str:\n        return str(value)\n\ndef outer():\n    class Local:\n        pass\n    def build(value: Local) -> Local:\n        return value\n    return build\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        runtime_annotation_compatibility_diagnostics(
+            &config,
+            &runtime_path,
+            PythonTarget::PYTHON_3_10,
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
 fn runtime_annotation_compatibility_diagnostics_warns_for_framework_consumers() {
     let project_dir = temp_project_dir(
         "runtime_annotation_compatibility_diagnostics_warns_for_framework_consumers",
