@@ -113,6 +113,7 @@ impl Server {
                 id,
                 json!({
                     "capabilities": {
+                        "positionEncoding": "utf-16",
                         "textDocumentSync": {
                             "openClose": true,
                             "change": 2

@@ -145,58 +145,23 @@ pub(crate) fn lsp_position_to_byte_offset(
     position: LspPosition,
     uri: &str,
 ) -> Result<usize, LspError> {
-    let mut line_start = 0usize;
-    for (line_index, line) in text.split_inclusive('\n').enumerate() {
-        let line_number = line_index as u32;
-        let line_text = line.strip_suffix('\n').unwrap_or(line);
-        if line_number == position.line {
-            return utf16_column_to_byte_offset(line_text, line_start, position, uri);
-        }
-        line_start += line.len();
-    }
-
-    let total_lines = text.lines().count() as u32;
-    if position.line == total_lines {
-        return utf16_column_to_byte_offset(&text[line_start..], line_start, position, uri);
-    }
-
-    Err(LspError::content_modified(format!(
-        "TPY6002: didChange for `{}` references line {} beyond the current document",
-        uri, position.line
-    ))
-    .with_tpy_code("TPY6002"))
-}
-
-pub(crate) fn utf16_column_to_byte_offset(
-    line_text: &str,
-    line_start: usize,
-    position: LspPosition,
-    uri: &str,
-) -> Result<usize, LspError> {
-    let mut utf16_offset = 0u32;
-    for (byte_offset, ch) in line_text.char_indices() {
-        if utf16_offset == position.character {
-            return Ok(line_start + byte_offset);
-        }
-        utf16_offset += ch.len_utf16() as u32;
-        if utf16_offset > position.character {
-            return Err(LspError::content_modified(format!(
+    byte_offset_at_position(text, position).map_err(|error| {
+        let message = match error {
+            PositionConversionError::LineOutOfBounds => format!(
+                "TPY6002: didChange for `{}` references line {} beyond the current document",
+                uri, position.line
+            ),
+            PositionConversionError::CharacterOutOfBounds => format!(
+                "TPY6002: didChange for `{}` references character {} beyond line {}",
+                uri, position.character, position.line
+            ),
+            PositionConversionError::SplitsCodePoint => format!(
                 "TPY6002: didChange for `{}` splits a UTF-16 code point at line {}, character {}",
                 uri, position.line, position.character
-            ))
-            .with_tpy_code("TPY6002"));
-        }
-    }
-
-    if utf16_offset == position.character {
-        Ok(line_start + line_text.len())
-    } else {
-        Err(LspError::content_modified(format!(
-            "TPY6002: didChange for `{}` references character {} beyond line {}",
-            uri, position.character, position.line
-        ))
-        .with_tpy_code("TPY6002"))
-    }
+            ),
+        };
+        LspError::content_modified(message).with_tpy_code("TPY6002")
+    })
 }
 
 pub(crate) fn resolve_symbol<'a>(
@@ -234,9 +199,9 @@ pub(crate) fn diagnostics_by_uri(
         .iter()
         .map(|document| (document.uri.clone(), Vec::new()))
         .collect::<BTreeMap<_, _>>();
-    let path_to_uri = documents
+    let documents_by_path = documents
         .iter()
-        .map(|document| (normalize_path_string(&document.path), document.uri.clone()))
+        .map(|document| (normalize_path_string(&document.path), document))
         .collect::<BTreeMap<_, _>>();
 
     for diagnostic in &diagnostics.diagnostics {
@@ -244,20 +209,19 @@ pub(crate) fn diagnostics_by_uri(
             continue;
         };
         let normalized = normalize_path_string(Path::new(&span.path));
-        let Some(uri) = path_to_uri.get(&normalized) else {
+        let Some(document) = documents_by_path.get(&normalized) else {
             continue;
         };
+        let uri = &document.uri;
         let data = diagnostic_lsp_data(diagnostic);
         by_uri.entry(uri.clone()).or_default().push(LspDiagnostic {
             range: LspRange {
-                start: LspPosition {
-                    line: span.line.saturating_sub(1) as u32,
-                    character: span.column.saturating_sub(1) as u32,
-                },
-                end: LspPosition {
-                    line: span.end_line.saturating_sub(1) as u32,
-                    character: span.end_column.saturating_sub(1) as u32,
-                },
+                start: lsp_position_from_scalar_column(&document.text, span.line, span.column),
+                end: lsp_position_from_scalar_column(
+                    &document.text,
+                    span.end_line,
+                    span.end_column,
+                ),
             },
             severity: match diagnostic.severity {
                 Severity::Error => 1,

@@ -227,28 +227,23 @@ pub(crate) fn collect_diagnostic_suggestion_code_actions(
             let Some(span) = suggestion.get("span") else {
                 continue;
             };
+            let span_value = |name: &str| {
+                span.get(name)
+                    .and_then(Value::as_u64)
+                    .and_then(|value| usize::try_from(value).ok())
+                    .unwrap_or(1)
+            };
             let suggestion_range = LspRange {
-                start: LspPosition {
-                    line: span.get("line").and_then(Value::as_u64).unwrap_or(1).saturating_sub(1)
-                        as u32,
-                    character: span
-                        .get("column")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(1)
-                        .saturating_sub(1) as u32,
-                },
-                end: LspPosition {
-                    line: span
-                        .get("end_line")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(1)
-                        .saturating_sub(1) as u32,
-                    character: span
-                        .get("end_column")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(1)
-                        .saturating_sub(1) as u32,
-                },
+                start: lsp_position_from_scalar_column(
+                    &document.text,
+                    span_value("line"),
+                    span_value("column"),
+                ),
+                end: lsp_position_from_scalar_column(
+                    &document.text,
+                    span_value("end_line"),
+                    span_value("end_column"),
+                ),
             };
             if !range_intersects(range, suggestion_range) {
                 continue;
@@ -304,7 +299,7 @@ pub(crate) fn collect_unsafe_code_actions(
                 start: LspPosition { line: range.start.line, character: 0 },
                 end: LspPosition {
                     line: range.start.line,
-                    character: line_text.chars().count() as u32,
+                    character: utf16_len(line_text),
                 },
             },
             new_text: replacement,
@@ -353,7 +348,7 @@ pub(crate) fn collect_effect_declaration_code_actions(
                     start: LspPosition { line: line_index - 1, character: 0 },
                     end: LspPosition {
                         line: line_index - 1,
-                        character: previous_line.unwrap_or_default().chars().count() as u32,
+                        character: utf16_len(previous_line.unwrap_or_default()),
                     },
                 },
                 new_text: decorator_text,
@@ -502,7 +497,7 @@ fn collect_typing_extensions_import_actions(
                 start: LspPosition { line: line.saturating_sub(1) as u32, character: 0 },
                 end: LspPosition {
                     line: line.saturating_sub(1) as u32,
-                    character: line_text.chars().count() as u32,
+                    character: utf16_len(line_text),
                 },
             },
             new_text: line_text.replacen("from typing import ", "from typing_extensions import ", 1),
@@ -532,7 +527,7 @@ fn collect_overload_normalization_actions(document: &DocumentState, range: LspRa
                 start: LspPosition { line: line.saturating_sub(1) as u32, character: 0 },
                 end: LspPosition {
                     line: line.saturating_sub(1) as u32,
-                    character: line_text.chars().count() as u32,
+                    character: utf16_len(line_text),
                 },
             },
             new_text: replacement,
@@ -573,7 +568,7 @@ fn collect_typeddict_requiredness_actions(
                 start: LspPosition { line: line.saturating_sub(1) as u32, character: 0 },
                 end: LspPosition {
                     line: line.saturating_sub(1) as u32,
-                    character: line_text.chars().count() as u32,
+                    character: utf16_len(line_text),
                 },
             },
             new_text: format!("{}: NotRequired[{}]", left, right.trim()),
@@ -706,12 +701,20 @@ fn collect_qualified_portable_typing_sites(
         while let Some(relative) = line[search_start..].find(legacy) {
             let start = search_start + relative;
             let end = start + legacy.len();
+            let start_character = utf16_len(&line[..start]);
+            let end_character = utf16_len(&line[..end]);
             sites.push(PortableTypingRewriteSite {
                 legacy: legacy.to_owned(),
                 replacement: replacement.to_owned(),
                 range: LspRange {
-                    start: LspPosition { line: line_index as u32, character: start as u32 },
-                    end: LspPosition { line: line_index as u32, character: end as u32 },
+                    start: LspPosition {
+                        line: line_index as u32,
+                        character: start_character,
+                    },
+                    end: LspPosition {
+                        line: line_index as u32,
+                        character: end_character,
+                    },
                 },
             });
             search_start = end;

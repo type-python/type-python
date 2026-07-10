@@ -146,10 +146,7 @@ pub(crate) fn single_line_range(text: &str, line: usize) -> LspRange {
     let line_text = text.lines().nth(line.saturating_sub(1)).unwrap_or_default();
     LspRange {
         start: LspPosition { line: line.saturating_sub(1) as u32, character: 0 },
-        end: LspPosition {
-            line: line.saturating_sub(1) as u32,
-            character: line_text.chars().count() as u32,
-        },
+        end: LspPosition { line: line.saturating_sub(1) as u32, character: utf16_len(line_text) },
     }
 }
 
@@ -178,10 +175,7 @@ pub(crate) fn block_range(text: &str, line: usize) -> LspRange {
 
     LspRange {
         start: LspPosition { line: start_index as u32, character: 0 },
-        end: LspPosition {
-            line: end_index as u32,
-            character: lines[end_index].chars().count() as u32,
-        },
+        end: LspPosition { line: end_index as u32, character: utf16_len(lines[end_index]) },
     }
 }
 

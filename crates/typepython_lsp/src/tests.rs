@@ -42,6 +42,7 @@ fn handle_initialize_returns_required_capabilities() {
     assert_eq!(
         responses[0]["result"]["capabilities"],
         json!({
+            "positionEncoding": "utf-16",
             "textDocumentSync": {
                 "openClose": true,
                 "change": 2
@@ -288,6 +289,82 @@ fn json_rpc_references_and_rename_only_edit_semantic_identifier_tokens() {
         1,
         "the f-string expression should be edited without touching its literal text"
     );
+}
+
+#[test]
+fn json_rpc_navigation_and_rename_use_utf16_positions_after_non_bmp_text() {
+    let source = "def target(value: int) -> int:\n    return value\n";
+    let consumer = "from app.a import target\ndef use() -> int:\n    return (\"😀😀😀😀😀😀😀😀\", target(1))[1]\n";
+    let config = temp_workspace(
+        "json_rpc_navigation_and_rename_use_utf16_positions_after_non_bmp_text",
+        &[("src/app/a.tpy", source), ("src/app/b.tpy", consumer)],
+    );
+    let mut server = Server::new(config.clone());
+    let source_uri = path_to_uri(&config.config_dir.join("src/app/a.tpy"));
+    let consumer_uri = path_to_uri(&config.config_dir.join("src/app/b.tpy"));
+
+    let definition = server
+        .handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 51,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {"uri": consumer_uri},
+                "position": {"line": 2, "character": 33}
+            }
+        }))
+        .expect("UTF-16 definition request should succeed");
+    let definition = result_response_for_id(&definition, 51)
+        .as_array()
+        .expect("definition result should be an array");
+    assert_eq!(definition.len(), 1);
+    assert_eq!(definition[0]["uri"], json!(source_uri));
+    assert_eq!(definition[0]["range"]["start"], json!({"line": 0, "character": 4}));
+
+    let references = server
+        .handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 52,
+            "method": "textDocument/references",
+            "params": {
+                "textDocument": {"uri": consumer_uri},
+                "position": {"line": 2, "character": 33},
+                "context": {"includeDeclaration": false}
+            }
+        }))
+        .expect("UTF-16 references request should succeed");
+    let references = result_response_for_id(&references, 52)
+        .as_array()
+        .expect("references result should be an array");
+    assert!(references.iter().any(|reference| {
+        reference["uri"] == json!(consumer_uri)
+            && reference["range"]["start"] == json!({"line": 2, "character": 32})
+            && reference["range"]["end"] == json!({"line": 2, "character": 38})
+    }));
+
+    let rename = server
+        .handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 53,
+            "method": "textDocument/rename",
+            "params": {
+                "textDocument": {"uri": consumer_uri},
+                "position": {"line": 2, "character": 33},
+                "newName": "renamed"
+            }
+        }))
+        .expect("UTF-16 rename request should succeed");
+    let changes = result_response_for_id(&rename, 53)["changes"]
+        .as_object()
+        .expect("rename should return workspace changes");
+    let consumer_edits = changes
+        .get(&consumer_uri)
+        .and_then(Value::as_array)
+        .expect("consumer references should be renamed");
+    assert!(consumer_edits.iter().any(|edit| {
+        edit["range"]["start"] == json!({"line": 2, "character": 32})
+            && edit["range"]["end"] == json!({"line": 2, "character": 38})
+    }));
 }
 
 #[test]
@@ -2015,6 +2092,81 @@ fn code_actions_offer_machine_applicable_return_suggestion() {
 }
 
 #[test]
+fn diagnostics_and_suggestion_edits_use_utf16_ranges() {
+    let config = temp_workspace(
+        "diagnostics_and_suggestion_edits_use_utf16_ranges",
+        &[("src/app/__init__.tpy", "prefix = \"😀😀😀😀\"; broken\n")],
+    );
+    let path = config.config_dir.join("src/app/__init__.tpy");
+    let uri = path_to_uri(&path);
+    let text = fs::read_to_string(&path).expect("source file should be readable");
+    let syntax = parse_with_options(
+        SourceFile {
+            path: path.clone(),
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: text.clone(),
+        },
+        ParseOptions::default(),
+    );
+    let document = DocumentState {
+        uri: uri.clone(),
+        path: path.clone(),
+        text,
+        syntax,
+        local_symbols: BTreeMap::new(),
+        local_value_types: BTreeMap::new(),
+    };
+    let report = DiagnosticReport {
+        diagnostics: vec![
+            typepython_diagnostics::Diagnostic::error("TPY4001", "broken value")
+                .with_span(typepython_diagnostics::Span::new(
+                    path.display().to_string(),
+                    1,
+                    18,
+                    1,
+                    24,
+                ))
+                .with_suggestion(
+                    "Replace broken value",
+                    typepython_diagnostics::Span::new(path.display().to_string(), 1, 18, 1, 24),
+                    String::from("fixed"),
+                    typepython_diagnostics::SuggestionApplicability::MachineApplicable,
+                ),
+        ],
+    };
+
+    let diagnostics = diagnostics_by_uri(std::slice::from_ref(&document), &report);
+    let diagnostics = diagnostics.get(&uri).expect("diagnostic should map to the document");
+    assert_eq!(
+        serde_json::to_value(diagnostics[0].range).expect("range should serialize"),
+        json!({
+            "start": {"line": 0, "character": 21},
+            "end": {"line": 0, "character": 27}
+        })
+    );
+
+    let diagnostic_values =
+        serde_json::to_value(diagnostics).expect("diagnostics should serialize");
+    let actions = collect_diagnostic_suggestion_code_actions(
+        &document,
+        LspRange {
+            start: LspPosition { line: 0, character: 21 },
+            end: LspPosition { line: 0, character: 27 },
+        },
+        &json!({"context": {"diagnostics": diagnostic_values}}),
+    );
+    let edit = &actions[0]["edit"]["changes"][uri.as_str()][0];
+    assert_eq!(
+        edit["range"],
+        json!({
+            "start": {"line": 0, "character": 21},
+            "end": {"line": 0, "character": 27}
+        })
+    );
+}
+
+#[test]
 fn diagnostics_include_fix_portability_metadata() {
     let config = temp_workspace(
         "diagnostics_include_fix_portability_metadata",
@@ -2326,6 +2478,58 @@ fn did_change_applies_ranged_content_change() {
             .expect("overlay should still be cached after ranged update")
             .text,
         "def name() -> int:\n    return 1\n"
+    );
+}
+
+#[test]
+fn did_change_applies_utf16_range_around_non_bmp_character() {
+    let config = temp_config(
+        "did_change_applies_utf16_range_around_non_bmp_character",
+        "message = \"A😀B\"\n",
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+    server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": uri,
+                    "text": "message = \"A😀B\"\n",
+                    "languageId": "typepython",
+                    "version": 1
+                }
+            }
+        }))
+        .expect("didOpen should succeed");
+
+    server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"textDocument/didChange",
+            "params": {
+                "textDocument": {"uri": uri, "version": 2},
+                "contentChanges": [{
+                    "range": {
+                        "start": {"line": 0, "character": 12},
+                        "end": {"line": 0, "character": 14}
+                    },
+                    "rangeLength": 2,
+                    "text": "Z"
+                }]
+            }
+        }))
+        .expect("UTF-16 ranged didChange should succeed");
+
+    assert_eq!(
+        server
+            .analysis
+            .overlays
+            .get(&config.config_dir.join("src/app/__init__.tpy"))
+            .expect("overlay should contain the changed document")
+            .text,
+        "message = \"AZB\"\n"
     );
 }
 

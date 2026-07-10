@@ -1,17 +1,10 @@
 pub(crate) fn full_document_range(text: &str) -> LspRange {
-    let mut last_line = 0u32;
-    let mut last_character = 0u32;
-    for (index, line) in text.lines().enumerate() {
-        last_line = index as u32;
-        last_character = line.chars().count() as u32;
-    }
-    if text.ends_with('\n') {
-        last_line = text.lines().count() as u32;
-        last_character = 0;
-    }
     LspRange {
         start: LspPosition { line: 0, character: 0 },
-        end: LspPosition { line: last_line, character: last_character },
+        end: position_at_byte_offset(text, text.len()).unwrap_or(LspPosition {
+            line: 0,
+            character: 0,
+        }),
     }
 }
 
@@ -42,8 +35,7 @@ pub(crate) fn resolve_owner_canonical(
 }
 
 pub(crate) fn member_receiver_name(text: &str, position: LspPosition) -> Option<String> {
-    let line = text.lines().nth(position.line as usize)?;
-    let prefix = line.chars().take(position.character as usize).collect::<String>();
+    let prefix = line_prefix_at_position(text, position)?;
     let mut chars = prefix.chars().collect::<Vec<_>>();
     while chars.last().is_some_and(|ch| ch.is_whitespace()) {
         chars.pop();
@@ -171,32 +163,124 @@ pub(crate) fn tokenize_identifiers(text: &str) -> Vec<TokenOccurrence> {
     tokens
 }
 
-fn position_at_byte_offset(text: &str, offset: usize) -> Option<LspPosition> {
+pub(crate) fn position_at_byte_offset(text: &str, offset: usize) -> Option<LspPosition> {
     let prefix = text.get(..offset)?;
     let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
     Some(LspPosition {
         line: prefix.bytes().filter(|byte| *byte == b'\n').count() as u32,
-        character: text.get(line_start..offset)?.chars().count() as u32,
+        character: utf16_len(text.get(line_start..offset)?),
     })
 }
 
 pub(crate) fn find_name_range(text: &str, line: usize, name: &str) -> Option<LspRange> {
     let line_text = text.lines().nth(line.saturating_sub(1))?;
-    let column = line_text.find(name)?;
+    let byte_column = line_text.find(name)?;
+    let column = utf16_len(line_text.get(..byte_column)?);
+    let end_column = column.saturating_add(utf16_len(name));
     Some(LspRange {
-        start: LspPosition { line: line.saturating_sub(1) as u32, character: column as u32 },
+        start: LspPosition { line: line.saturating_sub(1) as u32, character: column },
         end: LspPosition {
             line: line.saturating_sub(1) as u32,
-            character: (column + name.len()) as u32,
+            character: end_column,
         },
     })
 }
 
 pub(crate) fn line_prefix(text: &str, position: LspPosition) -> String {
-    text.lines()
-        .nth(position.line as usize)
-        .map(|line| line.chars().take(position.character as usize).collect())
-        .unwrap_or_default()
+    line_prefix_at_position(text, position).unwrap_or_default().to_owned()
+}
+
+pub(crate) fn utf16_len(text: &str) -> u32 {
+    text.chars().fold(0u32, |length, character| {
+        length.saturating_add(character.len_utf16() as u32)
+    })
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum PositionConversionError {
+    LineOutOfBounds,
+    CharacterOutOfBounds,
+    SplitsCodePoint,
+}
+
+pub(crate) fn byte_offset_at_position(
+    text: &str,
+    position: LspPosition,
+) -> Result<usize, PositionConversionError> {
+    let mut line_start = 0usize;
+    let mut line_number = 0u32;
+
+    loop {
+        let remainder = text
+            .get(line_start..)
+            .ok_or(PositionConversionError::LineOutOfBounds)?;
+        let newline = remainder.find('\n');
+        let raw_line = newline.map_or(remainder, |newline| &remainder[..newline]);
+        let line_text = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+
+        if line_number == position.line {
+            return byte_offset_at_utf16_column(line_text, position.character)
+                .map(|column| line_start + column);
+        }
+
+        let Some(newline) = newline else {
+            break;
+        };
+        line_start = line_start.saturating_add(newline).saturating_add(1);
+        line_number = line_number.saturating_add(1);
+    }
+
+    Err(PositionConversionError::LineOutOfBounds)
+}
+
+fn byte_offset_at_utf16_column(
+    line_text: &str,
+    character: u32,
+) -> Result<usize, PositionConversionError> {
+    let mut utf16_offset = 0u32;
+    for (byte_offset, ch) in line_text.char_indices() {
+        if utf16_offset == character {
+            return Ok(byte_offset);
+        }
+        utf16_offset = utf16_offset.saturating_add(ch.len_utf16() as u32);
+        if utf16_offset > character {
+            return Err(PositionConversionError::SplitsCodePoint);
+        }
+    }
+
+    if utf16_offset == character {
+        Ok(line_text.len())
+    } else {
+        Err(PositionConversionError::CharacterOutOfBounds)
+    }
+}
+
+pub(crate) fn lsp_position_from_scalar_column(
+    text: &str,
+    one_based_line: usize,
+    one_based_column: usize,
+) -> LspPosition {
+    let line = one_based_line.saturating_sub(1) as u32;
+    let scalar_column = one_based_column.saturating_sub(1);
+    let character = text
+        .split('\n')
+        .nth(line as usize)
+        .map(|line_text| line_text.strip_suffix('\r').unwrap_or(line_text))
+        .map(|line_text| {
+            let byte_column = line_text
+                .char_indices()
+                .nth(scalar_column)
+                .map_or(line_text.len(), |(offset, _)| offset);
+            utf16_len(&line_text[..byte_column])
+        })
+        .unwrap_or(scalar_column as u32);
+    LspPosition { line, character }
+}
+
+fn line_prefix_at_position(text: &str, position: LspPosition) -> Option<&str> {
+    let offset = byte_offset_at_position(text, position).ok()?;
+    let line_start = text.get(..offset)?.rfind('\n').map_or(0, |index| index + 1);
+    text.get(line_start..offset)
 }
 
 pub(crate) fn format_signature(
