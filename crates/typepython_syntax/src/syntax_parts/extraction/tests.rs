@@ -2080,6 +2080,44 @@ fn parse_collects_nested_calls_returns_and_assignments_in_control_flow_suites() 
 }
 
 #[test]
+fn parse_collects_function_assignments_beneath_module_control_flow() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("guarded-function.py"),
+        kind: SourceKind::Python,
+        logical_module: String::new(),
+        text: String::from(
+            "if TYPE_CHECKING:\n    def build() -> str:\n        annotated: str = \"x\"\n        bare = 1\n        if (captured := 2):\n            pass\n        return bare\n",
+        ),
+    });
+
+    assert!(tree.diagnostics.is_empty(), "{}", tree.diagnostics.as_text());
+    let values = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::Value(statement)
+                if statement.owner_name.as_deref() == Some("build") =>
+            {
+                Some(statement.names.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        values,
+        vec![
+            vec![String::from("annotated")],
+            vec![String::from("bare")],
+            vec![String::from("captured")],
+        ]
+    );
+    assert!(tree.statements.iter().any(|statement| {
+        matches!(statement, SyntaxStatement::Return(statement) if statement.owner_name == "build")
+    }));
+}
+
+#[test]
 fn parse_collects_control_flow_facts_through_every_nested_suite() {
     let tree = parse(SourceFile {
         path: PathBuf::from("nested-suite-facts.py"),

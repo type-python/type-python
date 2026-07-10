@@ -556,23 +556,22 @@ pub(in super::super) fn collect_function_body_assignments(
             }
             _ => {
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
-                let Some(owner_name) = owner_name else {
-                    continue;
-                };
-                if let Some(assignment) = extract_function_body_assignment_statement(
-                    source,
-                    stmt,
-                    line,
-                    owner_name,
-                    owner_type_name,
-                ) {
+                if let Some(owner_name) = owner_name
+                    && let Some(assignment) = extract_function_body_assignment_statement(
+                        source,
+                        stmt,
+                        line,
+                        owner_name,
+                        owner_type_name,
+                    )
+                {
                     statements.push(assignment);
                 }
                 for_each_nested_suite(stmt, |suite| {
                     collect_function_body_assignments(
                         source,
                         suite,
-                        Some(owner_name),
+                        owner_name,
                         owner_type_name,
                         statements,
                     )
@@ -610,24 +609,23 @@ pub(in super::super) fn collect_function_body_bare_assignments(
                 );
             }
             _ => {
-                let Some(owner_name) = owner_name else {
-                    continue;
-                };
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
-                if let Some(assignment) = extract_function_body_bare_assignment_statement(
-                    source,
-                    stmt,
-                    line,
-                    owner_name,
-                    owner_type_name,
-                ) {
+                if let Some(owner_name) = owner_name
+                    && let Some(assignment) = extract_function_body_bare_assignment_statement(
+                        source,
+                        stmt,
+                        line,
+                        owner_name,
+                        owner_type_name,
+                    )
+                {
                     statements.push(assignment);
                 }
                 for_each_nested_suite(stmt, |suite| {
                     collect_function_body_bare_assignments(
                         source,
                         suite,
-                        Some(owner_name),
+                        owner_name,
                         owner_type_name,
                         statements,
                     )
@@ -665,17 +663,26 @@ pub(in super::super) fn collect_function_body_namedexpr_assignments(
                 );
             }
             _ => {
-                let Some(owner_name) = owner_name else {
-                    continue;
-                };
-                let mut collector = NamedExprAssignmentCollector {
-                    source,
-                    owner_name,
-                    owner_type_name,
-                    statements: Vec::new(),
-                };
-                collector.visit_stmt(stmt);
-                statements.extend(collector.statements);
+                if let Some(owner_name) = owner_name {
+                    let mut collector = NamedExprAssignmentCollector {
+                        source,
+                        owner_name,
+                        owner_type_name,
+                        statements: Vec::new(),
+                    };
+                    collector.visit_stmt(stmt);
+                    statements.extend(collector.statements);
+                } else {
+                    for_each_nested_suite(stmt, |suite| {
+                        collect_function_body_namedexpr_assignments(
+                            source,
+                            suite,
+                            None,
+                            owner_type_name,
+                            statements,
+                        )
+                    });
+                }
             }
         }
     }

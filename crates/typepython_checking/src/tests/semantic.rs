@@ -2544,6 +2544,21 @@ fn check_missing_none_return_suggestion_uses_source_overrides_without_backing_fi
 }
 
 #[test]
+fn check_uses_assignments_from_functions_beneath_module_control_flow() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import TYPE_CHECKING\n",
+        "if TYPE_CHECKING:\n",
+        "    def guarded() -> str:\n",
+        "        value = 1\n",
+        "        return value\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("return type"), "{rendered}");
+}
+
+#[test]
 fn check_union_member_guard_suggestion_uses_source_overrides_without_backing_file() {
     let source_text = concat!("value = None\n", "value.name\n");
     let path = PathBuf::from("virtual/app.tpy");
