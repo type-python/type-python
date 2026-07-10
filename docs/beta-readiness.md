@@ -123,7 +123,8 @@ A Beta release candidate must pass the tracked release gate before the classifie
   source-installable VS Code manifest, LSP stdio launch wiring, version-aligned VSIX docs, and the
   rule that VS Code packaging evidence does not block Core v1.0 RC
 - Python 3.9 wrapper smoke
-- Python 3.13 and 3.14 target smoke
+- installed-wheel host smoke on every declared Python version from 3.9 through 3.14
+- Python 3.13 and 3.14 native-target smoke
 - macOS and Windows platform smoke
 - industrial performance evidence: `python scripts/industrial_perf_smoke.py` on the release
   candidate, recording cold check, warm check, single-file implementation edit, public surface edit,

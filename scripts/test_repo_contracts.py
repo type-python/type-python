@@ -448,6 +448,26 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("scripts/test_coverage_gate.py", workflow)
         self.assertIn("branch instrumentation", contributing)
 
+    def test_python_package_host_matrix_matches_declared_support(self) -> None:
+        pyproject = read_text("pyproject.toml")
+        workflow = read_text(".github/workflows/rust.yml")
+        expected_versions = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+
+        self.assertIn('requires-python = ">=3.9"', pyproject)
+        for version in expected_versions:
+            self.assertIn(f'Programming Language :: Python :: {version}', pyproject)
+        self.assertIn("python-package-hosts:", workflow)
+        self.assertIn(
+            'python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]',
+            workflow,
+        )
+        host_job = workflow.split("python-package-hosts:", 1)[1].split("msrv-check:", 1)[0]
+        self.assertIn("python -m build --wheel", host_job)
+        self.assertIn("python -m pip install --force-reinstall dist/*.whl", host_job)
+        self.assertIn("python scripts/quickstart_smoke.py", host_job)
+        release_gate = workflow.split("beta-release-gate:", 1)[1]
+        self.assertIn("python-package-hosts", release_gate)
+
     def test_dx_and_lsp_stability_boundary_is_documented(self) -> None:
         dx = read_text("docs/dx-stability.md")
         beta = read_text("docs/beta-readiness.md")

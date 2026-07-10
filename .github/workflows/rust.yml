@@ -213,8 +213,12 @@ jobs:
           path: fuzz/artifacts/
           if-no-files-found: ignore
 
-  python-min-supported:
+  python-package-hosts:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Check out repository
@@ -227,15 +231,15 @@ jobs:
             --component clippy
           rustup default 1.94.0
 
-      - name: Set up Python 3.9
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install wheel build tools
         run: python -m pip install --upgrade pip build
 
-      - name: Build wheel with minimum supported Python
+      - name: Build wheel
         run: python -m build --wheel
 
       - name: Install built wheel
@@ -256,37 +260,6 @@ jobs:
 
       - name: Verify declared MSRV
         run: make msrv-check
-
-  python-modern-host:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust 1.94.0
-        run: |
-          rustup toolchain install 1.94.0 --profile minimal \
-            --component rustfmt \
-            --component clippy
-          rustup default 1.94.0
-
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install wheel build tools
-        run: python -m pip install --upgrade pip build
-
-      - name: Build wheel with modern host Python
-        run: python -m build --wheel
-
-      - name: Install built wheel
-        run: python -m pip install --force-reinstall dist/*.whl
-
-      - name: Run installed wheel smoke test
-        run: python scripts/quickstart_smoke.py
 
   native-target-build-verify:
     runs-on: ubuntu-latest
@@ -412,9 +385,8 @@ jobs:
       - security-audit
       - coverage
       - fuzz-smoke
-      - python-min-supported
+      - python-package-hosts
       - msrv-check
-      - python-modern-host
       - native-target-build-verify
       - platform-smoke
       - cli-verification
