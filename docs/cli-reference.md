@@ -280,7 +280,7 @@ typepython verify [OPTIONS]
 | `--sdist PATH`              | Path to a `.tar.gz` sdist to verify (repeatable)                                                 |
 | `--api-diff OLD_SURFACE`    | Compare an old public typing surface against the current verified build output                   |
 | `--checker COMMAND`         | Run an external type checker against the emitted build output (repeatable)                       |
-| `--checker-preset PRESET`   | Run a named checker preset; `all` expands to `mypy`, `pyright`, and `ty`                         |
+| `--checker-preset PRESET`   | Run a named checker preset; `all` expands to `mypy`, `pyright`, `basedpyright`, and `ty`         |
 | `--checker-allowlist PATH`  | TOML allowlist of known checker disagreements that should remain visible but non-blocking        |
 | `--publication-type-health` | Run package-maintainer type-health checks and fail on PEP 561 metadata or type precision debt    |
 | `--unsafe-runtime-imports`  | Import emitted runtime modules to compare runtime-visible public names; executes project code    |

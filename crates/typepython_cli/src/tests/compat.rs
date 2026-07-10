@@ -34,7 +34,12 @@ fn compat_command_parses_checker_preset_flags() {
 fn expand_compat_profile_maps_named_profiles_to_checker_sets() {
     assert_eq!(
         expand_compat_profile("library-portable").expect("profile should expand"),
-        vec![String::from("mypy"), String::from("pyright"), String::from("ty")],
+        vec![
+            String::from("basedpyright"),
+            String::from("mypy"),
+            String::from("pyright"),
+            String::from("ty"),
+        ],
     );
     assert_eq!(
         expand_compat_profile("pyright-first").expect("profile should expand"),
@@ -57,7 +62,12 @@ fn expand_compat_profile_maps_named_profiles_to_checker_sets() {
 fn expand_checker_list_expands_default_all_matrix() {
     assert_eq!(
         expand_checker_list("all").expect("checker list should expand"),
-        vec![String::from("mypy"), String::from("pyright"), String::from("ty")],
+        vec![
+            String::from("basedpyright"),
+            String::from("mypy"),
+            String::from("pyright"),
+            String::from("ty"),
+        ],
     );
 }
 

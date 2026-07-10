@@ -144,7 +144,7 @@ pub(crate) struct VerifyArgs {
     #[arg(
         long = "checker-preset",
         value_name = "PRESET",
-        help = "Run a named checker preset; currently supports `all` for mypy, pyright, and ty"
+        help = "Run a named checker preset; currently supports `all` for basedpyright, mypy, pyright, and ty"
     )]
     pub(crate) checker_preset: Option<String>,
     #[arg(

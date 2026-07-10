@@ -3775,6 +3775,11 @@ fn verify_checker_preset_expands_and_deduplicates_with_explicit_checkers() {
 
     assert_eq!(
         verify_checker_invocations(&args).expect("checker preset should expand"),
-        vec![String::from("mypy"), String::from("pyright"), String::from("ty")],
+        vec![
+            String::from("basedpyright"),
+            String::from("mypy"),
+            String::from("pyright"),
+            String::from("ty"),
+        ],
     );
 }

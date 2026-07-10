@@ -579,7 +579,12 @@ pub(crate) fn expand_checker_list(raw: &str) -> Result<Vec<String>> {
     let mut checkers = Vec::new();
     for value in values {
         if value == "all" {
-            checkers.extend([String::from("mypy"), String::from("pyright"), String::from("ty")]);
+            checkers.extend([
+                String::from("basedpyright"),
+                String::from("mypy"),
+                String::from("pyright"),
+                String::from("ty"),
+            ]);
         } else {
             checkers.push(value.to_owned());
         }
