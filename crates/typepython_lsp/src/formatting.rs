@@ -89,19 +89,31 @@ pub(super) fn expand_formatter_argument(
     file: &str,
     workspace_root: &str,
 ) -> String {
+    let has_path_placeholder = argument.contains("{file}") || argument.contains("{workspace_root}");
     let expanded = argument.replace("{file}", file).replace("{workspace_root}", workspace_root);
     if expanded.starts_with('-') {
         return expanded;
     }
-    let path = Path::new(&expanded);
-    if path.is_absolute()
-        || !typepython_config::command_value_is_path_like(&expanded)
-        || expanded == file
-        || expanded == workspace_root
-    {
+    if expanded == file || expanded == workspace_root {
         return expanded;
     }
-    config.config_dir.join(path).to_string_lossy().into_owned()
+
+    // A lone backslash is also common in regexes and escape sequences passed to formatters. Treat
+    // backslash-only relative arguments as paths only when they use an explicit relative prefix;
+    // portable implicit relative paths use `/`, as documented by the configuration examples.
+    let is_explicit_path = has_path_placeholder
+        || Path::new(&expanded).is_absolute()
+        || argument.contains('/')
+        || argument.starts_with(r".\")
+        || argument.starts_with(r"..\")
+        || argument.starts_with(r"\\");
+    if !is_explicit_path {
+        return expanded;
+    }
+
+    typepython_config::resolve_command_path(&config.config_dir, &expanded)
+        .to_string_lossy()
+        .into_owned()
 }
 
 pub(super) fn resolve_formatter_program(config: &ConfigHandle, program: &str) -> PathBuf {

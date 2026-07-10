@@ -1216,6 +1216,22 @@ fn formatter_programs_with_backslashes_resolve_from_workspace_portably() {
 }
 
 #[test]
+fn formatter_arguments_do_not_treat_backslash_escapes_as_paths() {
+    let config = temp_workspace_with_config(
+        "formatter_arguments_do_not_treat_backslash_escapes_as_paths",
+        "[project]\nsrc = [\"src\"]\n",
+        &[("src/app/__init__.tpy", "pass\n")],
+    );
+
+    assert_eq!(expand_formatter_argument(&config, r"\d+", "module.py", "workspace"), r"\d+");
+    assert_eq!(
+        expand_formatter_argument(&config, r".\config\style.toml", "module.py", "workspace"),
+        config.config_dir.join(".").join("config").join("style.toml").to_string_lossy()
+    );
+    fs::remove_dir_all(&config.config_dir).expect("workspace should be removed");
+}
+
+#[test]
 fn import_binding_definition_and_hover_resolve_to_original_declaration() {
     let config = temp_workspace(
         "import_binding_definition_and_hover_resolve_to_original_declaration",
