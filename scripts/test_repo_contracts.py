@@ -138,11 +138,30 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("check_reports_none_call_argument_when_strict_nulls_is_enabled", report)
         self.assertIn("language-spec-v1:L", report)
         self.assertNotIn("| Core v1 | MUST | missing |", report)
+        self.assertIn("match zero tests", read_text("scripts/conformance_report.py"))
         subprocess.run(
             [sys.executable, "scripts/conformance_report.py", "--check"],
             cwd=REPO_ROOT,
             check=True,
         )
+
+    def test_conformance_evidence_rejects_zero_match_filters(self) -> None:
+        conformance = load_script_module(
+            "scripts/conformance_report.py", "conformance_evidence_filter_test"
+        )
+        evidence = conformance.cargo_test_evidence(
+            (
+                "cargo test -p typepython-checking existing",
+                "cargo test -p typepython-checking missing",
+            )
+        )
+
+        unmatched = conformance.unmatched_cargo_test_evidence(
+            evidence,
+            {"typepython-checking": ("tests::existing_case",)},
+        )
+
+        self.assertEqual(unmatched, ("cargo test -p typepython-checking missing",))
 
     def test_beta_scope_and_release_gate_are_documented(self) -> None:
         pyproject = read_text("pyproject.toml")

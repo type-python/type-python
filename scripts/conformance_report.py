@@ -5,6 +5,7 @@ import dataclasses
 import json
 import pathlib
 import re
+import subprocess
 from collections.abc import Iterable
 
 
@@ -19,6 +20,9 @@ SPEC_PATHS = (
 )
 FEATURE_ROW_RE = re.compile(r"^\|\s*(?P<feature>[^|]+?)\s*\|\s*(?P<tier>[^|]+?)\s*\|\s*(?P<status>MUST|SHOULD|MAY)\s*\|")
 NORMATIVE_RE = re.compile(r"\bMUST(?:\s+NOT)?\b")
+CARGO_TEST_EVIDENCE_RE = re.compile(
+    r"^cargo test -p (?P<package>[a-zA-Z0-9_-]+)(?: (?P<filter>\S+))?$"
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -44,6 +48,13 @@ class SemanticSubRule:
     area: str
     rule: str
     tests: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class CargoTestEvidence:
+    command: str
+    package: str
+    filter: str | None
 
 
 BETA_SCOPE_NOTES: dict[str, str] = {
@@ -257,14 +268,19 @@ TEST_EVIDENCE: dict[str, tuple[str, ...]] = {
     "Recursive type aliases": ("cargo test -p typepython-checking recursive",),
     "Unions and literals": ("cargo test -p typepython-checking literal",),
     "Local inference": ("cargo test -p typepython-checking inference",),
-    "Widened literal and container inference": ("cargo test -p typepython-checking widened",),
-    "`Self` and receiver typing": ("cargo test -p typepython-checking receiver",),
-    "Self and receiver typing": ("cargo test -p typepython-checking receiver",),
+    "Widened literal and container inference": ("cargo test -p typepython-checking widening",),
+    "`Self` and receiver typing": ("cargo test -p typepython-checking self_",),
+    "Self and receiver typing": ("cargo test -p typepython-checking self_",),
     "Callable compatibility and overload specificity": ("cargo test -p typepython-checking calls",),
     "Typed callable decorator transforms (callable-to-callable)": ("cargo test -p typepython-checking decorator",),
     "`TypedDict` literal checking in contextual positions": ("cargo test -p typepython-checking typed_dict",),
     "`TypedDict` `closed=` / `extra_items=` semantics": ("cargo test -p typepython-checking typed_dict",),
-    "`Annotated`, `ClassVar`, `Required`, `NotRequired`, and `ReadOnly` in their supported positions": ("cargo test -p typepython-checking wrappers",),
+    "`Annotated`, `ClassVar`, `Required`, `NotRequired`, and `ReadOnly` in their supported positions": (
+        "cargo test -p typepython-checking annotated",
+        "cargo test -p typepython-checking classvar",
+        "cargo test -p typepython-checking notrequired",
+        "cargo test -p typepython-checking readonly",
+    ),
     "`NewType` declarations and nominal compatibility": ("cargo test -p typepython-checking newtype",),
     "NewType declarations and nominal compatibility": ("cargo test -p typepython-checking newtype",),
     "Narrowing (`is None`, `isinstance`, `TypeGuard`/`TypeIs`, `assert`, `match`, boolean composition)": ("cargo test -p typepython-checking narrowing",),
@@ -474,6 +490,72 @@ def beta_rule_status(requirement: str, tests: tuple[str, ...]) -> str:
     return "needs-mapping"
 
 
+def cargo_test_evidence(commands: Iterable[str]) -> tuple[CargoTestEvidence, ...]:
+    evidence: list[CargoTestEvidence] = []
+    for command in sorted(set(commands)):
+        if not command.startswith("cargo test"):
+            continue
+        match = CARGO_TEST_EVIDENCE_RE.fullmatch(command)
+        if match is None:
+            raise ValueError(f"unsupported cargo test evidence command: {command}")
+        evidence.append(
+            CargoTestEvidence(
+                command=command,
+                package=match.group("package"),
+                filter=match.group("filter"),
+            )
+        )
+    return tuple(evidence)
+
+
+def unmatched_cargo_test_evidence(
+    evidence: Iterable[CargoTestEvidence],
+    tests_by_package: dict[str, tuple[str, ...]],
+) -> tuple[str, ...]:
+    unmatched: list[str] = []
+    for item in evidence:
+        tests = tests_by_package.get(item.package, ())
+        if not tests or (
+            item.filter is not None and not any(item.filter in test for test in tests)
+        ):
+            unmatched.append(item.command)
+    return tuple(unmatched)
+
+
+def validate_cargo_test_evidence(commands: Iterable[str]) -> None:
+    evidence = cargo_test_evidence(commands)
+    tests_by_package: dict[str, tuple[str, ...]] = {}
+    for package in sorted({item.package for item in evidence}):
+        completed = subprocess.run(
+            ["cargo", "test", "-p", package, "--", "--list"],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise SystemExit(f"unable to enumerate tests for {package}: {detail}")
+        tests_by_package[package] = tuple(
+            line.rsplit(": ", 1)[0]
+            for line in completed.stdout.splitlines()
+            if line.endswith(": test")
+        )
+    unmatched = unmatched_cargo_test_evidence(evidence, tests_by_package)
+    if unmatched:
+        joined = ", ".join(unmatched)
+        raise SystemExit(f"conformance evidence command(s) match zero tests: {joined}")
+
+
+def all_evidence_commands(
+    claims: Iterable[FeatureClaim], rules: Iterable[NormativeRule]
+) -> tuple[str, ...]:
+    commands = [test for claim in claims for test in claim.tests]
+    commands.extend(test for rule in rules for test in rule.tests)
+    commands.extend(test for subrule in SEMANTIC_SUBRULE_EVIDENCE for test in subrule.tests)
+    return tuple(dict.fromkeys(commands))
+
+
 def normative_rules() -> list[NormativeRule]:
     rules: list[NormativeRule] = []
     for path in SPEC_PATHS:
@@ -617,6 +699,7 @@ def main() -> int:
             raise SystemExit(f"normative MUST rule(s) need mapping: {joined}")
         if not rules:
             raise SystemExit("no normative MUST rules found in docs/spec")
+        validate_cargo_test_evidence(all_evidence_commands(claims, rules))
         return 0
     print(rendered, end="")
     return 0
