@@ -37,10 +37,15 @@ fn scoped_type_param_bound_without_provenance(
     if type_param.kind != typepython_binding::GenericTypeParamKind::TypeVar {
         return None;
     }
-    type_param
-        .bound_expr
-        .as_ref()
-        .map(|bound| lower_type_expr(bound.expr.clone()))
+    if let Some(bound) = &type_param.bound_expr {
+        return Some(lower_type_expr(bound.expr.clone()));
+    }
+    let constraints = type_param
+        .constraint_exprs
+        .iter()
+        .map(|constraint| lower_type_expr(constraint.expr.clone()))
+        .collect::<Vec<_>>();
+    (!constraints.is_empty()).then(|| join_semantic_type_candidates(constraints))
 }
 
 #[expect(

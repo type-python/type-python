@@ -1943,6 +1943,51 @@ fn check_resolves_union_bound_member_method_and_self_returns() {
 }
 
 #[test]
+fn check_resolves_constrained_typevar_members_and_self_returns() {
+    let result = check_temp_typepython_source(concat!(
+        "class Left:\n",
+        "    value: int\n",
+        "    def parse(self, raw: str) -> int:\n",
+        "        return 1\n",
+        "    def clone(self) -> Self:\n",
+        "        return self\n\n",
+        "class Right:\n",
+        "    value: str\n",
+        "    def parse(self, raw: str) -> str:\n",
+        "        return raw\n",
+        "    def clone(self) -> Self:\n",
+        "        return self\n\n",
+        "def parse_value[T: (Left, Right)](owner: T) -> int | str:\n",
+        "    return owner.parse(\"value\")\n\n",
+        "def read_value[T: (Left, Right)](owner: T) -> int | str:\n",
+        "    return owner.value\n\n",
+        "def clone_value[T: (Left, Right)](owner: T) -> T:\n",
+        "    return owner.clone()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_validates_each_constrained_typevar_method_signature() {
+    let result = check_temp_typepython_source(concat!(
+        "class Left:\n",
+        "    def parse(self, raw: str) -> int:\n",
+        "        return 1\n\n",
+        "class Right:\n",
+        "    def parse(self, raw: str) -> int:\n",
+        "        return 1\n\n",
+        "def parse_value[T: (Left, Right)](owner: T) -> int:\n",
+        "    return owner.parse(1)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 2, "{rendered}");
+    assert!(rendered.contains("Left.parse") && rendered.contains("Right.parse"), "{rendered}");
+}
+
+#[test]
 fn check_validates_each_union_bound_method_signature() {
     let result = check_temp_typepython_source(concat!(
         "class Left:\n",
