@@ -18567,6 +18567,115 @@ fn check_reports_attribute_assignment_type_mismatch() {
 }
 
 #[test]
+fn check_validates_attribute_assignment_on_each_union_branch() {
+    let result = check_temp_typepython_source(concat!(
+        "class Left:\n",
+        "    value: str\n\n",
+        "class Right:\n",
+        "    value: int\n\n",
+        "def mutate(owner: Left | Right) -> None:\n",
+        "    owner.value = \"updated\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 1, "{rendered}");
+    assert!(rendered.contains("attribute assignment on `Right`"), "{rendered}");
+    assert!(rendered.contains("expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_attribute_assignment_valid_on_every_union_branch() {
+    let result = check_temp_typepython_source(concat!(
+        "class Left:\n",
+        "    value: str\n\n",
+        "class Right:\n",
+        "    value: str\n\n",
+        "def mutate(owner: Left | Right) -> None:\n",
+        "    owner.value = \"updated\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_substitutes_generic_attribute_types_on_union_branches() {
+    let result = check_temp_typepython_source(concat!(
+        "class Box[T]:\n",
+        "    value: T\n\n",
+        "def mutate(owner: Box[int] | Box[str]) -> None:\n",
+        "    owner.value = 1\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 1, "{rendered}");
+    assert!(rendered.contains("Box[str]"), "{rendered}");
+    assert!(rendered.contains("expects `str`"), "{rendered}");
+}
+
+#[test]
+fn check_preserves_self_for_union_bound_attribute_assignment() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Left:\n",
+        "    peer: Self\n\n",
+        "interface Right:\n",
+        "    peer: Self\n\n",
+        "def link[T: Left | Right](owner: T, peer: T) -> None:\n",
+        "    owner.peer = peer\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_validates_property_setters_on_each_union_branch() {
+    let result = check_temp_typepython_source(concat!(
+        "class Text:\n",
+        "    @property\n",
+        "    def value(self) -> str:\n",
+        "        return \"\"\n",
+        "    @value.setter\n",
+        "    def value(self, new_value: str) -> None:\n",
+        "        pass\n\n",
+        "class Count:\n",
+        "    @property\n",
+        "    def value(self) -> int:\n",
+        "        return 0\n",
+        "    @value.setter\n",
+        "    def value(self, new_value: int) -> None:\n",
+        "        pass\n\n",
+        "def mutate(owner: Text | Count) -> None:\n",
+        "    owner.value = \"updated\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 1, "{rendered}");
+    assert!(rendered.contains("attribute assignment on `Count`"), "{rendered}");
+}
+
+#[test]
+fn check_validates_non_null_attribute_branch_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        concat!(
+            "class Box:\n",
+            "    value: str\n\n",
+            "def mutate(owner: Box | None) -> None:\n",
+            "    owner.value = 1\n",
+        ),
+        ParseOptions::default(),
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 1, "{rendered}");
+    assert!(rendered.contains("attribute assignment on `Box`"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_contextual_declared_attribute_assignment_lambda() {
     let result = check_temp_typepython_source(
         "from typing import Callable\n\nclass Box:\n    handler: Callable[[int], str]\n\ndef mutate(box: Box) -> None:\n    box.handler = lambda x: str(x)\n",

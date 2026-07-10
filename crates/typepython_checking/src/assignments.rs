@@ -2104,86 +2104,126 @@ pub(super) fn attribute_assignment_type_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    context
-        .load_frozen_field_mutation_sites(node)
-        .into_iter()
-        .filter_map(|site| {
-            if site.kind == typepython_syntax::FrozenFieldMutationKind::Delete {
-                return None;
-            }
+    let mut diagnostics = Vec::new();
+    for site in context.load_frozen_field_mutation_sites(node) {
+        if site.kind == typepython_syntax::FrozenFieldMutationKind::Delete {
+            continue;
+        }
+        if site.owner_name.as_deref() == Some("__init__")
+            && site.target.value_name.as_deref() == Some("self")
+        {
+            continue;
+        }
 
-            if site.owner_name.as_deref() == Some("__init__")
-                && site.target.value_name.as_deref() == Some("self")
-            {
-                return None;
-            }
+        let Some(receiver_type) = resolve_assignment_expression_semantic_type(
+            context,
+            node,
+            nodes,
+            None,
+            site.owner_name.as_deref(),
+            site.owner_type_name.as_deref(),
+            site.line,
+            &site.target,
+        ) else {
+            continue;
+        };
+        let bound_target_type = scoped_mutation_target_bound_semantic_type(
+            node,
+            nodes,
+            &site,
+            &receiver_type,
+            context.assignability_options(),
+        );
+        let target_type = bound_target_type.as_ref().unwrap_or(&receiver_type);
+        let target_type_rendered = diagnostic_type_text(target_type);
+        if should_defer_attribute_assignment_to_frozen_checks(
+            context,
+            node,
+            nodes,
+            &site,
+            &target_type_rendered,
+        ) {
+            continue;
+        }
 
-            let receiver_type = resolve_assignment_expression_semantic_type(
-                context,
-                node,
-                nodes,
-                None,
-                site.owner_name.as_deref(),
-                site.owner_type_name.as_deref(),
-                site.line,
-                &site.target,
-            )?;
-            let bound_target_type =
-                scoped_mutation_target_bound_semantic_type(
-                    node,
-                    nodes,
-                    &site,
-                    &receiver_type,
-                    context.assignability_options(),
-                );
-            let target_type = bound_target_type.as_ref().unwrap_or(&receiver_type);
-            let target_type_rendered = diagnostic_type_text(target_type);
-
-            if should_defer_attribute_assignment_to_frozen_checks(
+        let variants = if let Some(branches) =
+            semantic_member_union_branches(target_type, context.strict_nulls)
+        {
+            branches
+                .into_iter()
+                .map(|branch| {
+                    if bound_target_type.is_some() {
+                        (receiver_type.clone(), Some(branch))
+                    } else {
+                        (branch, None)
+                    }
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![(receiver_type, bound_target_type)]
+        };
+        for (receiver_type, bound_target_type) in variants {
+            if let Some(diagnostic) = attribute_assignment_variant_diagnostic(
                 context,
                 node,
                 nodes,
                 &site,
-                &target_type_rendered,
-            ) {
-                return None;
+                &receiver_type,
+                bound_target_type.as_ref(),
+            ) && !diagnostics.contains(&diagnostic)
+            {
+                diagnostics.push(diagnostic);
             }
+        }
+    }
+    diagnostics
+}
 
-            let (class_node, class_decl) =
-                resolve_direct_base(nodes, node, &target_type_rendered)?;
-            match find_owned_writable_member_target(nodes, class_node, class_decl, &site.field_name) {
-                Some(WritableAttributeTarget::Value(declaration)) => {
-                    if declaration.is_final {
-                        return Some(final_attribute_reassignment_diagnostic(
-                            &node.module_path,
-                            &target_type_rendered,
-                            &site.field_name,
-                        ));
-                    }
-                    let expected = resolve_writable_member_semantic_type_with_self_type(
+fn attribute_assignment_variant_diagnostic(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    site: &typepython_syntax::FrozenFieldMutationSite,
+    receiver_type: &SemanticType,
+    bound_target_type: Option<&SemanticType>,
+) -> Option<Diagnostic> {
+    let target_type = bound_target_type.unwrap_or(receiver_type);
+    let target_type_rendered = diagnostic_type_text(target_type);
+    let target_type_name = semantic_nominal_owner_name(target_type)?;
+    let (class_node, class_decl) = resolve_direct_base(nodes, node, &target_type_name)?;
+    match find_owned_writable_member_target(nodes, class_node, class_decl, &site.field_name) {
+        Some(WritableAttributeTarget::Value(declaration)) => {
+            if declaration.is_final {
+                return Some(final_attribute_reassignment_diagnostic(
+                    &node.module_path,
+                    &target_type_rendered,
+                    &site.field_name,
+                ));
+            }
+            let expected = resolve_writable_member_semantic_type_with_self_type(
+                node,
+                nodes,
+                declaration,
+                target_type,
+                bound_target_type.map(|_| receiver_type),
+            )?;
+            let value = site.value.as_ref()?;
+            match site.kind {
+                typepython_syntax::FrozenFieldMutationKind::Assignment => {
+                    let contextual = resolve_contextual_call_arg_semantic_type_with_context(
+                        context,
                         node,
                         nodes,
-                        declaration,
-                        target_type,
-                        bound_target_type.as_ref().map(|_| &receiver_type),
-                    )?;
-                    let value = site.value.as_ref()?;
-                    match site.kind {
-                        typepython_syntax::FrozenFieldMutationKind::Assignment => {
-                            let contextual = resolve_contextual_call_arg_semantic_type_with_context(
-                                context,
-                                node,
-                                nodes,
-                                site.line,
-                                value,
-                                Some(&diagnostic_type_text(&expected)),
-                            );
-                            if let Some(mut result) = contextual {
-                                if let Some(diagnostic) = result.diagnostics.pop() {
-                                    return Some(diagnostic);
-                                }
-                                let actual = result.actual_type;
-                                return (!context.semantic_type_is_assignable(
+                        site.line,
+                        value,
+                        Some(&diagnostic_type_text(&expected)),
+                    );
+                    if let Some(mut result) = contextual {
+                        if let Some(diagnostic) = result.diagnostics.pop() {
+                            return Some(diagnostic);
+                        }
+                        let actual = result.actual_type;
+                        return (!context.semantic_type_is_assignable(
                                     node, &expected, &actual,
                                 ))
                                     .then(|| {
@@ -2206,18 +2246,18 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                         1,
                                     ))
                                 });
-                            }
-                            let actual = resolve_assignment_expression_semantic_type(
-                                context,
-                                node,
-                                nodes,
-                                None,
-                                site.owner_name.as_deref(),
-                                site.owner_type_name.as_deref(),
-                                site.line,
-                                value,
-                            )?;
-                            (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
+                    }
+                    let actual = resolve_assignment_expression_semantic_type(
+                        context,
+                        node,
+                        nodes,
+                        None,
+                        site.owner_name.as_deref(),
+                        site.owner_type_name.as_deref(),
+                        site.line,
+                        value,
+                    )?;
+                    (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
@@ -2237,21 +2277,21 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                     1,
                                 ))
                             })
-                        }
-                        typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => {
-                            let actual = resolve_augmented_assignment_result_semantic_type(
-                                context,
-                                node,
-                                nodes,
-                                None,
-                                site.owner_name.as_deref(),
-                                site.owner_type_name.as_deref(),
-                                site.line,
-                                site.operator.as_deref(),
-                                &diagnostic_type_text(&expected),
-                                value,
-                            )?;
-                            (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
+                }
+                typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => {
+                    let actual = resolve_augmented_assignment_result_semantic_type(
+                        context,
+                        node,
+                        nodes,
+                        None,
+                        site.owner_name.as_deref(),
+                        site.owner_type_name.as_deref(),
+                        site.line,
+                        site.operator.as_deref(),
+                        &diagnostic_type_text(&expected),
+                        value,
+                    )?;
+                    (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
@@ -2271,35 +2311,35 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                     1,
                                 ))
                             })
-                        }
-                        typepython_syntax::FrozenFieldMutationKind::Delete => None,
-                    }
                 }
-                Some(WritableAttributeTarget::PropertySetter(declaration)) => {
-                    let expected = resolve_writable_member_semantic_type_with_self_type(
+                typepython_syntax::FrozenFieldMutationKind::Delete => None,
+            }
+        }
+        Some(WritableAttributeTarget::PropertySetter(declaration)) => {
+            let expected = resolve_writable_member_semantic_type_with_self_type(
+                node,
+                nodes,
+                declaration,
+                target_type,
+                bound_target_type.map(|_| receiver_type),
+            )?;
+            let value = site.value.as_ref()?;
+            match site.kind {
+                typepython_syntax::FrozenFieldMutationKind::Assignment => {
+                    let contextual = resolve_contextual_call_arg_semantic_type_with_context(
+                        context,
                         node,
                         nodes,
-                        declaration,
-                        target_type,
-                        bound_target_type.as_ref().map(|_| &receiver_type),
-                    )?;
-                    let value = site.value.as_ref()?;
-                    match site.kind {
-                        typepython_syntax::FrozenFieldMutationKind::Assignment => {
-                            let contextual = resolve_contextual_call_arg_semantic_type_with_context(
-                                context,
-                                node,
-                                nodes,
-                                site.line,
-                                value,
-                                Some(&diagnostic_type_text(&expected)),
-                            );
-                            if let Some(mut result) = contextual {
-                                if let Some(diagnostic) = result.diagnostics.pop() {
-                                    return Some(diagnostic);
-                                }
-                                let actual = result.actual_type;
-                                return (!context.semantic_type_is_assignable(
+                        site.line,
+                        value,
+                        Some(&diagnostic_type_text(&expected)),
+                    );
+                    if let Some(mut result) = contextual {
+                        if let Some(diagnostic) = result.diagnostics.pop() {
+                            return Some(diagnostic);
+                        }
+                        let actual = result.actual_type;
+                        return (!context.semantic_type_is_assignable(
                                     node, &expected, &actual,
                                 ))
                                     .then(|| {
@@ -2322,18 +2362,18 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                         1,
                                     ))
                                 });
-                            }
-                            let actual = resolve_assignment_expression_semantic_type(
-                                context,
-                                node,
-                                nodes,
-                                None,
-                                site.owner_name.as_deref(),
-                                site.owner_type_name.as_deref(),
-                                site.line,
-                                value,
-                            )?;
-                            (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
+                    }
+                    let actual = resolve_assignment_expression_semantic_type(
+                        context,
+                        node,
+                        nodes,
+                        None,
+                        site.owner_name.as_deref(),
+                        site.owner_type_name.as_deref(),
+                        site.line,
+                        value,
+                    )?;
+                    (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
@@ -2353,15 +2393,15 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                     1,
                                 ))
                             })
-                        }
-                        typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => {
-                            let Some(readable) = find_owned_readable_member_declaration(
-                                nodes,
-                                class_node,
-                                class_decl,
-                                &site.field_name,
-                            ) else {
-                                return Some(
+                }
+                typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => {
+                    let Some(readable) = find_owned_readable_member_declaration(
+                        nodes,
+                        class_node,
+                        class_decl,
+                        &site.field_name,
+                    ) else {
+                        return Some(
                                     Diagnostic::error(
                                         "TPY4001",
                                         format!(
@@ -2379,27 +2419,27 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                         1,
                                     )),
                                 );
-                            };
-                            let readable_type = resolve_readable_member_semantic_type_with_self_type(
-                                node,
-                                nodes,
-                                readable,
-                                target_type,
-                                bound_target_type.as_ref().map(|_| &receiver_type),
-                            )?;
-                            let actual = resolve_augmented_assignment_result_semantic_type(
-                                context,
-                                node,
-                                nodes,
-                                None,
-                                site.owner_name.as_deref(),
-                                site.owner_type_name.as_deref(),
-                                site.line,
-                                site.operator.as_deref(),
-                                &diagnostic_type_text(&readable_type),
-                                value,
-                            )?;
-                            (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
+                    };
+                    let readable_type = resolve_readable_member_semantic_type_with_self_type(
+                        node,
+                        nodes,
+                        readable,
+                        target_type,
+                        bound_target_type.map(|_| receiver_type),
+                    )?;
+                    let actual = resolve_augmented_assignment_result_semantic_type(
+                        context,
+                        node,
+                        nodes,
+                        None,
+                        site.owner_name.as_deref(),
+                        site.owner_type_name.as_deref(),
+                        site.line,
+                        site.operator.as_deref(),
+                        &diagnostic_type_text(&readable_type),
+                        value,
+                    )?;
+                    (!context.semantic_type_is_assignable(node, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
@@ -2419,30 +2459,28 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                     1,
                                 ))
                             })
-                        }
-                        typepython_syntax::FrozenFieldMutationKind::Delete => None,
-                    }
                 }
-                Some(WritableAttributeTarget::ReadOnlyProperty) => Some(
-                    Diagnostic::error(
-                        "TPY4001",
-                        format!(
-                            "property `{}` on `{}` in module `{}` is not writable",
-                            site.field_name,
-                            target_type_rendered,
-                            node.module_path.display(),
-                        ),
-                    )
-                    .with_span(Span::new(
-                        node.module_path.display().to_string(),
-                        site.line,
-                        1,
-                        site.line,
-                        1,
-                    )),
-                ),
-                Some(WritableAttributeTarget::NonWritable) | None => None,
+                typepython_syntax::FrozenFieldMutationKind::Delete => None,
             }
-        })
-        .collect()
+        }
+        Some(WritableAttributeTarget::ReadOnlyProperty) => Some(
+            Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "property `{}` on `{}` in module `{}` is not writable",
+                    site.field_name,
+                    target_type_rendered,
+                    node.module_path.display(),
+                ),
+            )
+            .with_span(Span::new(
+                node.module_path.display().to_string(),
+                site.line,
+                1,
+                site.line,
+                1,
+            )),
+        ),
+        Some(WritableAttributeTarget::NonWritable) | None => None,
+    }
 }
