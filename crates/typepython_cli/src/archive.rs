@@ -1,4 +1,4 @@
-use std::str;
+use std::{collections::BTreeSet, str};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ArchivePathKind {
@@ -17,11 +17,13 @@ impl ArchivePathKind {
 
 pub(crate) struct ArchiveMemberPaths {
     kind: ArchivePathKind,
+    seen: BTreeSet<String>,
+    files: BTreeSet<String>,
 }
 
 impl ArchiveMemberPaths {
     pub(crate) fn new(kind: ArchivePathKind) -> Self {
-        Self { kind }
+        Self { kind, seen: BTreeSet::new(), files: BTreeSet::new() }
     }
 
     pub(crate) fn register(
@@ -29,7 +31,46 @@ impl ArchiveMemberPaths {
         raw_path: &[u8],
         is_directory: bool,
     ) -> Result<String, String> {
-        validate_archive_member_path(raw_path, self.kind, is_directory)
+        let path = validate_archive_member_path(raw_path, self.kind, is_directory)?;
+        if self.seen.contains(&path) {
+            return Err(format!(
+                "{} archive contains duplicate member path `{path}`",
+                self.kind.label()
+            ));
+        }
+
+        let mut ancestor = String::new();
+        let components = path.split('/').collect::<Vec<_>>();
+        for component in components.iter().take(components.len().saturating_sub(1)) {
+            if !ancestor.is_empty() {
+                ancestor.push('/');
+            }
+            ancestor.push_str(component);
+            if self.files.contains(&ancestor) {
+                return Err(format!(
+                    "{} archive member `{path}` is nested below file member `{ancestor}`",
+                    self.kind.label()
+                ));
+            }
+        }
+
+        if !is_directory {
+            let descendant_prefix = format!("{path}/");
+            if let Some(descendant) = self.seen.range(descendant_prefix.clone()..).next()
+                && descendant.starts_with(&descendant_prefix)
+            {
+                return Err(format!(
+                    "{} archive file member `{path}` conflicts with member `{descendant}`",
+                    self.kind.label()
+                ));
+            }
+        }
+
+        self.seen.insert(path.clone());
+        if !is_directory {
+            self.files.insert(path.clone());
+        }
+        Ok(path)
     }
 }
 
@@ -141,5 +182,28 @@ mod tests {
             validate_archive_member_path(b"pkg/", ArchivePathKind::Wheel, true),
             Ok(String::from("pkg"))
         );
+    }
+
+    #[test]
+    fn rejects_duplicate_and_file_directory_conflicts() {
+        let mut paths = ArchiveMemberPaths::new(ArchivePathKind::Wheel);
+        assert_eq!(paths.register(b"pkg/module.py", false), Ok(String::from("pkg/module.py")));
+        assert!(paths.register(b"pkg/module.py", false).is_err());
+
+        let mut ancestor_file = ArchiveMemberPaths::new(ArchivePathKind::Wheel);
+        assert!(ancestor_file.register(b"pkg", false).is_ok());
+        assert!(ancestor_file.register(b"pkg/module.py", false).is_err());
+
+        let mut descendant_file = ArchiveMemberPaths::new(ArchivePathKind::Wheel);
+        assert!(descendant_file.register(b"pkg/module.py", false).is_ok());
+        assert!(descendant_file.register(b"pkg", false).is_err());
+
+        let mut directory_file = ArchiveMemberPaths::new(ArchivePathKind::Wheel);
+        assert!(directory_file.register(b"pkg/", true).is_ok());
+        assert!(directory_file.register(b"pkg", false).is_err());
+
+        let mut normalized_sdist = ArchiveMemberPaths::new(ArchivePathKind::Sdist);
+        assert!(normalized_sdist.register(b"/pkg/module.py", false).is_ok());
+        assert!(normalized_sdist.register(b"pkg/module.py", false).is_err());
     }
 }

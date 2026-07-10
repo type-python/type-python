@@ -26,6 +26,32 @@ fn supplied_archive_reader_rejects_unsafe_member_paths() {
 }
 
 #[test]
+fn supplied_archive_reader_rejects_duplicate_member_paths() {
+    let project_dir = temp_project_dir("supplied_archive_reader_rejects_duplicate_member_paths");
+    let errors = {
+        let wheel = project_dir.join("demo-0.1.0-py3-none-any.whl");
+        let sdist = project_dir.join("demo-0.1.0.zip");
+        let duplicate_files = [("app/__init__.py", "first\n"), ("app/__init__.py", "second\n")];
+        write_zip_archive(&wheel, &duplicate_files);
+        write_zip_archive(&sdist, &duplicate_files);
+
+        [
+            SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel },
+            SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: sdist },
+        ]
+        .iter()
+        .map(|artifact| {
+            inspect_supplied_archive_paths(artifact)
+                .expect_err("duplicate archive member path should be rejected")
+        })
+        .collect::<Vec<_>>()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(errors.iter().all(|error| error.contains("duplicate member path")), "{errors:?}");
+}
+
+#[test]
 fn verify_build_artifacts_reports_missing_runtime_and_marker_files() {
     let project_dir =
         temp_project_dir("verify_build_artifacts_reports_missing_runtime_and_marker_files");

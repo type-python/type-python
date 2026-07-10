@@ -2808,9 +2808,10 @@ fn read_supplied_artifact_entries(
                 return Err(String::from("expected a .whl or .zip file"));
             }
             Ok(SuppliedArchiveEntries {
-                entries: read_zip_entries(&artifact.path, ArchivePathKind::Wheel)?
-                    .into_iter()
-                    .collect(),
+                entries: archive_entries_to_map(read_zip_entries(
+                    &artifact.path,
+                    ArchivePathKind::Wheel,
+                )?)?,
                 common_root: None,
             })
         }
@@ -2823,7 +2824,7 @@ fn read_supplied_artifact_entries(
                 return Err(String::from("expected a .tar.gz, .tgz, or .zip file"));
             };
             let common_root = common_archive_root(&entries);
-            let entries = strip_archive_root(entries, common_root.as_deref());
+            let entries = strip_archive_root(entries, common_root.as_deref())?;
             Ok(SuppliedArchiveEntries { entries, common_root })
         }
     }
@@ -2893,19 +2894,35 @@ fn read_tar_gz_entries(path: &Path) -> std::result::Result<Vec<(String, Vec<u8>)
 fn strip_archive_root(
     entries: Vec<(String, Vec<u8>)>,
     common_root: Option<&str>,
-) -> BTreeMap<String, Vec<u8>> {
+) -> std::result::Result<BTreeMap<String, Vec<u8>>, String> {
     let Some(common_root) = common_root else {
-        return entries.into_iter().collect();
+        return archive_entries_to_map(entries);
     };
 
-    entries
-        .into_iter()
-        .map(|(path, bytes)| {
-            let normalized =
-                path.strip_prefix(&format!("{common_root}/")).map(str::to_owned).unwrap_or(path);
-            (normalized, bytes)
-        })
-        .collect()
+    archive_entries_to_map(
+        entries
+            .into_iter()
+            .map(|(path, bytes)| {
+                let normalized = path
+                    .strip_prefix(&format!("{common_root}/"))
+                    .map(str::to_owned)
+                    .unwrap_or(path);
+                (normalized, bytes)
+            })
+            .collect(),
+    )
+}
+
+fn archive_entries_to_map(
+    entries: Vec<(String, Vec<u8>)>,
+) -> std::result::Result<BTreeMap<String, Vec<u8>>, String> {
+    let mut mapped = BTreeMap::new();
+    for (path, bytes) in entries {
+        if mapped.insert(path.clone(), bytes).is_some() {
+            return Err(format!("archive contains duplicate member path `{path}`"));
+        }
+    }
+    Ok(mapped)
 }
 
 fn common_archive_root(entries: &[(String, Vec<u8>)]) -> Option<String> {

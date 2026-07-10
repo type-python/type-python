@@ -121,6 +121,29 @@ fn diff_api_surfaces_rejects_unsafe_archive_paths() {
 }
 
 #[test]
+fn diff_api_surfaces_rejects_duplicate_archive_paths() {
+    let project_dir = temp_project_dir("diff_api_surfaces_rejects_duplicate_archive_paths");
+    let error = {
+        let old_wheel = project_dir.join("demo-0.1.0-py3-none-any.whl");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(new_dir.join("app.pyi"), "def parse() -> int: ...\n")
+            .expect("new stub should be written");
+        write_zip_archive(
+            &old_wheel,
+            &[("app/__init__.pyi", "first: int\n"), ("app/__init__.pyi", "second: str\n")],
+        );
+
+        diff_api_surfaces(&old_wheel, &new_dir)
+            .expect_err("duplicate archive member path should be rejected")
+            .to_string()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(error.contains("duplicate member path"), "{error}");
+}
+
+#[test]
 fn diff_api_surfaces_reads_inline_typed_archive_sources() {
     let project_dir = temp_project_dir("diff_api_surfaces_reads_inline_typed_archive_sources");
     let report = {
