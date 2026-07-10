@@ -108,6 +108,24 @@ jobs:
           path: perf/industrial-smoke.json
           if-no-files-found: error
 
+  security-audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.94.0
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal
+          rustup default 1.94.0
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit locked Rust dependencies
+        run: cargo audit
+
   coverage:
     runs-on: ubuntu-latest
 
@@ -390,6 +408,7 @@ jobs:
     needs:
       - workspace-fast
       - industrial-performance-smoke
+      - security-audit
       - coverage
       - fuzz-smoke
       - python-min-supported
