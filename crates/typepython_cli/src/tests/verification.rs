@@ -1271,6 +1271,11 @@ fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
     let diagnostics = {
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            "[project]\nname = \"type-python\"\nversion = \"0.1\"\n",
+        )
+        .expect("test setup should succeed");
         fs::create_dir_all(project_dir.join(".typepython/build/app"))
             .expect("test setup should succeed");
         fs::write(
@@ -1285,7 +1290,7 @@ fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
         .expect("test setup should succeed");
         fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
             .expect("test setup should succeed");
-        let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
+        let wheel_path = project_dir.join("dist/type_python-0.1.0-1-py2.py3-none-any.whl");
         let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
         write_zip_archive(
             &wheel_path,
@@ -1299,7 +1304,7 @@ fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
                 ),
                 (
                     "type_python-0.1.0.dist-info/WHEEL",
-                    "Wheel-Version: 1.0\nGenerator: typepython-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+                    "Wheel-Version: 1.0\nGenerator: typepython-test\nRoot-Is-Purelib: true\nTag: py2-none-any\nTag: py3-none-any\nBuild: 1\n",
                 ),
                 (
                     "type_python-0.1.0.dist-info/RECORD",
@@ -1403,6 +1408,357 @@ fn verify_packaged_artifacts_rejects_missing_standard_archive_metadata() {
     assert!(rendered.contains("dist-info/WHEEL"), "{rendered}");
     assert!(rendered.contains("dist-info/RECORD"), "{rendered}");
     assert!(rendered.contains("PKG-INFO"), "{rendered}");
+}
+
+#[test]
+fn verify_packaged_artifacts_rejects_invalid_metadata_values() {
+    let project_dir = temp_project_dir("verify_packaged_artifacts_rejects_invalid_metadata_values");
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+            .expect("test setup should succeed");
+        let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
+        let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
+        write_zip_archive(
+            &wheel_path,
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                (
+                    "type_python-0.1.0.dist-info/METADATA",
+                    "Metadata-Version: totally-invalid\nName: Kelvin\nVersion: 1.0+K\n",
+                ),
+                (
+                    "type_python-0.1.0.dist-info/WHEEL",
+                    "Wheel-Version: 1.\nRoot-Is-Purelib: perhaps\nTag: py2.py3-none-any\n",
+                ),
+                (
+                    "type_python-0.1.0.dist-info/RECORD",
+                    "app/__init__.py,,\napp/__init__.pyi,,\napp/py.typed,,\ntype_python-0.1.0.dist-info/METADATA,,\ntype_python-0.1.0.dist-info/WHEEL,,\ntype_python-0.1.0.dist-info/RECORD,,\n",
+                ),
+            ],
+        );
+        write_tar_gz_archive(
+            &sdist_path,
+            "type-python-0.1.0",
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                ("PKG-INFO", "Metadata-Version: totally-invalid\nName: Kelvin\nVersion: 1.0+K\n"),
+            ],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+        verify_packaged_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+            &[
+                SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path },
+                SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: sdist_path },
+            ],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("invalid Metadata-Version"), "{rendered}");
+    assert!(rendered.contains("invalid distribution Name"), "{rendered}");
+    assert!(rendered.contains("invalid PEP 440 Version"), "{rendered}");
+    assert!(rendered.contains("unsupported Wheel-Version"), "{rendered}");
+    assert!(rendered.contains("invalid Root-Is-Purelib"), "{rendered}");
+    assert!(rendered.contains("invalid expanded compatibility Tag"), "{rendered}");
+}
+
+#[test]
+fn verify_packaged_artifacts_rejects_archive_identity_mismatches() {
+    let project_dir =
+        temp_project_dir("verify_packaged_artifacts_rejects_archive_identity_mismatches");
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+            .expect("test setup should succeed");
+        let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
+        let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
+        write_zip_archive(
+            &wheel_path,
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                (
+                    "archive_distribution-8.8.8.dist-info/METADATA",
+                    "Metadata-Version: 2.5\nName: wrong-distribution\nVersion: 9.9.9\n",
+                ),
+                (
+                    "archive_distribution-8.8.8.dist-info/WHEEL",
+                    "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+                ),
+                (
+                    "archive_distribution-8.8.8.dist-info/RECORD",
+                    "app/__init__.py,,\napp/__init__.pyi,,\napp/py.typed,,\narchive_distribution-8.8.8.dist-info/METADATA,,\narchive_distribution-8.8.8.dist-info/WHEEL,,\narchive_distribution-8.8.8.dist-info/RECORD,,\n",
+                ),
+            ],
+        );
+        write_tar_gz_archive(
+            &sdist_path,
+            "type-python-0.1.0",
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                ("PKG-INFO", "Metadata-Version: 2.5\nName: wrong-distribution\nVersion: 9.9.9\n"),
+            ],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+        verify_packaged_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+            &[
+                SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path },
+                SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: sdist_path },
+            ],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("wheel artifact filename"), "{rendered}");
+    assert!(rendered.contains("sdist artifact filename"), "{rendered}");
+    assert!(rendered.contains("identity mismatch"), "{rendered}");
+    assert!(rendered.contains("does not match"), "{rendered}");
+}
+
+fn prepare_packaged_artifact_test_project(project_dir: &Path) -> EmitArtifact {
+    fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+        .expect("test setup should succeed");
+    fs::create_dir_all(project_dir.join(".typepython/build/app"))
+        .expect("test setup should succeed");
+    fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+        .expect("test setup should succeed");
+    fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+        .expect("test setup should succeed");
+    fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+        .expect("test setup should succeed");
+    EmitArtifact {
+        source_path: project_dir.join("src/app/__init__.tpy"),
+        runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+        stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+    }
+}
+
+#[test]
+fn verify_packaged_artifacts_rejects_wheel_tag_and_build_mismatches() {
+    let project_dir =
+        temp_project_dir("verify_packaged_artifacts_rejects_wheel_tag_and_build_mismatches");
+    let rendered = {
+        let artifact = prepare_packaged_artifact_test_project(&project_dir);
+        let wheel_path = project_dir.join("dist/type_python-0.1.0-2-py3-none-any.whl");
+        write_zip_archive(
+            &wheel_path,
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                (
+                    "type_python-0.1.0.dist-info/METADATA",
+                    "Metadata-Version: 2.1\nName: type-python\nVersion: 0.1.0\n",
+                ),
+                (
+                    "type_python-0.1.0.dist-info/WHEEL",
+                    "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nBuild: 1\nTag: cp313-cp313-manylinux_2_17_x86_64\n",
+                ),
+                (
+                    "type_python-0.1.0.dist-info/RECORD",
+                    "app/__init__.py,,\napp/__init__.pyi,,\napp/py.typed,,\ntype_python-0.1.0.dist-info/METADATA,,\ntype_python-0.1.0.dist-info/WHEEL,,\ntype_python-0.1.0.dist-info/RECORD,,\n",
+                ),
+            ],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+        verify_packaged_artifacts(
+            &config,
+            &[artifact],
+            &[SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("WHEEL Build does not match"), "{rendered}");
+    assert!(rendered.contains("WHEEL Tag fields do not match"), "{rendered}");
+}
+
+#[test]
+fn verify_packaged_artifacts_rejects_sdist_root_and_zip_filename_mismatches() {
+    let project_dir = temp_project_dir(
+        "verify_packaged_artifacts_rejects_sdist_root_and_zip_filename_mismatches",
+    );
+    let rendered = {
+        let artifact = prepare_packaged_artifact_test_project(&project_dir);
+        let tar_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
+        write_tar_gz_archive(
+            &tar_path,
+            "wrong-9.9.9",
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                ("PKG-INFO", "Metadata-Version: 2.1\nName: type-python\nVersion: 0.1.0\n"),
+            ],
+        );
+        let zip_path = project_dir.join("dist/wrong-9.9.9.zip");
+        write_zip_archive(
+            &zip_path,
+            &[
+                ("type-python-0.1.0/app/__init__.py", "pass\n"),
+                ("type-python-0.1.0/app/__init__.pyi", "pass\n"),
+                ("type-python-0.1.0/app/py.typed", ""),
+                (
+                    "type-python-0.1.0/PKG-INFO",
+                    "Metadata-Version: 2.1\nName: type-python\nVersion: 0.1.0\n",
+                ),
+            ],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+        verify_packaged_artifacts(
+            &config,
+            &[artifact],
+            &[
+                SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: tar_path },
+                SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: zip_path },
+            ],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("root directory `wrong-9.9.9`"), "{rendered}");
+    assert!(rendered.contains("sdist artifact filename"), "{rendered}");
+}
+
+#[test]
+fn verify_packaged_artifacts_unfolds_metadata_headers_before_validation() {
+    let project_dir =
+        temp_project_dir("verify_packaged_artifacts_unfolds_metadata_headers_before_validation");
+    let rendered = {
+        let artifact = prepare_packaged_artifact_test_project(&project_dir);
+        let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
+        write_zip_archive(
+            &wheel_path,
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                (
+                    "type_python-0.1.0.dist-info/METADATA",
+                    "Metadata-Version: 1.0\nName: type-python\n injected\nVersion:\n 0.1.0\n",
+                ),
+                (
+                    "type_python-0.1.0.dist-info/WHEEL",
+                    "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+                ),
+                (
+                    "type_python-0.1.0.dist-info/RECORD",
+                    "app/__init__.py,,\napp/__init__.pyi,,\napp/py.typed,,\ntype_python-0.1.0.dist-info/METADATA,,\ntype_python-0.1.0.dist-info/WHEEL,,\ntype_python-0.1.0.dist-info/RECORD,,\n",
+                ),
+            ],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+        verify_packaged_artifacts(
+            &config,
+            &[artifact],
+            &[SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("invalid distribution Name `type-python injected`"), "{rendered}");
+    assert!(rendered.contains("wheels require version 1.1 or newer"), "{rendered}");
+    assert!(!rendered.contains("non-empty `Version`"), "{rendered}");
+}
+
+#[test]
+fn verify_packaged_artifacts_rejects_project_and_cross_archive_identity_mismatches() {
+    let project_dir = temp_project_dir(
+        "verify_packaged_artifacts_rejects_project_and_cross_archive_identity_mismatches",
+    );
+    let rendered = {
+        let artifact = prepare_packaged_artifact_test_project(&project_dir);
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            "[project]\nname = \"type-python\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("test setup should succeed");
+        let wheel_path = project_dir.join("dist/other-9.9.9-py3-none-any.whl");
+        write_zip_archive(
+            &wheel_path,
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                (
+                    "other-9.9.9.dist-info/METADATA",
+                    "Metadata-Version: 2.1\nName: other\nVersion: 9.9.9\n",
+                ),
+                (
+                    "other-9.9.9.dist-info/WHEEL",
+                    "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+                ),
+                (
+                    "other-9.9.9.dist-info/RECORD",
+                    "app/__init__.py,,\napp/__init__.pyi,,\napp/py.typed,,\nother-9.9.9.dist-info/METADATA,,\nother-9.9.9.dist-info/WHEEL,,\nother-9.9.9.dist-info/RECORD,,\n",
+                ),
+            ],
+        );
+        let sdist_path = project_dir.join("dist/third-8.8.8.tar.gz");
+        write_tar_gz_archive(
+            &sdist_path,
+            "third-8.8.8",
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                ("PKG-INFO", "Metadata-Version: 2.1\nName: third\nVersion: 8.8.8\n"),
+            ],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+        verify_packaged_artifacts(
+            &config,
+            &[artifact],
+            &[
+                SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path },
+                SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: sdist_path },
+            ],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("does not match project metadata"), "{rendered}");
+    assert!(rendered.contains("does not match wheel artifact"), "{rendered}");
 }
 
 #[test]

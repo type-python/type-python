@@ -4,12 +4,14 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, ExitCode, Output},
+    sync::OnceLock,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use rayon::prelude::*;
+use regex::Regex;
 use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::parse_module;
 use tar::Archive as TarArchive;
@@ -170,6 +172,8 @@ pub(crate) struct Pep561ReadinessReport {
 
 #[derive(Debug, serde::Deserialize)]
 struct PyProjectProjectMetadata {
+    name: Option<String>,
+    version: Option<String>,
     #[serde(rename = "requires-python")]
     requires_python: Option<String>,
     dependencies: Option<Vec<String>>,
@@ -775,6 +779,53 @@ pub(crate) fn verify_packaged_artifacts(
         diagnostics.diagnostics.extend(diagnostic_group);
     }
 
+    let supplied_identities = supplied_artifacts
+        .iter()
+        .filter_map(|artifact| {
+            let archive = read_supplied_artifact_entries(artifact).ok()?;
+            let identity = supplied_archive_distribution_identity(artifact, &archive.entries)?;
+            Some((artifact, identity))
+        })
+        .collect::<Vec<_>>();
+    if let Some(project_identity) = local_project_distribution_identity(config) {
+        for (artifact, identity) in &supplied_identities {
+            if *identity != project_identity {
+                diagnostics.push(Diagnostic::error(
+                    "TPY5003",
+                    format!(
+                        "{} artifact `{}` identity `{}-{}` does not match project metadata `{}-{}`",
+                        artifact.kind.label(),
+                        artifact.path.display(),
+                        identity.normalized_name,
+                        identity.normalized_version,
+                        project_identity.normalized_name,
+                        project_identity.normalized_version,
+                    ),
+                ));
+            }
+        }
+    }
+    if let Some((first_artifact, first_identity)) = supplied_identities.first() {
+        for (artifact, identity) in supplied_identities.iter().skip(1) {
+            if identity != first_identity {
+                diagnostics.push(Diagnostic::error(
+                    "TPY5003",
+                    format!(
+                        "{} artifact `{}` identity `{}-{}` does not match {} artifact `{}` identity `{}-{}`",
+                        artifact.kind.label(),
+                        artifact.path.display(),
+                        identity.normalized_name,
+                        identity.normalized_version,
+                        first_artifact.kind.label(),
+                        first_artifact.path.display(),
+                        first_identity.normalized_name,
+                        first_identity.normalized_version,
+                    ),
+                ));
+            }
+        }
+    }
+
     diagnostics
 }
 
@@ -988,10 +1039,27 @@ fn local_project_package_metadata(config: &ConfigHandle) -> Option<PackageMetada
     })
 }
 
+fn local_project_distribution_identity(config: &ConfigHandle) -> Option<DistributionIdentity> {
+    let pyproject_path = config.config_dir.join("pyproject.toml");
+    let rendered = fs::read_to_string(pyproject_path).ok()?;
+    let parsed = toml::from_str::<PyProjectMetadata>(&rendered).ok()?;
+    let project = parsed.project?;
+    let name = project.name?;
+    let version = project.version?;
+    if !valid_distribution_name_regex().is_match(&name) {
+        return None;
+    }
+    Some(DistributionIdentity {
+        normalized_name: normalize_distribution_name(&name),
+        normalized_version: normalize_version(&version)?,
+    })
+}
+
 fn supplied_artifact_package_metadata(
     artifact: &SuppliedVerifyArtifact,
 ) -> std::result::Result<Option<PackageMetadata>, String> {
-    let entries = read_supplied_artifact_entries(artifact)?;
+    let archive = read_supplied_artifact_entries(artifact)?;
+    let entries = &archive.entries;
     let metadata = match artifact.kind {
         SuppliedArtifactKind::Wheel => entries
             .iter()
@@ -1003,6 +1071,25 @@ fn supplied_artifact_package_metadata(
         return Ok(None);
     };
     parse_package_metadata_text(metadata)
+}
+
+fn supplied_archive_distribution_identity(
+    artifact: &SuppliedVerifyArtifact,
+    entries: &BTreeMap<String, Vec<u8>>,
+) -> Option<DistributionIdentity> {
+    let (metadata_path, metadata) = match artifact.kind {
+        SuppliedArtifactKind::Wheel => {
+            let mut metadata =
+                entries.iter().filter(|(path, _)| path.ends_with(".dist-info/METADATA"));
+            let first = metadata.next()?;
+            if metadata.next().is_some() {
+                return None;
+            }
+            (first.0.as_str(), first.1.as_slice())
+        }
+        SuppliedArtifactKind::Sdist => ("PKG-INFO", entries.get("PKG-INFO")?.as_slice()),
+    };
+    core_metadata_diagnostics(artifact, metadata_path, metadata).1
 }
 
 fn parse_package_metadata_text(
@@ -1342,8 +1429,13 @@ fn verify_supplied_artifact(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     match read_supplied_artifact_entries(artifact) {
-        Ok(entries) => {
-            diagnostics.extend(archive_metadata_diagnostics(artifact, &entries));
+        Ok(archive) => {
+            let entries = &archive.entries;
+            diagnostics.extend(archive_metadata_diagnostics(
+                artifact,
+                entries,
+                archive.common_root.as_deref(),
+            ));
             for (relative_path, expected_bytes) in expected_files {
                 match entries.get(relative_path) {
                     None => diagnostics.push(Diagnostic::error(
@@ -1403,10 +1495,11 @@ fn verify_supplied_artifact(
 fn archive_metadata_diagnostics(
     artifact: &SuppliedVerifyArtifact,
     entries: &BTreeMap<String, Vec<u8>>,
+    common_root: Option<&str>,
 ) -> Vec<Diagnostic> {
     match artifact.kind {
         SuppliedArtifactKind::Wheel => wheel_metadata_diagnostics(artifact, entries),
-        SuppliedArtifactKind::Sdist => sdist_metadata_diagnostics(artifact, entries),
+        SuppliedArtifactKind::Sdist => sdist_metadata_diagnostics(artifact, entries, common_root),
     }
 }
 
@@ -1445,22 +1538,17 @@ fn wheel_metadata_diagnostics(
         [&metadata_path, &wheel_path, &record_path],
     ));
 
-    if let Some(metadata) = entries.get(&metadata_path) {
-        diagnostics.extend(required_metadata_header_diagnostics(
-            artifact,
-            &metadata_path,
-            metadata,
-            &["Metadata-Version", "Name", "Version"],
-        ));
-    }
-    if let Some(wheel) = entries.get(&wheel_path) {
-        diagnostics.extend(required_metadata_header_diagnostics(
-            artifact,
-            &wheel_path,
-            wheel,
-            &["Wheel-Version", "Tag"],
-        ));
-    }
+    let metadata_identity = entries.get(&metadata_path).and_then(|metadata| {
+        let (metadata_diagnostics, identity) =
+            core_metadata_diagnostics(artifact, &metadata_path, metadata);
+        diagnostics.extend(metadata_diagnostics);
+        identity
+    });
+    let wheel_identity = entries.get(&wheel_path).and_then(|wheel| {
+        let (wheel_diagnostics, identity) = wheel_header_diagnostics(artifact, &wheel_path, wheel);
+        diagnostics.extend(wheel_diagnostics);
+        identity
+    });
     if let Some(record) = entries.get(&record_path) {
         match record_paths(record) {
             Ok(recorded_paths) => {
@@ -1491,12 +1579,21 @@ fn wheel_metadata_diagnostics(
             )),
         }
     }
+    if let Some(metadata_identity) = metadata_identity {
+        diagnostics.extend(wheel_identity_diagnostics(
+            artifact,
+            dist_info,
+            &metadata_identity,
+            wheel_identity.as_ref(),
+        ));
+    }
     diagnostics
 }
 
 fn sdist_metadata_diagnostics(
     artifact: &SuppliedVerifyArtifact,
     entries: &BTreeMap<String, Vec<u8>>,
+    common_root: Option<&str>,
 ) -> Vec<Diagnostic> {
     let Some(metadata) = entries.get("PKG-INFO") else {
         return vec![Diagnostic::error(
@@ -1507,12 +1604,11 @@ fn sdist_metadata_diagnostics(
             ),
         )];
     };
-    required_metadata_header_diagnostics(
-        artifact,
-        "PKG-INFO",
-        metadata,
-        &["Metadata-Version", "Name", "Version"],
-    )
+    let (mut diagnostics, identity) = core_metadata_diagnostics(artifact, "PKG-INFO", metadata);
+    if let Some(identity) = identity {
+        diagnostics.extend(sdist_identity_diagnostics(artifact, common_root, &identity));
+    }
+    diagnostics
 }
 
 fn required_archive_file_diagnostics<'a>(
@@ -1536,43 +1632,630 @@ fn required_archive_file_diagnostics<'a>(
         .collect()
 }
 
-fn required_metadata_header_diagnostics(
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct DistributionIdentity {
+    normalized_name: String,
+    normalized_version: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct WheelArchiveIdentity {
+    build: Option<String>,
+    tags: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct WheelFilenameIdentity {
+    distribution: DistributionIdentity,
+    build: Option<String>,
+    tags: BTreeSet<String>,
+}
+
+fn core_metadata_diagnostics(
     artifact: &SuppliedVerifyArtifact,
     metadata_path: &str,
     bytes: &[u8],
-    required_headers: &[&str],
+) -> (Vec<Diagnostic>, Option<DistributionIdentity>) {
+    let headers = match metadata_headers(bytes) {
+        Ok(headers) => headers,
+        Err(error) => {
+            return (vec![archive_metadata_error(artifact, metadata_path, &error)], None);
+        }
+    };
+    let mut diagnostics = Vec::new();
+    let metadata_version = required_single_header(
+        artifact,
+        metadata_path,
+        &headers,
+        "Metadata-Version",
+        &mut diagnostics,
+    );
+    let name = required_single_header(artifact, metadata_path, &headers, "Name", &mut diagnostics);
+    let version =
+        required_single_header(artifact, metadata_path, &headers, "Version", &mut diagnostics);
+
+    if let Some(metadata_version) = metadata_version {
+        let known = matches!(
+            metadata_version,
+            "1.0" | "1.1" | "1.2" | "2.1" | "2.2" | "2.3" | "2.4" | "2.5"
+        );
+        if !known {
+            match numeric_format_version(metadata_version) {
+                Some((2, minor)) if minor > 5 => diagnostics.push(archive_metadata_warning(
+                    artifact,
+                    metadata_path,
+                    &format!("uses newer unsupported Metadata-Version `{metadata_version}`"),
+                )),
+                _ => diagnostics.push(archive_metadata_error(
+                    artifact,
+                    metadata_path,
+                    &format!("has invalid Metadata-Version `{metadata_version}`"),
+                )),
+            }
+        }
+        if matches!(artifact.kind, SuppliedArtifactKind::Wheel) && metadata_version == "1.0" {
+            diagnostics.push(archive_metadata_error(
+                artifact,
+                metadata_path,
+                "uses Metadata-Version `1.0`, but wheels require version 1.1 or newer",
+            ));
+        }
+    }
+    let normalized_name = name.and_then(|name| {
+        if valid_distribution_name_regex().is_match(name) {
+            Some(normalize_distribution_name(name))
+        } else {
+            diagnostics.push(archive_metadata_error(
+                artifact,
+                metadata_path,
+                &format!("has invalid distribution Name `{name}`"),
+            ));
+            None
+        }
+    });
+    let normalized_version = version.and_then(|version| match normalize_version(version) {
+        Some(version) => Some(version),
+        None => {
+            diagnostics.push(archive_metadata_error(
+                artifact,
+                metadata_path,
+                &format!("has invalid PEP 440 Version `{version}`"),
+            ));
+            None
+        }
+    });
+    let identity =
+        normalized_name.zip(normalized_version).map(|(normalized_name, normalized_version)| {
+            DistributionIdentity { normalized_name, normalized_version }
+        });
+    (diagnostics, identity)
+}
+
+fn wheel_header_diagnostics(
+    artifact: &SuppliedVerifyArtifact,
+    metadata_path: &str,
+    bytes: &[u8],
+) -> (Vec<Diagnostic>, Option<WheelArchiveIdentity>) {
+    let headers = match metadata_headers(bytes) {
+        Ok(headers) => headers,
+        Err(error) => {
+            return (vec![archive_metadata_error(artifact, metadata_path, &error)], None);
+        }
+    };
+    let mut diagnostics = Vec::new();
+    let wheel_version = required_single_header(
+        artifact,
+        metadata_path,
+        &headers,
+        "Wheel-Version",
+        &mut diagnostics,
+    );
+    let root_is_purelib = required_single_header(
+        artifact,
+        metadata_path,
+        &headers,
+        "Root-Is-Purelib",
+        &mut diagnostics,
+    );
+    let tags = headers.get("tag").map(Vec::as_slice).unwrap_or_default();
+    if tags.is_empty() {
+        diagnostics.push(archive_metadata_error(
+            artifact,
+            metadata_path,
+            "is missing required `Tag`",
+        ));
+    }
+    if let Some(wheel_version) = wheel_version {
+        match numeric_format_version(wheel_version) {
+            Some((1, 0)) => {}
+            Some((1, _)) => diagnostics.push(archive_metadata_warning(
+                artifact,
+                metadata_path,
+                &format!("uses newer unsupported Wheel-Version `{wheel_version}`"),
+            )),
+            _ => diagnostics.push(archive_metadata_error(
+                artifact,
+                metadata_path,
+                &format!("has unsupported Wheel-Version `{wheel_version}`"),
+            )),
+        }
+    }
+    if let Some(root_is_purelib) = root_is_purelib
+        && !matches!(root_is_purelib, "true" | "false")
+    {
+        diagnostics.push(archive_metadata_error(
+            artifact,
+            metadata_path,
+            &format!("has invalid Root-Is-Purelib `{root_is_purelib}`"),
+        ));
+    }
+    let mut valid_tags = BTreeSet::new();
+    let mut tags_valid = !tags.is_empty();
+    for tag in tags {
+        if expanded_wheel_tag_regex().is_match(tag) {
+            valid_tags.insert(tag.to_ascii_lowercase());
+        } else {
+            tags_valid = false;
+            diagnostics.push(archive_metadata_error(
+                artifact,
+                metadata_path,
+                &format!("has invalid expanded compatibility Tag `{tag}`"),
+            ));
+        }
+    }
+    let builds = headers.get("build").map(Vec::as_slice).unwrap_or_default();
+    let valid_build = builds.is_empty()
+        || (builds.len() == 1
+            && !builds[0].is_empty()
+            && builds[0].chars().next().is_some_and(|character| character.is_ascii_digit()));
+    if !valid_build {
+        diagnostics.push(archive_metadata_error(
+            artifact,
+            metadata_path,
+            "has invalid Build tag; it must be unique and start with a digit",
+        ));
+    }
+    let identity = (tags_valid && valid_build)
+        .then(|| WheelArchiveIdentity { build: builds.first().cloned(), tags: valid_tags });
+    (diagnostics, identity)
+}
+
+fn wheel_identity_diagnostics(
+    artifact: &SuppliedVerifyArtifact,
+    dist_info: &str,
+    metadata_identity: &DistributionIdentity,
+    wheel_identity: Option<&WheelArchiveIdentity>,
 ) -> Vec<Diagnostic> {
-    let Ok(rendered) = std::str::from_utf8(bytes) else {
-        return vec![Diagnostic::error(
+    let mut diagnostics = Vec::new();
+    let dist_info_identity = dist_info_identity(dist_info);
+    match dist_info_identity {
+        Some(identity) if identity != *metadata_identity => diagnostics.push(Diagnostic::error(
             "TPY5003",
             format!(
-                "{} artifact `{}` contains non-UTF-8 metadata in `{metadata_path}`",
-                artifact.kind.label(),
+                "wheel artifact `{}` identity mismatch: `{dist_info}` does not match METADATA name/version `{}-{}`",
+                artifact.path.display(),
+                metadata_identity.normalized_name,
+                metadata_identity.normalized_version,
+            ),
+        )),
+        None => diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "wheel artifact `{}` has invalid `.dist-info` identity `{dist_info}`",
                 artifact.path.display(),
             ),
-        )];
-    };
-    let present = rendered
-        .lines()
-        .filter_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            (!value.trim().is_empty()).then_some(name.trim())
-        })
-        .collect::<BTreeSet<_>>();
-    required_headers
-        .iter()
-        .filter(|header| !present.contains(**header))
-        .map(|header| {
-            Diagnostic::error(
+        )),
+        Some(_) => {}
+    }
+
+    if artifact.path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("whl")) {
+        match wheel_filename_identity(&artifact.path) {
+            Ok(identity) => {
+                if identity.distribution != *metadata_identity {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY5003",
+                        format!(
+                            "wheel artifact filename `{}` does not match METADATA name/version `{}-{}`",
+                            artifact.path.display(),
+                            metadata_identity.normalized_name,
+                            metadata_identity.normalized_version,
+                        ),
+                    ));
+                }
+                if let Some(wheel_identity) = wheel_identity {
+                    if identity.build != wheel_identity.build {
+                        diagnostics.push(Diagnostic::error(
+                            "TPY5003",
+                            format!(
+                                "wheel artifact `{}` WHEEL Build does not match its filename build tag",
+                                artifact.path.display(),
+                            ),
+                        ));
+                    }
+                    if identity.tags != wheel_identity.tags {
+                        diagnostics.push(Diagnostic::error(
+                            "TPY5003",
+                            format!(
+                                "wheel artifact `{}` WHEEL Tag fields do not match its filename compatibility tags",
+                                artifact.path.display(),
+                            ),
+                        ));
+                    }
+                }
+            }
+            Err(error) => diagnostics.push(Diagnostic::error(
                 "TPY5003",
                 format!(
-                    "{} artifact `{}` metadata `{metadata_path}` is missing or has an empty `{header}`",
-                    artifact.kind.label(),
-                    artifact.path.display(),
+                    "wheel artifact `{}` has invalid filename: {error}",
+                    artifact.path.display()
                 ),
-            )
-        })
-        .collect()
+            )),
+        }
+    }
+    diagnostics
+}
+
+fn sdist_identity_diagnostics(
+    artifact: &SuppliedVerifyArtifact,
+    common_root: Option<&str>,
+    metadata_identity: &DistributionIdentity,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    match sdist_filename_identity(&artifact.path) {
+        Ok(identity) if identity != *metadata_identity => diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "sdist artifact filename `{}` does not match PKG-INFO name/version `{}-{}`",
+                artifact.path.display(),
+                metadata_identity.normalized_name,
+                metadata_identity.normalized_version,
+            ),
+        )),
+        Err(error) => diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!("sdist artifact `{}` has invalid filename: {error}", artifact.path.display()),
+        )),
+        Ok(_) => {}
+    }
+    match common_root.and_then(distribution_stem_identity) {
+        Some(identity) if identity != *metadata_identity => diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "sdist artifact `{}` root directory `{}` does not match PKG-INFO name/version `{}-{}`",
+                artifact.path.display(),
+                common_root.unwrap_or_default(),
+                metadata_identity.normalized_name,
+                metadata_identity.normalized_version,
+            ),
+        )),
+        None => diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "sdist artifact `{}` must contain one valid top-level `name-version` directory",
+                artifact.path.display(),
+            ),
+        )),
+        Some(_) => {}
+    }
+    diagnostics
+}
+
+fn metadata_headers(bytes: &[u8]) -> std::result::Result<BTreeMap<String, Vec<String>>, String> {
+    let rendered = std::str::from_utf8(bytes)
+        .map_err(|error| format!("metadata is not valid UTF-8: {error}"))?;
+    let mut headers = BTreeMap::<String, Vec<String>>::new();
+    let mut current_header = None::<String>;
+    for line in rendered.lines() {
+        if line.is_empty() {
+            break;
+        }
+        if line.chars().next().is_some_and(char::is_whitespace) {
+            let Some(header) = current_header.as_ref() else {
+                return Err(String::from("metadata starts with a continuation line"));
+            };
+            let Some(value) = headers.get_mut(header).and_then(|values| values.last_mut()) else {
+                return Err(format!("metadata continuation for missing header `{header}`"));
+            };
+            let continuation = line.trim();
+            if !value.is_empty() && !continuation.is_empty() {
+                value.push(' ');
+            }
+            value.push_str(continuation);
+            continue;
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            return Err(format!("metadata header line `{line}` is missing `:`"));
+        };
+        if name.is_empty()
+            || !name.chars().all(|character| character.is_ascii_graphic() && character != ':')
+        {
+            return Err(format!("metadata header line `{line}` has an invalid field name"));
+        }
+        let normalized_name = name.to_ascii_lowercase();
+        headers.entry(normalized_name.clone()).or_default().push(value.trim().to_owned());
+        current_header = Some(normalized_name);
+    }
+    Ok(headers)
+}
+
+fn required_single_header<'a>(
+    artifact: &SuppliedVerifyArtifact,
+    metadata_path: &str,
+    headers: &'a BTreeMap<String, Vec<String>>,
+    header: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<&'a str> {
+    let values = headers.get(&header.to_ascii_lowercase()).map(Vec::as_slice).unwrap_or_default();
+    if values.len() != 1 || values[0].is_empty() {
+        diagnostics.push(archive_metadata_error(
+            artifact,
+            metadata_path,
+            &format!("must contain exactly one non-empty `{header}`"),
+        ));
+        return None;
+    }
+    Some(values[0].as_str())
+}
+
+fn archive_metadata_error(
+    artifact: &SuppliedVerifyArtifact,
+    metadata_path: &str,
+    detail: &str,
+) -> Diagnostic {
+    Diagnostic::error(
+        "TPY5003",
+        format!(
+            "{} artifact `{}` metadata `{metadata_path}` {detail}",
+            artifact.kind.label(),
+            artifact.path.display(),
+        ),
+    )
+}
+
+fn archive_metadata_warning(
+    artifact: &SuppliedVerifyArtifact,
+    metadata_path: &str,
+    detail: &str,
+) -> Diagnostic {
+    Diagnostic::warning(
+        "TPY5003",
+        format!(
+            "{} artifact `{}` metadata `{metadata_path}` {detail}",
+            artifact.kind.label(),
+            artifact.path.display(),
+        ),
+    )
+}
+
+fn numeric_format_version(value: &str) -> Option<(u64, u64)> {
+    let (major, minor) = value.split_once('.')?;
+    if major.is_empty()
+        || minor.is_empty()
+        || !major.chars().all(|character| character.is_ascii_digit())
+        || !minor.chars().all(|character| character.is_ascii_digit())
+    {
+        return None;
+    }
+    Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+fn valid_distribution_name_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        match Regex::new(r"^(?:[A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9])\z") {
+            Ok(regex) => regex,
+            Err(error) => panic!("invalid built-in distribution name regex: {error}"),
+        }
+    })
+}
+
+fn compressed_wheel_tag_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        match Regex::new(
+            r"^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*-[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*-[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*\z",
+        ) {
+            Ok(regex) => regex,
+            Err(error) => panic!("invalid built-in wheel tag regex: {error}"),
+        }
+    })
+}
+
+fn expanded_wheel_tag_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| match Regex::new(r"^[A-Za-z0-9_]+-[A-Za-z0-9_]+-[A-Za-z0-9_]+\z") {
+        Ok(regex) => regex,
+        Err(error) => panic!("invalid built-in expanded wheel tag regex: {error}"),
+    })
+}
+
+fn version_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        match Regex::new(
+            r"(?x)^\s*v?(?:(?:(?P<epoch>[0-9]+)!)?(?P<release>[0-9]+(?:\.[0-9]+)*)(?P<pre>[-_.]?(?P<pre_l>a|b|c|rc|alpha|beta|pre|preview)[-_.]?(?P<pre_n>[0-9]+)?)?(?P<post>(?:-(?P<post_n1>[0-9]+))|(?:[-_.]?(?P<post_l>post|rev|r)[-_.]?(?P<post_n2>[0-9]+)?))?(?P<dev>[-_.]?(?P<dev_l>dev)[-_.]?(?P<dev_n>[0-9]+)?)?)(?:\+(?P<local>[a-z0-9]+(?:[-_.][a-z0-9]+)*))?\s*$",
+        ) {
+            Ok(regex) => regex,
+            Err(error) => panic!("invalid built-in version regex: {error}"),
+        }
+    })
+}
+
+fn normalize_distribution_name(name: &str) -> String {
+    let mut normalized = String::new();
+    let mut separator = false;
+    for character in name.chars() {
+        if matches!(character, '-' | '_' | '.') {
+            separator = true;
+        } else {
+            if separator && !normalized.is_empty() {
+                normalized.push('-');
+            }
+            separator = false;
+            normalized.push(character.to_ascii_lowercase());
+        }
+    }
+    normalized
+}
+
+fn normalize_version(version: &str) -> Option<String> {
+    if !version.is_ascii() {
+        return None;
+    }
+    let lowercase_version = version.to_ascii_lowercase();
+    let captures = version_regex().captures(&lowercase_version)?;
+    let mut normalized = String::new();
+    if let Some(epoch) = captures.name("epoch") {
+        let epoch = normalize_integer(epoch.as_str());
+        if epoch != "0" {
+            normalized.push_str(&epoch);
+            normalized.push('!');
+        }
+    }
+    let release = captures.name("release")?.as_str();
+    let mut release = release.split('.').map(normalize_integer).collect::<Vec<_>>();
+    while release.len() > 1 && release.last().is_some_and(|segment| segment == "0") {
+        release.pop();
+    }
+    normalized.push_str(&release.join("."));
+    if let Some(pre_label) = captures.name("pre_l") {
+        normalized.push_str(match pre_label.as_str().to_ascii_lowercase().as_str() {
+            "a" | "alpha" => "a",
+            "b" | "beta" => "b",
+            "c" | "rc" | "pre" | "preview" => "rc",
+            _ => return None,
+        });
+        normalized.push_str(&normalize_integer(
+            captures.name("pre_n").map_or("0", |value| value.as_str()),
+        ));
+    }
+    if captures.name("post").is_some() {
+        normalized.push_str(".post");
+        let number = captures
+            .name("post_n1")
+            .or_else(|| captures.name("post_n2"))
+            .map_or("0", |value| value.as_str());
+        normalized.push_str(&normalize_integer(number));
+    }
+    if captures.name("dev").is_some() {
+        normalized.push_str(".dev");
+        normalized.push_str(&normalize_integer(
+            captures.name("dev_n").map_or("0", |value| value.as_str()),
+        ));
+    }
+    if let Some(local) = captures.name("local") {
+        normalized.push('+');
+        normalized.push_str(
+            &local
+                .as_str()
+                .split(['-', '_', '.'])
+                .map(|part| {
+                    if part.chars().all(|character| character.is_ascii_digit()) {
+                        normalize_integer(part)
+                    } else {
+                        part.to_ascii_lowercase()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("."),
+        );
+    }
+    Some(normalized)
+}
+
+fn normalize_integer(value: &str) -> String {
+    let normalized = value.trim_start_matches('0');
+    if normalized.is_empty() { String::from("0") } else { normalized.to_owned() }
+}
+
+fn dist_info_identity(dist_info: &str) -> Option<DistributionIdentity> {
+    let stem = dist_info.strip_suffix(".dist-info")?;
+    let (name, version) = stem.rsplit_once('-')?;
+    Some(DistributionIdentity {
+        normalized_name: normalize_distribution_name(name),
+        normalized_version: normalize_version(version)?,
+    })
+}
+
+fn wheel_filename_identity(path: &Path) -> std::result::Result<WheelFilenameIdentity, String> {
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| String::from("filename is not valid UTF-8"))?;
+    let stem =
+        filename.strip_suffix(".whl").ok_or_else(|| String::from("filename must end in `.whl`"))?;
+    let parts = stem.split('-').collect::<Vec<_>>();
+    if !matches!(parts.len(), 5 | 6) {
+        return Err(String::from("expected distribution-version(-build)-python-abi-platform.whl"));
+    }
+    if parts.len() == 6
+        && !parts[2].chars().next().is_some_and(|character| character.is_ascii_digit())
+    {
+        return Err(String::from("build tag must start with a digit"));
+    }
+    let tag_start = parts.len() - 3;
+    let tag = parts[tag_start..].join("-");
+    if !compressed_wheel_tag_regex().is_match(&tag) {
+        return Err(format!("invalid compatibility tag `{tag}`"));
+    }
+    if !valid_distribution_name_regex().is_match(parts[0]) {
+        return Err(format!("invalid distribution component `{}`", parts[0]));
+    }
+    let normalized_version = normalize_version(parts[1])
+        .ok_or_else(|| format!("invalid version component `{}`", parts[1]))?;
+    Ok(WheelFilenameIdentity {
+        distribution: DistributionIdentity {
+            normalized_name: normalize_distribution_name(parts[0]),
+            normalized_version,
+        },
+        build: (parts.len() == 6).then(|| parts[2].to_owned()),
+        tags: expand_compressed_wheel_tags(
+            parts[tag_start],
+            parts[tag_start + 1],
+            parts[tag_start + 2],
+        ),
+    })
+}
+
+fn expand_compressed_wheel_tags(
+    python_tags: &str,
+    abi_tags: &str,
+    platform_tags: &str,
+) -> BTreeSet<String> {
+    let mut tags = BTreeSet::new();
+    for python_tag in python_tags.split('.') {
+        for abi_tag in abi_tags.split('.') {
+            for platform_tag in platform_tags.split('.') {
+                tags.insert(format!("{python_tag}-{abi_tag}-{platform_tag}").to_ascii_lowercase());
+            }
+        }
+    }
+    tags
+}
+
+fn sdist_filename_identity(path: &Path) -> std::result::Result<DistributionIdentity, String> {
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| String::from("filename is not valid UTF-8"))?;
+    let stem = filename
+        .strip_suffix(".tar.gz")
+        .or_else(|| filename.strip_suffix(".tgz"))
+        .or_else(|| filename.strip_suffix(".zip"))
+        .ok_or_else(|| String::from("filename must end in `.tar.gz`, `.tgz`, or `.zip`"))?;
+    distribution_stem_identity(stem)
+        .ok_or_else(|| String::from("expected a valid name-version distribution identity"))
+}
+
+fn distribution_stem_identity(stem: &str) -> Option<DistributionIdentity> {
+    let (name, version) = stem.rsplit_once('-')?;
+    if !valid_distribution_name_regex().is_match(name) {
+        return None;
+    }
+    Some(DistributionIdentity {
+        normalized_name: normalize_distribution_name(name),
+        normalized_version: normalize_version(version)?,
+    })
 }
 
 fn record_paths(bytes: &[u8]) -> std::result::Result<BTreeSet<String>, String> {
@@ -2102,16 +2785,24 @@ fn is_allowed_non_surface_file(path: &str) -> bool {
     matches!(path, "setup.py" | "conftest.py" | "noxfile.py" | "toxfile.py")
 }
 
+struct SuppliedArchiveEntries {
+    entries: BTreeMap<String, Vec<u8>>,
+    common_root: Option<String>,
+}
+
 fn read_supplied_artifact_entries(
     artifact: &SuppliedVerifyArtifact,
-) -> std::result::Result<BTreeMap<String, Vec<u8>>, String> {
+) -> std::result::Result<SuppliedArchiveEntries, String> {
     let path_text = artifact.path.to_string_lossy().to_ascii_lowercase();
     match artifact.kind {
         SuppliedArtifactKind::Wheel => {
             if !(path_text.ends_with(".whl") || path_text.ends_with(".zip")) {
                 return Err(String::from("expected a .whl or .zip file"));
             }
-            Ok(read_zip_entries(&artifact.path)?.into_iter().collect())
+            Ok(SuppliedArchiveEntries {
+                entries: read_zip_entries(&artifact.path)?.into_iter().collect(),
+                common_root: None,
+            })
         }
         SuppliedArtifactKind::Sdist => {
             let entries = if path_text.ends_with(".tar.gz") || path_text.ends_with(".tgz") {
@@ -2121,7 +2812,9 @@ fn read_supplied_artifact_entries(
             } else {
                 return Err(String::from("expected a .tar.gz, .tgz, or .zip file"));
             };
-            Ok(strip_common_archive_root(entries))
+            let common_root = common_archive_root(&entries);
+            let entries = strip_archive_root(entries, common_root.as_deref());
+            Ok(SuppliedArchiveEntries { entries, common_root })
         }
     }
 }
@@ -2176,8 +2869,11 @@ fn read_tar_gz_entries(path: &Path) -> std::result::Result<Vec<(String, Vec<u8>)
     Ok(entries)
 }
 
-fn strip_common_archive_root(entries: Vec<(String, Vec<u8>)>) -> BTreeMap<String, Vec<u8>> {
-    let Some(common_root) = common_archive_root(&entries) else {
+fn strip_archive_root(
+    entries: Vec<(String, Vec<u8>)>,
+    common_root: Option<&str>,
+) -> BTreeMap<String, Vec<u8>> {
+    let Some(common_root) = common_root else {
         return entries.into_iter().collect();
     };
 

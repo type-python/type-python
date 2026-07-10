@@ -1812,6 +1812,7 @@ dependencies = [
  "littrs-ruff-python-parser",
  "notify",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "tar",

@@ -21,6 +21,7 @@ littrs-ruff-python-ast = "0.6.2"
 littrs-ruff-python-parser = "0.6.2"
 notify.workspace = true
 rayon.workspace = true
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tar.workspace = true
