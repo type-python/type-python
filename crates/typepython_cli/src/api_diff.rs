@@ -415,9 +415,11 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
         if file.is_dir() {
             continue;
         }
-        if entry_name.ends_with("py.typed") {
+        let zip_file_type = file.unix_mode().map(|mode| mode & 0o170000).unwrap_or(0);
+        let is_regular_file = zip_file_type == 0 || zip_file_type == 0o100000;
+        if is_regular_file && let Some(typed_root) = archive_typed_root(&entry_name) {
             insert_py_typed_marker(&mut modules);
-            typed_roots.push(archive_typed_root(&entry_name));
+            typed_roots.push(typed_root);
             continue;
         }
         let Some(kind) = surface_source_kind_from_archive_entry(&entry_name) else {
@@ -490,9 +492,9 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
         if !entry_type.is_file() && !entry_type.is_contiguous() {
             continue;
         }
-        if entry_path.ends_with("py.typed") {
+        if let Some(typed_root) = archive_typed_root(&entry_path) {
             insert_py_typed_marker(&mut modules);
-            typed_roots.push(archive_typed_root(&entry_path));
+            typed_roots.push(typed_root);
             continue;
         }
         let Some(kind) = surface_source_kind_from_archive_entry(&entry_path) else {
@@ -544,8 +546,12 @@ fn surface_source_kind_from_archive_entry(entry: &str) -> Option<SurfaceSourceKi
     }
 }
 
-fn archive_typed_root(marker: &str) -> String {
-    marker.strip_suffix("py.typed").unwrap_or(marker).trim_end_matches('/').to_owned()
+fn archive_typed_root(marker: &str) -> Option<String> {
+    let (parent, name) = marker.rsplit_once('/').unwrap_or(("", marker));
+    if name != "py.typed" || parent.split('/').any(|component| component.ends_with(".dist-info")) {
+        return None;
+    }
+    Some(parent.to_owned())
 }
 
 fn archive_entry_is_under_typed_root(entry: &str, roots: &[String]) -> bool {

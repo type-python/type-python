@@ -198,6 +198,55 @@ fn diff_api_surfaces_reads_inline_typed_archive_sources() {
 }
 
 #[test]
+fn diff_api_surfaces_ignores_false_archive_typed_markers() {
+    let project_dir = temp_project_dir("diff_api_surfaces_ignores_false_archive_typed_markers");
+    let (wheel_report, sdist_report) = {
+        let old_wheel = project_dir.join("demo-0.1.0-py3-none-any.whl");
+        let new_wheel = project_dir.join("demo-0.2.0-py3-none-any.whl");
+        for (path, returns) in [(&old_wheel, "int"), (&new_wheel, "str")] {
+            write_zip_archive(
+                path,
+                &[
+                    ("app/fakepy.typed", ""),
+                    ("demo-1.0.dist-info/py.typed", ""),
+                    ("app/fake/mod.py", &format!("def parse() -> {returns}:\n    return 1\n")),
+                ],
+            );
+        }
+
+        let old_sdist = project_dir.join("demo-0.1.0.tar.gz");
+        let new_sdist = project_dir.join("demo-0.2.0.tar.gz");
+        for (path, root, returns) in
+            [(&old_sdist, "demo-0.1.0", "int"), (&new_sdist, "demo-0.2.0", "str")]
+        {
+            write_tar_gz_archive(
+                path,
+                root,
+                &[
+                    ("app/copy.typed", ""),
+                    ("demo-1.0.dist-info/py.typed", ""),
+                    ("app/fake/mod.py", &format!("def parse() -> {returns}:\n    return 1\n")),
+                ],
+            );
+        }
+
+        (
+            diff_api_surfaces(&old_wheel, &new_wheel)
+                .expect("false wheel markers should be ignored"),
+            diff_api_surfaces(&old_sdist, &new_sdist)
+                .expect("false sdist markers should be ignored"),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    for report in [wheel_report, sdist_report] {
+        assert!(report.added.is_empty());
+        assert!(report.removed.is_empty());
+        assert!(report.changed.is_empty());
+    }
+}
+
+#[test]
 fn diff_api_surfaces_accepts_source_directory_inputs_when_stubs_are_absent() {
     let project_dir = temp_project_dir("diff_api_surfaces_accepts_source_directory_inputs");
     let report = {
