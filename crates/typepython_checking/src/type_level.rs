@@ -253,9 +253,7 @@ fn key_literals(ty: &SemanticType) -> Result<Vec<String>, TypeLevelEvalError> {
             .iter()
             .map(|arg| {
                 let rendered = render_semantic_type(arg);
-                rendered
-                    .strip_prefix('"')
-                    .and_then(|value| value.strip_suffix('"'))
+                key_literal_value(&rendered)
                     .map(str::to_owned)
                     .ok_or(TypeLevelEvalError::UnsupportedForm(format!("key literal `{rendered}`")))
             })
@@ -268,13 +266,18 @@ fn key_literals(ty: &SemanticType) -> Result<Vec<String>, TypeLevelEvalError> {
         }
         other => {
             let rendered = render_semantic_type(other);
-            rendered
-                .strip_prefix('"')
-                .and_then(|value| value.strip_suffix('"'))
+            key_literal_value(&rendered)
                 .map(|key| vec![key.to_owned()])
                 .ok_or_else(|| TypeLevelEvalError::UnsupportedForm(format!("key set `{rendered}`")))
         }
     }
+}
+
+fn key_literal_value(rendered: &str) -> Option<&str> {
+    rendered
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| rendered.strip_prefix('\'').and_then(|value| value.strip_suffix('\'')))
 }
 
 pub(crate) fn evaluate_restricted_type_level_aliases(

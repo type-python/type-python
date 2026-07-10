@@ -11,6 +11,9 @@ fn check_accepts_supported_restricted_type_level_shape_aliases() {
         "typealias PublicProfile = Pick[User, \"id\", \"name\"]\n",
         "typealias AnonymousUser = Omit[User, \"id\", \"name\"]\n",
         "typealias LiteralCompat = Pick[User, Literal[\"id\"]]\n",
+        "typealias SingleQuotePick = Pick[User, 'id']\n",
+        "typealias SingleQuoteOmit = Omit[User, 'name']\n",
+        "typealias SingleQuoteLiteral = Pick[User, Literal['name']]\n",
     ));
 
     let rendered = result.diagnostics.as_text();
