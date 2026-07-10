@@ -179,6 +179,25 @@ class AnnotationCompatTests(unittest.TestCase):
         )
         self.assertTrue(audit.safe_for_runtime_introspection)
 
+    def test_audit_source_detects_consumers_in_annotation_metadata(self) -> None:
+        audit = annotation_compat.audit_source(
+            "from fastapi import Depends as Dep\n"
+            "from pydantic import Field as PField\n"
+            "from typing import Annotated\n\n"
+            "def load(value: Annotated[str, Dep()]) -> None:\n"
+            "    return None\n\n"
+            "class Model:\n"
+            "    value: \"Annotated[str, PField(alias='value')]\"\n"
+        )
+
+        self.assertEqual(
+            set(audit.consumers),
+            {
+                annotation_compat.AnnotationConsumer.FASTAPI_DEPENDS,
+                annotation_compat.AnnotationConsumer.PYDANTIC_FIELD,
+            },
+        )
+
     def test_audit_source_resolves_consumer_import_aliases(self) -> None:
         audit = annotation_compat.audit_source(
             "import annotationlib as al\n"

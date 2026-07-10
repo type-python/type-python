@@ -620,6 +620,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         *,
         include_current_class_names: bool = False,
     ) -> None:
+        self._record_annotation_consumers(annotations)
         enclosing_function_names = set().union(
             *(
                 scope.runtime_names
@@ -681,6 +682,21 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         return self._future_annotations or (
             isinstance(annotation, ast.Constant) and isinstance(annotation.value, str)
         )
+
+    def _record_annotation_consumers(self, annotations: list[ast.expr]) -> None:
+        for annotation in annotations:
+            expression = annotation
+            if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+                try:
+                    expression = ast.parse(annotation.value, mode="eval").body
+                except SyntaxError:
+                    continue
+            for node in ast.walk(expression):
+                if not isinstance(node, ast.Call):
+                    continue
+                consumer = _call_consumer(self._canonical_name(node.func))
+                if consumer is not None:
+                    self.consumers.add(consumer)
 
 
 def _callable_annotations(
