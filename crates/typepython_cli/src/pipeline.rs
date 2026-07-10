@@ -84,20 +84,25 @@ struct AnalyzedPipelineState {
     pre_lowering_emit_plan: Vec<EmitArtifact>,
 }
 
-const MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION: u32 = 3;
+const MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION: u32 = 4;
 const ANALYSIS_CACHE_SCHEMA_VERSION: u32 = 3;
 const EFFECT_METADATA_SIDECAR_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 struct CachedEmitArtifact {
+    /// Canonical source identity, independent of the command's working directory.
     source_path: PathBuf,
+    /// Output-root-relative path; absolute and parent components are never accepted.
     runtime_path: Option<PathBuf>,
+    /// Output-root-relative path; absolute and parent components are never accepted.
     stub_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 struct MaterializedBuildManifest {
     schema_version: u32,
+    /// Canonical root that owns every runtime and stub path in `emit_plan`.
+    out_root: PathBuf,
     incremental: IncrementalState,
     emit_plan: Vec<CachedEmitArtifact>,
     output_config: OutputAffectingConfigFingerprint,
@@ -533,7 +538,10 @@ fn cleanup_stale_materialized_outputs(
     let Some(previous_manifest) = load_previous_materialized_build_manifest(config)? else {
         return Ok(None);
     };
-    let previous_artifacts = emit_artifacts_from_cached(&previous_manifest.emit_plan);
+    let out_root = previous_manifest.out_root.clone();
+    let previous_artifacts = emit_artifacts_from_cached(&out_root, &previous_manifest.emit_plan);
+    let current_artifacts =
+        emit_artifacts_from_cached(&out_root, &cached_emit_artifacts(config, current_artifacts)?);
     let current_paths = current_artifacts
         .iter()
         .flat_map(|artifact| {
@@ -547,35 +555,33 @@ fn cleanup_stale_materialized_outputs(
         if let Some(runtime_path) = &artifact.runtime_path
             && !current_paths.contains(runtime_path)
         {
-            if runtime_path.exists() {
-                fs::remove_file(runtime_path).with_context(|| {
-                    format!("unable to remove stale runtime artifact {}", runtime_path.display())
-                })?;
+            if remove_materialized_file_if_exists(
+                &out_root,
+                runtime_path,
+                "stale runtime artifact",
+            )? {
                 removed_files += 1;
             }
             if let Ok(bytecode_path) = bytecode_path_for(runtime_path)
-                && bytecode_path.exists()
+                && remove_materialized_file_if_exists(
+                    &out_root,
+                    &bytecode_path,
+                    "stale bytecode artifact",
+                )?
             {
-                fs::remove_file(&bytecode_path).with_context(|| {
-                    format!("unable to remove stale bytecode artifact {}", bytecode_path.display())
-                })?;
                 removed_files += 1;
             }
         }
         if let Some(stub_path) = &artifact.stub_path
             && !current_paths.contains(stub_path)
-            && stub_path.exists()
+            && remove_materialized_file_if_exists(&out_root, stub_path, "stale stub artifact")?
         {
-            fs::remove_file(stub_path).with_context(|| {
-                format!("unable to remove stale stub artifact {}", stub_path.display())
-            })?;
             removed_files += 1;
         }
     }
 
-    let out_root = config.resolve_relative_path(&config.config.project.out_dir);
     let desired_package_roots = if config.config.emit.write_py_typed {
-        py_typed_package_roots(&out_root, current_artifacts)
+        py_typed_package_roots(&out_root, &current_artifacts)
     } else {
         BTreeSet::new()
     };
@@ -585,16 +591,37 @@ fn cleanup_stale_materialized_outputs(
             continue;
         }
         let marker_path = package_root.join("py.typed");
-        if marker_path.exists() {
-            fs::remove_file(&marker_path).with_context(|| {
-                format!("unable to remove stale package marker {}", marker_path.display())
-            })?;
+        if remove_materialized_file_if_exists(&out_root, &marker_path, "stale package marker")? {
             removed_files += 1;
         }
     }
 
     Ok((removed_files > 0)
         .then(|| format!("removed {} stale materialized artifact(s)", removed_files)))
+}
+
+fn remove_materialized_file_if_exists(
+    out_root: &Path,
+    path: &Path,
+    description: &str,
+) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+
+    let canonical_path = fs::canonicalize(path)
+        .with_context(|| format!("unable to resolve {description} {}", path.display()))?;
+    if !canonical_path.starts_with(out_root) {
+        anyhow::bail!(
+            "refusing to remove {description} {} outside canonical output root {}",
+            path.display(),
+            out_root.display()
+        );
+    }
+
+    fs::remove_file(path)
+        .with_context(|| format!("unable to remove {description} {}", path.display()))?;
+    Ok(true)
 }
 
 pub(crate) fn ensure_output_dirs(config: &ConfigHandle) -> Result<()> {
@@ -809,24 +836,66 @@ fn syntax_tree_source_hashes(
         .collect()
 }
 
-fn cached_emit_artifacts(artifacts: &[EmitArtifact]) -> Vec<CachedEmitArtifact> {
+fn cached_emit_artifacts(
+    config: &ConfigHandle,
+    artifacts: &[EmitArtifact],
+) -> Result<Vec<CachedEmitArtifact>> {
+    let configured_out_root = config.resolve_relative_path(&config.config.project.out_dir);
     artifacts
         .iter()
-        .map(|artifact| CachedEmitArtifact {
-            source_path: artifact.source_path.clone(),
-            runtime_path: artifact.runtime_path.clone(),
-            stub_path: artifact.stub_path.clone(),
+        .map(|artifact| -> Result<CachedEmitArtifact> {
+            Ok(CachedEmitArtifact {
+                source_path: fs::canonicalize(&artifact.source_path).with_context(|| {
+                    format!("unable to resolve source artifact {}", artifact.source_path.display())
+                })?,
+                runtime_path: artifact
+                    .runtime_path
+                    .as_deref()
+                    .map(|path| manifest_relative_output_path(&configured_out_root, path))
+                    .transpose()?,
+                stub_path: artifact
+                    .stub_path
+                    .as_deref()
+                    .map(|path| manifest_relative_output_path(&configured_out_root, path))
+                    .transpose()?,
+            })
         })
         .collect()
 }
 
-fn emit_artifacts_from_cached(artifacts: &[CachedEmitArtifact]) -> Vec<EmitArtifact> {
+fn manifest_relative_output_path(out_root: &Path, path: &Path) -> Result<PathBuf> {
+    let relative = path.strip_prefix(out_root).with_context(|| {
+        format!(
+            "materialized output {} is not under configured output root {}",
+            path.display(),
+            out_root.display()
+        )
+    })?;
+    if !is_safe_manifest_relative_path(relative) {
+        anyhow::bail!(
+            "materialized output {} has an unsafe path relative to {}",
+            path.display(),
+            out_root.display()
+        );
+    }
+    Ok(relative.to_path_buf())
+}
+
+fn is_safe_manifest_relative_path(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && path.components().all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn emit_artifacts_from_cached(
+    out_root: &Path,
+    artifacts: &[CachedEmitArtifact],
+) -> Vec<EmitArtifact> {
     artifacts
         .iter()
         .map(|artifact| EmitArtifact {
             source_path: artifact.source_path.clone(),
-            runtime_path: artifact.runtime_path.clone(),
-            stub_path: artifact.stub_path.clone(),
+            runtime_path: artifact.runtime_path.as_ref().map(|path| out_root.join(path)),
+            stub_path: artifact.stub_path.as_ref().map(|path| out_root.join(path)),
         })
         .collect()
 }
@@ -897,6 +966,16 @@ fn materialized_build_manifest_path(config: &ConfigHandle) -> PathBuf {
     config.resolve_relative_path(&config.config.project.cache_dir).join("build-manifest.json")
 }
 
+fn canonical_materialized_out_root(config: &ConfigHandle) -> Result<Option<PathBuf>> {
+    let out_root = config.resolve_relative_path(&config.config.project.out_dir);
+    match fs::canonicalize(&out_root) {
+        Ok(out_root) => Ok(Some(out_root)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error)
+            .with_context(|| format!("unable to resolve output root {}", out_root.display())),
+    }
+}
+
 fn load_previous_analysis_cache(config: &ConfigHandle) -> Result<Option<AnalysisCache>> {
     let cache_path = analysis_cache_path(config);
     if !cache_path.is_file() {
@@ -926,6 +1005,19 @@ fn load_previous_materialized_build_manifest(
         return Ok(None);
     };
     if manifest.schema_version != MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION {
+        return Ok(None);
+    }
+    let Some(out_root) = canonical_materialized_out_root(config)? else {
+        return Ok(None);
+    };
+    if manifest.out_root != out_root
+        || manifest.emit_plan.iter().any(|artifact| {
+            [artifact.runtime_path.as_deref(), artifact.stub_path.as_deref()]
+                .into_iter()
+                .flatten()
+                .any(|path| !is_safe_manifest_relative_path(path))
+        })
+    {
         return Ok(None);
     }
     Ok(Some(manifest))
@@ -1001,11 +1093,12 @@ fn lowering_diagnostics_by_module(
 fn can_reuse_cached_pipeline_outputs(
     config: &ConfigHandle,
     analyzed: &AnalyzedPipelineState,
+    current_emit_plan: &[CachedEmitArtifact],
     previous_manifest: Option<&MaterializedBuildManifest>,
 ) -> bool {
     previous_manifest.is_some_and(|manifest| {
         manifest.incremental == analyzed.incremental
-            && manifest.emit_plan == cached_emit_artifacts(&analyzed.pre_lowering_emit_plan)
+            && manifest.emit_plan == current_emit_plan
             && materialized_manifest_output_config_matches(config, manifest)
             && !verify_build_artifacts(config, &analyzed.pre_lowering_emit_plan).has_errors()
     })
@@ -1088,6 +1181,7 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let previous_analysis_cache = load_previous_analysis_cache(config)?;
     let previous_manifest = load_previous_materialized_build_manifest(config)?;
     let analyzed = analyze_pipeline_state(config, &prepared, previous.as_ref())?;
+    let current_cached_emit_plan = cached_emit_artifacts(config, &analyzed.pre_lowering_emit_plan)?;
     let project_module_keys = current_project_module_keys(&prepared.syntax_trees);
     let project_syntax_by_module = current_project_syntax_by_module(&prepared.syntax_trees);
     let analysis_metadata = analysis_cache_metadata(config, &analyzed.incremental.metadata);
@@ -1135,7 +1229,12 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     }
     let diagnostics = diagnostics_report_from_modules(&module_diagnostics);
     if previous.is_some()
-        && can_reuse_cached_pipeline_outputs(config, &analyzed, previous_manifest.as_ref())
+        && can_reuse_cached_pipeline_outputs(
+            config,
+            &analyzed,
+            &current_cached_emit_plan,
+            previous_manifest.as_ref(),
+        )
     {
         return Ok(reusable_cached_pipeline_snapshot(
             prepared.source_paths.len(),
@@ -1148,8 +1247,7 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let modules_requiring_materialization = match previous_manifest.as_ref() {
         Some(manifest)
             if manifest.incremental == analyzed.incremental
-                && manifest.emit_plan
-                    == cached_emit_artifacts(&analyzed.pre_lowering_emit_plan)
+                && manifest.emit_plan == current_cached_emit_plan
                 && materialized_manifest_output_config_matches(config, manifest)
                 && verify_build_artifacts(config, &analyzed.pre_lowering_emit_plan)
                     .has_errors() =>
@@ -1158,16 +1256,14 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         }
         Some(manifest)
             if manifest.incremental == analyzed.incremental
-                && manifest.emit_plan
-                    == cached_emit_artifacts(&analyzed.pre_lowering_emit_plan)
+                && manifest.emit_plan == current_cached_emit_plan
                 && materialized_manifest_output_config_matches(config, manifest) =>
         {
             BTreeSet::new()
         }
         Some(manifest)
             if manifest.incremental.metadata != analyzed.incremental.metadata
-                || manifest.emit_plan
-                    != cached_emit_artifacts(&analyzed.pre_lowering_emit_plan)
+                || manifest.emit_plan != current_cached_emit_plan
                 || !materialized_manifest_output_config_matches(config, manifest) =>
         {
             project_module_keys.clone()
@@ -1368,14 +1464,22 @@ fn write_materialized_build_manifest(
     config: &ConfigHandle,
     snapshot: &PipelineSnapshot,
 ) -> Result<PathBuf> {
+    let configured_out_root = config.resolve_relative_path(&config.config.project.out_dir);
+    fs::create_dir_all(&configured_out_root).with_context(|| {
+        format!("unable to create output directory {}", configured_out_root.display())
+    })?;
+    let out_root = fs::canonicalize(&configured_out_root).with_context(|| {
+        format!("unable to resolve output root {}", configured_out_root.display())
+    })?;
     let cache_dir = config.resolve_relative_path(&config.config.project.cache_dir);
     fs::create_dir_all(&cache_dir)
         .with_context(|| format!("unable to create cache directory {}", cache_dir.display()))?;
     let manifest_path = materialized_build_manifest_path(config);
     let payload = serde_json::to_string_pretty(&MaterializedBuildManifest {
         schema_version: MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION,
+        out_root,
         incremental: snapshot.incremental.clone(),
-        emit_plan: cached_emit_artifacts(&snapshot.emit_plan),
+        emit_plan: cached_emit_artifacts(config, &snapshot.emit_plan)?,
         output_config: output_affecting_config_fingerprint(config),
     })
     .context("unable to serialize materialized build manifest")?;

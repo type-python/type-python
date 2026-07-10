@@ -990,6 +990,205 @@ fn run_build_like_command_removes_stale_py_typed_when_disabled() {
 }
 
 #[test]
+fn materialized_manifest_binds_relative_outputs_to_canonical_root_across_path_forms() {
+    let project_dir = temp_project_dir(
+        "materialized_manifest_binds_relative_outputs_to_canonical_root_across_path_forms",
+    );
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+
+        let absolute_config = load(&project_dir).expect("test setup should succeed");
+        let mut relative_config = absolute_config.clone();
+        relative_config.config_dir = relative_path_from(
+            &env::current_dir().expect("current directory should be available"),
+            &project_dir,
+        );
+        relative_config.config_path = relative_config.config_dir.join("typepython.toml");
+
+        let first = run_pipeline(&relative_config).expect("initial pipeline should succeed");
+        materialize_build_outputs(&relative_config, &first)
+            .expect("initial materialization should succeed");
+        let manifest_path = project_dir.join(".typepython/cache/build-manifest.json");
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&manifest_path).expect("manifest should exist"),
+        )
+        .expect("manifest should be valid JSON");
+
+        fs::remove_file(project_dir.join("src/app.tpy")).expect("old source should be removed");
+        fs::write(project_dir.join("src/other.tpy"), "def build() -> int:\n    return 2\n")
+            .expect("replacement source should be written");
+        let second = run_pipeline(&absolute_config).expect("follow-up pipeline should succeed");
+        materialize_build_outputs(&absolute_config, &second)
+            .expect("follow-up materialization should succeed");
+
+        (
+            manifest,
+            fs::canonicalize(project_dir.join(".typepython/build"))
+                .expect("output root should exist"),
+            project_dir.join(".typepython/build/app.py").exists(),
+            project_dir.join(".typepython/build/app.pyi").exists(),
+            project_dir.join(".typepython/build/other.py").exists(),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let (manifest, canonical_out_root, old_runtime, old_stub, new_runtime) = result;
+    assert_eq!(manifest["schema_version"].as_u64(), Some(4));
+    assert_eq!(
+        manifest["out_root"].as_str(),
+        canonical_out_root.to_str(),
+        "manifest should bind relative entries to the canonical output root"
+    );
+    assert_eq!(manifest["emit_plan"][0]["runtime_path"].as_str(), Some("app.py"));
+    assert_eq!(manifest["emit_plan"][0]["stub_path"].as_str(), Some("app.pyi"));
+    assert!(!old_runtime);
+    assert!(!old_stub);
+    assert!(new_runtime);
+}
+
+#[test]
+fn materialized_manifest_ignores_absolute_parent_and_foreign_root_paths() {
+    let project_dir =
+        temp_project_dir("materialized_manifest_ignores_absolute_parent_and_foreign_root_paths");
+    let sentinels = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let first = run_pipeline(&config).expect("initial pipeline should succeed");
+        materialize_build_outputs(&config, &first).expect("initial materialization should succeed");
+        let manifest_path = project_dir.join(".typepython/cache/build-manifest.json");
+
+        let absolute_sentinel = project_dir.join("absolute-sentinel.py");
+        fs::write(&absolute_sentinel, "do not delete\n").expect("sentinel should be written");
+        let mut manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&manifest_path).expect("manifest should exist"),
+        )
+        .expect("manifest should be valid JSON");
+        manifest["emit_plan"][0]["runtime_path"] =
+            serde_json::Value::String(absolute_sentinel.display().to_string());
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).expect("manifest should serialize"),
+        )
+        .expect("tampered manifest should be written");
+        let rebuilt = run_pipeline(&config).expect("pipeline should ignore unsafe manifest");
+        materialize_build_outputs(&config, &rebuilt)
+            .expect("materialization should ignore unsafe manifest");
+
+        let parent_sentinel = project_dir.join("parent-sentinel.pyi");
+        fs::write(&parent_sentinel, "do not delete\n").expect("sentinel should be written");
+        let mut manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&manifest_path).expect("manifest should exist"),
+        )
+        .expect("manifest should be valid JSON");
+        let parent_escape = relative_path_from(
+            &env::current_dir().expect("current directory should be available"),
+            &parent_sentinel,
+        );
+        assert!(
+            parent_escape
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir)),
+            "test path should exercise parent traversal"
+        );
+        manifest["emit_plan"][0]["stub_path"] =
+            serde_json::Value::String(parent_escape.display().to_string());
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).expect("manifest should serialize"),
+        )
+        .expect("tampered manifest should be written");
+        let rebuilt = run_pipeline(&config).expect("pipeline should ignore unsafe manifest");
+        materialize_build_outputs(&config, &rebuilt)
+            .expect("materialization should ignore unsafe manifest");
+
+        let foreign_root = project_dir.join("foreign-output");
+        fs::create_dir_all(&foreign_root).expect("foreign root should be created");
+        let foreign_sentinel = foreign_root.join("foreign-sentinel.py");
+        fs::write(&foreign_sentinel, "do not delete\n").expect("sentinel should be written");
+        let mut manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&manifest_path).expect("manifest should exist"),
+        )
+        .expect("manifest should be valid JSON");
+        manifest["out_root"] = serde_json::Value::String(
+            fs::canonicalize(&foreign_root)
+                .expect("foreign root should resolve")
+                .display()
+                .to_string(),
+        );
+        manifest["emit_plan"][0]["runtime_path"] =
+            serde_json::Value::String(String::from("foreign-sentinel.py"));
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).expect("manifest should serialize"),
+        )
+        .expect("tampered manifest should be written");
+        let rebuilt = run_pipeline(&config).expect("pipeline should ignore foreign manifest");
+        materialize_build_outputs(&config, &rebuilt)
+            .expect("materialization should ignore foreign manifest");
+
+        (absolute_sentinel.exists(), parent_sentinel.exists(), foreign_sentinel.exists())
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(sentinels, (true, true, true));
+}
+
+#[cfg(unix)]
+#[test]
+fn materialized_manifest_refuses_symlink_escape_during_cleanup() {
+    let project_dir =
+        temp_project_dir("materialized_manifest_refuses_symlink_escape_during_cleanup");
+    let (error, sentinel_exists) = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let first = run_pipeline(&config).expect("initial pipeline should succeed");
+        materialize_build_outputs(&config, &first).expect("initial materialization should succeed");
+
+        let outside = project_dir.join("outside");
+        fs::create_dir_all(&outside).expect("outside directory should be created");
+        let sentinel = outside.join("sentinel.py");
+        fs::write(&sentinel, "do not delete\n").expect("sentinel should be written");
+        std::os::unix::fs::symlink(&outside, project_dir.join(".typepython/build/escape"))
+            .expect("escape symlink should be created");
+
+        let manifest_path = project_dir.join(".typepython/cache/build-manifest.json");
+        let mut manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&manifest_path).expect("manifest should exist"),
+        )
+        .expect("manifest should be valid JSON");
+        manifest["emit_plan"][0]["runtime_path"] =
+            serde_json::Value::String(String::from("escape/sentinel.py"));
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).expect("manifest should serialize"),
+        )
+        .expect("tampered manifest should be written");
+
+        let rebuilt = run_pipeline(&config).expect("pipeline should complete analysis");
+        let error = materialize_build_outputs(&config, &rebuilt)
+            .expect_err("cleanup must refuse a symlink escape")
+            .to_string();
+        (error, sentinel.exists())
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(error.contains("outside canonical output root"), "{error}");
+    assert!(sentinel_exists);
+}
+
+#[test]
 fn run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed() {
     let project_dir =
         temp_project_dir("run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed");
@@ -1146,6 +1345,28 @@ fn persist_pipeline_caches(config: &typepython_config::ConfigHandle, snapshot: &
     materialize_build_outputs(config, snapshot).expect("materialized outputs should be written");
 }
 
+fn relative_path_from(base: &Path, target: &Path) -> PathBuf {
+    let base = fs::canonicalize(base).expect("base path should resolve");
+    let target = fs::canonicalize(target).expect("target path should resolve");
+    let base_components = base.components().collect::<Vec<_>>();
+    let target_components = target.components().collect::<Vec<_>>();
+    let shared = base_components
+        .iter()
+        .zip(&target_components)
+        .take_while(|(left, right)| left == right)
+        .count();
+    assert!(shared > 0, "base and target should share a filesystem root");
+
+    let mut relative = PathBuf::new();
+    for _ in &base_components[shared..] {
+        relative.push("..");
+    }
+    for component in &target_components[shared..] {
+        relative.push(component.as_os_str());
+    }
+    relative
+}
+
 #[test]
 fn run_pipeline_selectively_lowers_only_changed_module_for_implementation_edits() {
     let project_dir = temp_project_dir(
@@ -1284,7 +1505,7 @@ fn materialized_build_manifest_records_output_affecting_config() {
         serde_json::from_str(&manifest).expect("manifest should be JSON");
     let output_config = &manifest["output_config"];
 
-    assert_eq!(manifest["schema_version"].as_u64(), Some(3));
+    assert_eq!(manifest["schema_version"].as_u64(), Some(4));
     assert_eq!(output_config["target_python"].as_str(), Some("3.13"));
     assert_eq!(output_config["emit_style"].as_str(), Some("compat"));
     assert_eq!(output_config["emit_pyi"].as_bool(), Some(false));
