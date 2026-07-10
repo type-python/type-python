@@ -510,15 +510,18 @@ fn resolve_local_typed_dict_shape_inner(
             continue;
         }
         let base_name = local_base_name(base);
-        let Some(_base_block) = classes.get(base_name) else {
+        let Some(base_block) = classes.get(base_name).copied() else {
             stack.pop();
             return Err(TypedDictInheritanceError::UnknownBase {
                 owner: block.name.clone(),
                 base: base.trim().to_owned(),
             });
         };
-        if let Some(base_shape) = resolve_local_typed_dict_shape_inner(base_name, classes, stack)? {
+        if let Some(mut base_shape) =
+            resolve_local_typed_dict_shape_inner(base_name, classes, stack)?
+        {
             is_typed_dict = true;
+            substitute_projection_field_types(&mut base_shape.fields, base, base_block);
             merge_projection_fields(&mut fields, base_shape.fields);
         }
     }
@@ -538,6 +541,91 @@ fn resolve_local_typed_dict_shape_inner(
 
 fn local_base_name(base: &str) -> &str {
     base.trim().split_once('[').map_or(base.trim(), |(head, _)| head.trim())
+}
+
+fn substitute_projection_field_types(
+    fields: &mut [typepython_syntax::ShapeProjectionField],
+    base: &str,
+    base_block: &typepython_syntax::NamedBlockStatement,
+) {
+    let Some((_, arguments)) = parse_transform_expr(base) else {
+        return;
+    };
+    let substitutions = base_block
+        .type_params
+        .iter()
+        .zip(arguments.into_iter().skip(1))
+        .filter_map(|(parameter, argument)| {
+            typepython_syntax::TypeExpr::parse(argument)
+                .map(|argument| (parameter.name.clone(), argument))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if substitutions.is_empty() {
+        return;
+    }
+
+    for field in fields {
+        let Some(annotation) = field.annotation.as_deref() else {
+            continue;
+        };
+        let Some(annotation) = typepython_syntax::TypeExpr::parse(annotation) else {
+            continue;
+        };
+        field.annotation = Some(substitute_type_expr(annotation, &substitutions).render());
+    }
+}
+
+fn substitute_type_expr(
+    expression: typepython_syntax::TypeExpr,
+    substitutions: &std::collections::BTreeMap<String, typepython_syntax::TypeExpr>,
+) -> typepython_syntax::TypeExpr {
+    use typepython_syntax::{CallableParamExpr, TypeExpr};
+
+    match expression {
+        TypeExpr::Name(name) => substitutions.get(&name).cloned().unwrap_or(TypeExpr::Name(name)),
+        TypeExpr::Generic { head, args } => TypeExpr::Generic {
+            head,
+            args: args
+                .into_iter()
+                .map(|argument| substitute_type_expr(argument, substitutions))
+                .collect(),
+        },
+        TypeExpr::Callable { params, return_type } => TypeExpr::Callable {
+            params: Box::new(match *params {
+                CallableParamExpr::Ellipsis => CallableParamExpr::Ellipsis,
+                CallableParamExpr::ParamList(parameters) => CallableParamExpr::ParamList(
+                    parameters
+                        .into_iter()
+                        .map(|parameter| substitute_type_expr(parameter, substitutions))
+                        .collect(),
+                ),
+                CallableParamExpr::Concatenate(parameters) => CallableParamExpr::Concatenate(
+                    parameters
+                        .into_iter()
+                        .map(|parameter| substitute_type_expr(parameter, substitutions))
+                        .collect(),
+                ),
+                CallableParamExpr::Single(parameter) => CallableParamExpr::Single(Box::new(
+                    substitute_type_expr(*parameter, substitutions),
+                )),
+            }),
+            return_type: Box::new(substitute_type_expr(*return_type, substitutions)),
+        },
+        TypeExpr::Union { branches, style } => TypeExpr::Union {
+            branches: branches
+                .into_iter()
+                .map(|branch| substitute_type_expr(branch, substitutions))
+                .collect(),
+            style,
+        },
+        TypeExpr::Annotated { value, metadata } => TypeExpr::Annotated {
+            value: Box::new(substitute_type_expr(*value, substitutions)),
+            metadata,
+        },
+        TypeExpr::Unpack(value) => {
+            TypeExpr::Unpack(Box::new(substitute_type_expr(*value, substitutions)))
+        }
+    }
 }
 
 fn is_typed_dict_support_base(base: &str) -> bool {

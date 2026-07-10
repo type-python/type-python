@@ -3144,6 +3144,35 @@ fn lower_flattens_multilevel_inherited_typed_dict_transforms() {
 }
 
 #[test]
+fn lower_substitutes_generic_inherited_typed_dict_fields() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("generic-inherited-typed-dict.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "from typing import TypedDict\n",
+            "class Base[T](TypedDict):\n",
+            "    value: T\n",
+            "    wrapped: list[T]\n\n",
+            "class Mid[U](Base[list[U]]):\n",
+            "    extra: U\n\n",
+            "class Child(Mid[int]):\n",
+            "    pass\n\n",
+            "typealias Selected = Pick[Child, \"value\", \"wrapped\", \"extra\"]\n",
+        )),
+    });
+
+    let lowered = lower_with_options(&tree, &LoweringOptions::default());
+    assert!(!lowered.diagnostics.has_errors(), "{}", lowered.diagnostics.as_text());
+    let selected = emitted_class_block(&lowered.module.python_source, "Selected");
+    assert!(selected.contains("value: list[int]"), "{selected}");
+    assert!(selected.contains("wrapped: list[list[int]]"), "{selected}");
+    assert!(selected.contains("extra: int"), "{selected}");
+    assert!(!selected.contains(": T"), "{selected}");
+    assert!(!selected.contains(": U"), "{selected}");
+}
+
+#[test]
 fn lower_reports_unknown_and_cyclic_typed_dict_inheritance() {
     let tree = parse(SourceFile {
         path: PathBuf::from("invalid-inherited-typed-dict.tpy"),
