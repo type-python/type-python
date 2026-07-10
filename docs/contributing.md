@@ -328,7 +328,7 @@ make fuzz-smoke
 make fuzz-long
 ```
 
-The first fuzz targets cover parser entrypoints, `TypeExpr` parsing/rendering, and the TypePython lowering plus authoritative stub-emission path. Seed corpus files are checked in under `fuzz/corpus/`; crashing inputs are written to `fuzz/artifacts/` and uploaded by CI.
+The fuzz targets cover parser entrypoints without discarding selector bytes, idempotent `TypeExpr` parse/render round trips, the TypePython lowering plus authoritative stub-emission path, and the full parse-bind-graph-check pipeline. Seed corpus files are checked in under `fuzz/corpus/`; crashing inputs are written to `fuzz/artifacts/` and uploaded by CI.
 
 ## Makefile Targets
 

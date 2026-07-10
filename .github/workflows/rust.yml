@@ -161,7 +161,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fuzz-target: [parser, type_expr, lowering_stub]
+        fuzz-target: [parser, type_expr, lowering_stub, checker]
 
     steps:
       - name: Check out repository
@@ -190,7 +190,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fuzz-target: [parser, type_expr, lowering_stub]
+        fuzz-target: [parser, type_expr, lowering_stub, checker]
 
     steps:
       - name: Check out repository

@@ -15,7 +15,7 @@ fuzz_target!(|data: &[u8]| {
         1 => SourceKind::Python,
         _ => SourceKind::Stub,
     };
-    let text = String::from_utf8_lossy(&data[1..]).into_owned();
+    let text = String::from_utf8_lossy(data).into_owned();
     let source = SourceFile {
         path: PathBuf::from("/fuzz/input.tpy"),
         kind,

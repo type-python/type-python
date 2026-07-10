@@ -115,7 +115,7 @@ A Beta release candidate must pass the tracked release gate before the classifie
   `.pyi` fragments and runtime erasure of TypePython-only syntax
 - roadmap demo smoke: `python scripts/research_roadmap_demo_smoke.py`, which checks and builds the
   P0-P4 author-time semantics example and asserts portable output
-- fuzz smoke: `parser`, `type_expr`, and `lowering_stub`
+- fuzz smoke: `parser`, `type_expr`, `lowering_stub`, and `checker`
 - package build and metadata check: `python -m build --sdist --wheel` and `python -m twine check dist/*`
 - installed wheel quickstart smoke, including `typepython --help`, `init`, `check`, `build`, and
   `verify`, proving the installed wheel uses its bundled Rust CLI without `cargo`

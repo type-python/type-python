@@ -468,6 +468,25 @@ class RepoContractsTests(unittest.TestCase):
         release_gate = workflow.split("beta-release-gate:", 1)[1]
         self.assertIn("python-package-hosts", release_gate)
 
+    def test_fuzz_matrix_covers_parser_roundtrip_lowering_and_checker(self) -> None:
+        makefile = read_text("Makefile")
+        rust_workflow = read_text(".github/workflows/rust.yml")
+        security_workflow = read_text(".github/workflows/security.yml")
+        parser_target = read_text("fuzz/fuzz_targets/parser.rs")
+        type_expr_target = read_text("fuzz/fuzz_targets/type_expr.rs")
+        checker_target = read_text("fuzz/fuzz_targets/checker.rs")
+
+        expected = "parser type_expr lowering_stub checker"
+        self.assertIn(f"FUZZ_TARGETS ?= {expected}", makefile)
+        for workflow in (rust_workflow, security_workflow):
+            self.assertIn("[parser, type_expr, lowering_stub, checker]", workflow)
+        self.assertIn("String::from_utf8_lossy(data)", parser_target)
+        self.assertNotIn("data[1..]", parser_target)
+        self.assertIn("assert_eq!(reparsed.render(), rendered", type_expr_target)
+        self.assertIn("let binding = bind(&tree)", checker_target)
+        self.assertIn("let graph = build(&[binding])", checker_target)
+        self.assertIn("let _ = check(&graph)", checker_target)
+
     def test_dx_and_lsp_stability_boundary_is_documented(self) -> None:
         dx = read_text("docs/dx-stability.md")
         beta = read_text("docs/beta-readiness.md")

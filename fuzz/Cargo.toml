@@ -9,7 +9,10 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+typepython-binding = { path = "../crates/typepython_binding" }
+typepython-checking = { path = "../crates/typepython_checking" }
 typepython-emit = { path = "../crates/typepython_emit" }
+typepython-graph = { path = "../crates/typepython_graph" }
 typepython-lowering = { path = "../crates/typepython_lowering" }
 typepython-syntax = { path = "../crates/typepython_syntax" }
 
@@ -30,6 +33,13 @@ bench = false
 [[bin]]
 name = "lowering_stub"
 path = "fuzz_targets/lowering_stub.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "checker"
+path = "fuzz_targets/checker.rs"
 test = false
 doc = false
 bench = false
