@@ -1997,6 +1997,58 @@ fn lower_expands_partial_dataclass_shape_transform_when_experimental() {
 }
 
 #[test]
+fn aliased_imports_do_not_satisfy_generated_unqualified_bindings() {
+    let interface = lower(&parse(SourceFile {
+        path: PathBuf::from("aliased-protocol.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(
+            "from typing import (\n    Protocol as P,\n    Protocolish,\n)\n\ninterface Service:\n    def run(self) -> None: ...\n",
+        ),
+    }));
+
+    assert!(interface.diagnostics.is_empty(), "{}", interface.diagnostics.as_text());
+    assert!(
+        interface.module.required_imports.contains(&String::from("from typing import Protocol"))
+    );
+
+    let transform = lower_with_options(
+        &parse(SourceFile {
+            path: PathBuf::from("qualified-typing.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "import typing\nfrom typing import TypedDict as TD\n\ndata class User:\n    id: int\n\ntypealias UserPatch = Partial[User]\n",
+            ),
+        }),
+        &experimental_shape_options(),
+    );
+
+    assert!(transform.diagnostics.is_empty(), "{}", transform.diagnostics.as_text());
+    assert!(
+        transform.module.required_imports.contains(&String::from("from typing import TypedDict"))
+    );
+    assert!(transform.module.python_source.contains("class UserPatch(TypedDict):"));
+}
+
+#[test]
+fn exact_unaliased_multiline_imports_satisfy_generated_bindings() {
+    let lowered = lower(&parse(SourceFile {
+        path: PathBuf::from("multiline-protocol.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(
+            "from typing import (\n    Protocol,\n    Protocolish,\n)\n\ninterface Service:\n    def run(self) -> None: ...\n",
+        ),
+    }));
+
+    assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+    assert!(
+        !lowered.module.required_imports.contains(&String::from("from typing import Protocol"))
+    );
+}
+
+#[test]
 fn lower_expands_pick_dataclass_shape_transform_when_experimental() {
     let lowered = lower_with_options(
         &parse(SourceFile {

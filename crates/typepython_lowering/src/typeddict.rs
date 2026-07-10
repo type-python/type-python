@@ -205,45 +205,19 @@ fn apply_transform_to_shape(
 }
 
 pub(super) fn has_notrequired_import(source: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == "from typing_extensions import NotRequired"
-            || (trimmed.starts_with("from typing_extensions import ")
-                && trimmed.contains("NotRequired"))
-            || (trimmed.starts_with("from typing import ") && trimmed.contains("NotRequired"))
-    })
+    super::core::has_unaliased_typing_import(source, "NotRequired")
 }
 
 pub(super) fn has_readonly_import(source: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == "from typing_extensions import ReadOnly"
-            || (trimmed.starts_with("from typing_extensions import ")
-                && trimmed.contains("ReadOnly"))
-            || (trimmed.starts_with("from typing import ") && trimmed.contains("ReadOnly"))
-    })
+    super::core::has_unaliased_typing_import(source, "ReadOnly")
 }
 
 pub(super) fn has_optional_import(source: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == "from typing import Optional"
-            || (trimmed.starts_with("from typing import ") && trimmed.contains("Optional"))
-            || trimmed == "import typing"
-    })
+    super::core::has_unaliased_from_import(source, "typing", "Optional")
 }
 
 pub(super) fn has_typeddict_import(source: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == "from typing import TypedDict"
-            || trimmed == "from typing_extensions import TypedDict"
-            || (trimmed.starts_with("from typing import ") && trimmed.contains("TypedDict"))
-            || (trimmed.starts_with("from typing_extensions import ")
-                && trimmed.contains("TypedDict"))
-            || trimmed == "import typing"
-            || trimmed == "import typing_extensions"
-    })
+    super::core::has_unaliased_typing_import(source, "TypedDict")
 }
 
 pub(super) fn transform_targets_data_class(

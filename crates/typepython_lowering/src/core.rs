@@ -1109,11 +1109,7 @@ fn normalize_intrinsic_type_text(text: &str) -> Option<String> {
 }
 
 fn has_any_import(source: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == "from typing import Any"
-            || (trimmed.starts_with("from typing import ") && trimmed.contains("Any"))
-    })
+    has_unaliased_from_import(source, "typing", "Any")
 }
 
 fn tree_uses_dynamic_intrinsic(tree: &SyntaxTree) -> bool {
@@ -2019,56 +2015,54 @@ fn rewrite_typevar_line(
 }
 
 fn has_typealias_import(source: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == "from typing import TypeAlias"
-            || (trimmed.starts_with("from typing import ") && trimmed.contains("TypeAlias"))
-    })
+    has_unaliased_from_import(source, "typing", "TypeAlias")
 }
 
 fn has_literal_import(source: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == "from typing import Literal"
-            || (trimmed.starts_with("from typing import ") && trimmed.contains("Literal"))
-    })
+    has_unaliased_from_import(source, "typing", "Literal")
 }
 
-fn has_typevar_import(source: &str, module: &str) -> bool {
-    has_unaliased_from_import(source, module, "TypeVar")
+fn has_typevar_import(source: &str, _module: &str) -> bool {
+    has_unaliased_typing_import(source, "TypeVar")
 }
 
-fn has_paramspec_import(source: &str, module: &str) -> bool {
-    has_unaliased_from_import(source, module, "ParamSpec")
+fn has_paramspec_import(source: &str, _module: &str) -> bool {
+    has_unaliased_typing_import(source, "ParamSpec")
 }
 
-fn has_typevartuple_import(source: &str, module: &str) -> bool {
-    has_unaliased_from_import(source, module, "TypeVarTuple")
+fn has_typevartuple_import(source: &str, _module: &str) -> bool {
+    has_unaliased_typing_import(source, "TypeVarTuple")
 }
 
-fn has_unpack_import(source: &str, module: &str) -> bool {
-    has_unaliased_from_import(source, module, "Unpack")
+fn has_unpack_import(source: &str, _module: &str) -> bool {
+    has_unaliased_typing_import(source, "Unpack")
 }
 
-fn has_unaliased_from_import(source: &str, module: &str, symbol: &str) -> bool {
-    let prefix = format!("from {module} import ");
-    source.lines().any(|line| {
-        let Some(imported_names) = line.trim().strip_prefix(&prefix) else {
+pub(super) fn has_unaliased_from_import(source: &str, module: &str, symbol: &str) -> bool {
+    let parsed = ruff_python_parser::parse_unchecked(
+        source,
+        ruff_python_parser::ParseOptions::from(ruff_python_parser::Mode::Module),
+    );
+    let Some(module_ast) = parsed.syntax().as_module() else {
+        return false;
+    };
+    module_ast.body.iter().any(|statement| {
+        let Stmt::ImportFrom(import) = statement else {
             return false;
         };
-        imported_names
-            .split('#')
-            .next()
-            .unwrap_or_default()
-            .split(',')
-            .map(|entry| entry.trim().trim_matches(['(', ')']))
-            .any(|entry| {
-                entry == symbol
-                    || entry.split_once(" as ").is_some_and(|(imported, binding)| {
-                        imported.trim() == symbol && binding.trim() == symbol
-                    })
+        import.level == 0
+            && import.module.as_deref() == Some(module)
+            && import.names.iter().any(|alias| {
+                alias.name.as_str() == symbol
+                    && alias.asname.as_deref().is_none_or(|binding| binding == symbol)
             })
     })
+}
+
+pub(super) fn has_unaliased_typing_import(source: &str, symbol: &str) -> bool {
+    ["typing", "typing_extensions"]
+        .into_iter()
+        .any(|module| has_unaliased_from_import(source, module, symbol))
 }
 
 fn rewrite_typevar_import_line(module: &str) -> String {
@@ -2098,23 +2092,25 @@ fn has_unqualified_symbol_usage(source: &str, symbol: &str) -> bool {
 }
 
 fn has_generic_import(source: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == "from typing import Generic"
-            || (trimmed.starts_with("from typing import ") && trimmed.contains("Generic"))
-    })
+    has_unaliased_from_import(source, "typing", "Generic")
 }
 
 fn has_module_import(source: &str, module: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == format!("import {module}")
-            || trimmed.starts_with(&format!("import {module},"))
-            || (trimmed.starts_with("import ")
-                && trimmed
-                    .trim_start_matches("import ")
-                    .split(',')
-                    .any(|entry| entry.trim() == module))
+    let parsed = ruff_python_parser::parse_unchecked(
+        source,
+        ruff_python_parser::ParseOptions::from(ruff_python_parser::Mode::Module),
+    );
+    let Some(module_ast) = parsed.syntax().as_module() else {
+        return false;
+    };
+    module_ast.body.iter().any(|statement| {
+        let Stmt::Import(import) = statement else {
+            return false;
+        };
+        import.names.iter().any(|alias| {
+            alias.name.as_str() == module
+                && alias.asname.as_deref().is_none_or(|binding| binding == module)
+        })
     })
 }
 
@@ -2597,19 +2593,11 @@ fn generic_base(
 }
 
 fn has_protocol_import(source: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == "from typing import Protocol"
-            || (trimmed.starts_with("from typing import ") && trimmed.contains("Protocol"))
-    })
+    has_unaliased_from_import(source, "typing", "Protocol")
 }
 
 fn has_dataclass_import(source: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == "from dataclasses import dataclass"
-            || (trimmed.starts_with("from dataclasses import ") && trimmed.contains("dataclass"))
-    })
+    has_unaliased_from_import(source, "dataclasses", "dataclass")
 }
 
 fn rewrite_overload_lines(
@@ -2633,11 +2621,7 @@ fn rewrite_overload_lines(
 }
 
 fn has_overload_import(source: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == "from typing import overload"
-            || (trimmed.starts_with("from typing import ") && trimmed.contains("overload"))
-    })
+    has_unaliased_from_import(source, "typing", "overload")
 }
 
 pub(super) fn is_lowerable_named_block(statement: &typepython_syntax::NamedBlockStatement) -> bool {
