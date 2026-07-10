@@ -58,7 +58,7 @@ fn diff_api_surfaces_reports_added_removed_and_changed_symbols() {
                 "Review required: changed value `VALUE` in module `app` from `VALUE: int` to `VALUE: str`."
             ),
             String::from(
-                "Review required: changed function `parse` in module `app` from `def parse(value: str) -> int: ...` to `def parse(value: bytes) -> int: ...`."
+                "Review required: changed function `parse` in module `app` from `def parse(value: str) -> int:` to `def parse(value: bytes) -> int:`."
             ),
             String::from("Added public class `Added` to module `app`."),
         ]
@@ -151,6 +151,297 @@ fn diff_api_surfaces_accepts_typepython_source_directory_inputs() {
 
     assert_eq!(report.removed[0].symbol, "Removed");
     assert_eq!(report.added[0].symbol, "Added");
+}
+
+#[test]
+fn diff_api_surfaces_canonicalizes_multiline_overload_signatures() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_canonicalizes_multiline_overload_signatures");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload\n\n",
+                "@overload\n",
+                "def parse(\n",
+                "    value: str,\n",
+                ") -> int: ...\n",
+                "@overload\n",
+                "def parse(value: bytes, /) -> int: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload\n\n",
+                "@overload\n",
+                "def parse(value: str) -> int: ...\n",
+                "@overload\n",
+                "def parse(\n",
+                "    value: bytes,\n",
+                "    /,\n",
+                ") -> int: ...\n",
+            ),
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should parse overloads")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+}
+
+#[test]
+fn diff_api_surfaces_preserves_semantic_tuple_commas_in_annotations() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_preserves_semantic_tuple_commas_in_annotations");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            "from typing import Literal\ndef choose(value: Literal[(1,)]) -> int: ...\n",
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            "from typing import Literal\ndef choose(value: Literal[1]) -> int: ...\n",
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should retain tuple semantics")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].symbol, "choose");
+}
+
+#[test]
+fn diff_api_surfaces_compares_every_overload_variant() {
+    let project_dir = temp_project_dir("diff_api_surfaces_compares_every_overload_variant");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload as _overload\n",
+                "@_overload\n",
+                "def parse(value: str) -> int: ...\n",
+                "@_overload\n",
+                "def parse(value: bytes) -> int: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload as _overload\n",
+                "@_overload\n",
+                "def parse(value: str) -> int: ...\n",
+                "@_overload\n",
+                "def parse(value: bytes) -> str: ...\n",
+            ),
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should compare overloads")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].symbol, "parse");
+    assert!(report.changed[0].old_signature.as_deref().is_some_and(|signature| {
+        signature.contains("parse(value: str)") && signature.contains("parse(value: bytes)")
+    }));
+}
+
+#[test]
+fn diff_api_surfaces_reports_class_method_property_and_attribute_changes() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_reports_class_method_property_and_attribute_changes");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("client.pyi"),
+            concat!(
+                "class Client:\n",
+                "    endpoint: str\n",
+                "    @property\n",
+                "    def status(self) -> str: ...\n",
+                "    @status.setter\n",
+                "    def status(self, value: str) -> None: ...\n",
+                "    def __init__(self) -> None:\n",
+                "        self.token: str\n",
+                "    def request(self, path: str) -> bytes: ...\n",
+                "    def __enter__(self) -> Client: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("client.pyi"),
+            concat!(
+                "class Client:\n",
+                "    endpoint: bytes\n",
+                "    @property\n",
+                "    def status(self) -> str: ...\n",
+                "    @status.setter\n",
+                "    def status(self, value: bytes) -> None: ...\n",
+                "    def __init__(self) -> None:\n",
+                "        self.token: bytes\n",
+                "    def __enter__(self) -> Client: ...\n",
+            ),
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should compare class members")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.changed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["Client.endpoint", "Client.status", "Client.token"]
+    );
+    assert_eq!(
+        report.removed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["Client.request"]
+    );
+    assert!(!report.changed.iter().any(|change| change.symbol == "Client.__enter__"));
+}
+
+#[test]
+fn diff_api_surfaces_uses_static_all_for_private_and_reexported_names() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_uses_static_all_for_private_and_reexported_names");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import Any\n",
+                "from ._core import Public as Public, _private\n",
+                "EXPORTS = [\"Public\"]\n",
+                "__all__ = EXPORTS + [\"_private\"]\n",
+                "def hidden() -> Any: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "from typing import Any\n",
+                "from ._core import Public as Public, _private\n",
+                "EXPORTS = [\"_private\"]\n",
+                "__all__ = EXPORTS\n",
+                "def hidden() -> Any: ...\n",
+            ),
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should honor __all__")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.removed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["Public"]
+    );
+    assert_eq!(report.removed[0].kind, "re-export");
+    assert!(report.changed.is_empty());
+    assert!(report.added.is_empty());
+}
+
+#[test]
+fn diff_api_surfaces_tracks_stub_and_runtime_reexports() {
+    let project_dir = temp_project_dir("diff_api_surfaces_tracks_stub_and_runtime_reexports");
+    let (stub_report, runtime_report) = {
+        let old_stubs = project_dir.join("old-stubs");
+        let new_stubs = project_dir.join("new-stubs");
+        let old_runtime = project_dir.join("old-runtime");
+        let new_runtime = project_dir.join("new-runtime");
+        for directory in [&old_stubs, &new_stubs, &old_runtime, &new_runtime] {
+            fs::create_dir_all(directory).expect("surface dir should be created");
+        }
+        fs::write(old_stubs.join("app.pyi"), "from ._core import Public as Public\n")
+            .expect("old stub should be written");
+        fs::write(new_stubs.join("app.pyi"), "from .v2 import Public as Public\n")
+            .expect("new stub should be written");
+        fs::write(old_runtime.join("app.py"), "from ._core import Public\n")
+            .expect("old runtime source should be written");
+        fs::write(new_runtime.join("app.py"), "from .v2 import Public\n")
+            .expect("new runtime source should be written");
+
+        (
+            diff_api_surfaces(&old_stubs, &new_stubs).expect("stub re-export should be compared"),
+            diff_api_surfaces(&old_runtime, &new_runtime)
+                .expect("runtime re-export should be compared"),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    for report in [stub_report, runtime_report] {
+        assert_eq!(report.changed.len(), 1);
+        assert_eq!(report.changed[0].symbol, "Public");
+        assert_eq!(report.changed[0].kind, "re-export");
+    }
+}
+
+#[test]
+fn diff_api_surfaces_compares_typepython_class_members() {
+    let project_dir = temp_project_dir("diff_api_surfaces_compares_typepython_class_members");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("models.tpy"),
+            concat!(
+                "data class User:\n",
+                "    name: str\n",
+                "    def render(self, prefix: str) -> str:\n",
+                "        return prefix + self.name\n",
+            ),
+        )
+        .expect("old TypePython source should be written");
+        fs::write(
+            new_dir.join("models.tpy"),
+            concat!(
+                "data class User:\n",
+                "    name: bytes\n",
+                "    def render(self, prefix: bytes) -> str:\n",
+                "        return str(prefix)\n",
+            ),
+        )
+        .expect("new TypePython source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should compare TypePython members")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.changed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["User.name", "User.render"]
+    );
 }
 
 #[test]
