@@ -48,6 +48,8 @@ struct RuntimeImportabilityResult {
 struct AnnotationRuntimeAuditResult {
     consumers: Vec<String>,
     findings: Vec<AnnotationRuntimeAuditFinding>,
+    #[serde(default)]
+    parse_error: Option<AnnotationRuntimeAuditParseError>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -58,14 +60,50 @@ struct AnnotationRuntimeAuditFinding {
     column: usize,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct AnnotationRuntimeAuditParseError {
+    host_python: String,
+    target_python: String,
+    message: String,
+    line: Option<usize>,
+    column: Option<usize>,
+    host_older_than_target: bool,
+}
+
 const ANNOTATION_RUNTIME_AUDIT_SCRIPT: &str = r#"
+import ast
 import json
 import pathlib
 import sys
 
 source_path = pathlib.Path(sys.argv[1])
+target_text = sys.argv[2]
+target_version = tuple(int(part) for part in target_text.split(".", 1))
+host_version = sys.version_info[:2]
 source = source_path.read_text(encoding="utf-8")
 from typepython.annotation_compat import audit_source
+
+try:
+    ast.parse(
+        source,
+        filename=str(source_path),
+        feature_version=target_version if target_version <= host_version else None,
+    )
+except SyntaxError as error:
+    payload = {
+        "consumers": [],
+        "findings": [],
+        "parse_error": {
+            "host_python": f"{host_version[0]}.{host_version[1]}",
+            "target_python": target_text,
+            "message": error.msg,
+            "line": error.lineno,
+            "column": error.offset,
+            "host_older_than_target": host_version < target_version,
+        },
+    }
+    print(json.dumps(payload))
+    raise SystemExit(0)
 
 audit = audit_source(source, filename=str(source_path))
 payload = {
@@ -79,6 +117,7 @@ payload = {
         }
         for finding in audit.findings
     ],
+    "parse_error": None,
 }
 print(json.dumps(payload))
 "#;
@@ -1163,7 +1202,10 @@ pub(crate) fn runtime_annotation_compatibility_diagnostics(
     let mut diagnostics = Vec::new();
     let interpreter = resolve_python_executable(config);
     let mut command = ProcessCommand::new(&interpreter);
-    command.args(["-B", "-c", ANNOTATION_RUNTIME_AUDIT_SCRIPT]).arg(runtime_path);
+    command
+        .args(["-B", "-c", ANNOTATION_RUNTIME_AUDIT_SCRIPT])
+        .arg(runtime_path)
+        .arg(target_python.to_string());
     if let Some(py_path) = annotation_runtime_pythonpath() {
         command.env("PYTHONPATH", py_path);
     }
@@ -1211,6 +1253,33 @@ pub(crate) fn runtime_annotation_compatibility_diagnostics(
             return diagnostics;
         }
     };
+    if let Some(parse_error) = audit.parse_error {
+        let location = match (parse_error.line, parse_error.column) {
+            (Some(line), Some(column)) => format!(" at {line}:{column}"),
+            (Some(line), None) => format!(" at line {line}"),
+            _ => String::new(),
+        };
+        let message = if parse_error.host_older_than_target {
+            format!(
+                "runtime annotation audit could not parse `{}` with Python {}{}: {}; the artifact targets Python {}, whose newer syntax requires a matching audit interpreter",
+                runtime_path.display(),
+                parse_error.host_python,
+                location,
+                parse_error.message,
+                parse_error.target_python,
+            )
+        } else {
+            format!(
+                "runtime artifact `{}` is not valid Python {} syntax{}: {}",
+                runtime_path.display(),
+                parse_error.target_python,
+                location,
+                parse_error.message,
+            )
+        };
+        diagnostics.push(Diagnostic::warning("TPY5004", message));
+        return diagnostics;
+    }
     if target_python >= PythonTarget::PYTHON_3_14 && !audit.consumers.is_empty() {
         let mut diagnostic = Diagnostic::warning(
             "TPY5004",

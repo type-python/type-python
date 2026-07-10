@@ -3289,6 +3289,31 @@ fn runtime_annotation_compatibility_diagnostics_ignores_safe_nested_annotations(
 }
 
 #[test]
+fn runtime_annotation_compatibility_diagnostics_enforces_target_syntax() {
+    let project_dir =
+        temp_project_dir("runtime_annotation_compatibility_diagnostics_enforces_target_syntax");
+    let diagnostics = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        let runtime_path = project_dir.join("app.py");
+        fs::write(&runtime_path, "type Alias = int\n").expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        runtime_annotation_compatibility_diagnostics(
+            &config,
+            &runtime_path,
+            PythonTarget::new(3, 9),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let rendered = DiagnosticReport { diagnostics }.as_text();
+    assert!(rendered.contains("TPY5004"), "{rendered}");
+    assert!(rendered.contains("not valid Python 3.9 syntax"), "{rendered}");
+    assert!(!rendered.contains("audit failed"), "{rendered}");
+}
+
+#[test]
 fn runtime_annotation_compatibility_diagnostics_warns_for_framework_consumers() {
     let project_dir = temp_project_dir(
         "runtime_annotation_compatibility_diagnostics_warns_for_framework_consumers",
