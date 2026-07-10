@@ -370,7 +370,12 @@ fn project_generated_roots(config: &ConfigHandle, source_roots: &[PathBuf]) -> V
         .into_iter()
         .map(|path| ComparablePath::new(&config.resolve_relative_path(path)))
         .filter(|generated_root| {
-            source_roots.iter().any(|source_root| generated_root.is_within(source_root))
+            // Generated roots outside source trees still matter when a source directory symlinks
+            // into them. A generated root that strictly contains a source root cannot safely be
+            // pruned, because that would discard the entire configured source tree.
+            !source_roots.iter().any(|source_root| {
+                source_root.is_within(generated_root) && !generated_root.is_within(source_root)
+            })
         })
         .collect()
 }
@@ -2490,6 +2495,64 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].logical_module, "pkg.value");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_source_discovery_prunes_symlinks_to_external_generated_roots() {
+        let project_dir =
+            temp_project_dir("project_source_discovery_prunes_external_generated_symlink");
+        let result = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                concat!(
+                    "[project]\n",
+                    "src = [\"src\"]\n",
+                    "include = [\"src/**/*.tpy\", \"src/**/*.py\"]\n",
+                    "exclude = []\n"
+                ),
+            )
+            .expect("config should be written");
+            let kept = project_dir.join("src/pkg/kept.tpy");
+            let generated = project_dir.join(".typepython/build/pkg/generated.py");
+            for source in [&kept, &generated] {
+                fs::create_dir_all(source.parent().expect("source should have a parent"))
+                    .expect("source parent should be created");
+                fs::write(source, "pass\n").expect("source should be written");
+            }
+            std::os::unix::fs::symlink(
+                project_dir.join(".typepython/build"),
+                project_dir.join("src/generated"),
+            )
+            .expect("generated directory alias should be created");
+
+            let config = typepython_config::load(&project_dir).expect("config should load");
+            let include_patterns =
+                compile_patterns(&config, &config.config.project.include, "project.include")
+                    .expect("include patterns should compile");
+            let exclude_patterns =
+                compile_patterns(&config, &config.config.project.exclude, "project.exclude")
+                    .expect("exclude patterns should compile");
+            let roots = source_roots(&config);
+            let sources =
+                collect_project_sources(&config, &roots, &include_patterns, &exclude_patterns)
+                    .expect("project sources should be discovered");
+            let generated_alias = project_dir.join("src/generated/pkg/generated.py");
+            let direct = discover_project_source_for_path(
+                &config,
+                &roots,
+                &include_patterns,
+                &exclude_patterns,
+                &generated_alias,
+            )
+            .expect("generated alias should be evaluated");
+            (sources, direct)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.0[0].logical_module, "pkg.kept");
+        assert!(result.1.is_none());
     }
 
     #[test]
