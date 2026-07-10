@@ -245,6 +245,30 @@ class AnnotationCompatTests(unittest.TestCase):
 
         self.assertEqual(audit.consumers, ())
 
+    def test_audit_source_respects_expression_scope_and_with_bindings(self) -> None:
+        audit = annotation_compat.audit_source(
+            "from typing import get_type_hints\n"
+            "callbacks = []\n"
+            "provider = lambda: None\n"
+            "local = lambda get_type_hints: get_type_hints(int)\n"
+            "values = [get_type_hints(int) for get_type_hints in callbacks]\n"
+            "with provider() as get_type_hints:\n"
+            "    get_type_hints(int)\n"
+        )
+
+        self.assertEqual(audit.consumers, ())
+
+        outer_iterable = annotation_compat.audit_source(
+            "from typing import get_type_hints\n"
+            "callbacks = []\n"
+            "values = [callback for get_type_hints in get_type_hints(callbacks) "
+            "for callback in callbacks]\n"
+        )
+        self.assertEqual(
+            outer_iterable.consumers,
+            (annotation_compat.AnnotationConsumer.TYPING_GET_TYPE_HINTS,),
+        )
+
     def test_audit_source_does_not_treat_relative_imports_as_consumers(self) -> None:
         audit = annotation_compat.audit_source(
             "import typing\n"

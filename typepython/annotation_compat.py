@@ -312,9 +312,18 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         for default in [*node.args.defaults, *node.args.kw_defaults]:
             if default is not None:
                 self.visit(default)
-        before = self._current_scope_state()
+        parameters = _argument_names(node.args)
+        self._scopes.append(
+            _AuditScope(
+                kind="function",
+                runtime_names=frozenset(parameters),
+                type_checking_only_names=frozenset(),
+                resolved_names={},
+                definitely_bound_names=set(parameters),
+            )
+        )
         self.visit(node.body)
-        self._restore_current_scope_state(before)
+        self._scopes.pop()
 
     def visit_ListComp(self, node: ast.ListComp) -> None:
         self._visit_comprehension(node, (node.elt,))
@@ -336,16 +345,41 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         if not node.generators:
             return
         self.visit(node.generators[0].iter)
-        before = self._current_scope_state()
+        target_names = set().union(
+            *(_assignment_target_names(generator.target) for generator in node.generators)
+        )
+        self._scopes.append(
+            _AuditScope(
+                kind="function",
+                runtime_names=frozenset(target_names),
+                type_checking_only_names=frozenset(),
+                resolved_names={},
+                definitely_bound_names=set(),
+            )
+        )
         for index, generator in enumerate(node.generators):
             if index > 0:
                 self.visit(generator.iter)
+            self._bind_assignment_target(generator.target, None)
             for condition in generator.ifs:
                 self.visit(condition)
         for value in values:
             self.visit(value)
-        after = self._current_scope_state()
-        self._merge_current_scope_states(before, after)
+        self._scopes.pop()
+
+    def visit_With(self, node: ast.With) -> None:
+        self._visit_with(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self._visit_with(node)
+
+    def _visit_with(self, node: ast.With | ast.AsyncWith) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars is not None:
+                self._bind_assignment_target(item.optional_vars, None)
+        for statement in node.body:
+            self.visit(statement)
 
     def visit_Match(self, node: ast.AST) -> None:
         self.visit(getattr(node, "subject"))
@@ -538,6 +572,9 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         if isinstance(target, (ast.List, ast.Tuple)):
             for element in target.elts:
                 self._bind_assignment_target(element, None)
+            return
+        if isinstance(target, ast.Starred):
+            self._bind_assignment_target(target.value, None)
 
     def _bind_runtime_name(self, name: str, resolved: str | None) -> None:
         if not self._scopes:
@@ -720,15 +757,29 @@ def _callable_annotations(
 
 
 def _parameter_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    return _argument_names(node.args)
+
+
+def _argument_names(arguments: ast.arguments) -> set[str]:
     names = {
         arg.arg
-        for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+        for arg in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]
     }
-    if node.args.vararg is not None:
-        names.add(node.args.vararg.arg)
-    if node.args.kwarg is not None:
-        names.add(node.args.kwarg.arg)
+    if arguments.vararg is not None:
+        names.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        names.add(arguments.kwarg.arg)
     return names
+
+
+def _assignment_target_names(target: ast.expr) -> set[str]:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.List, ast.Tuple)):
+        return set().union(*(_assignment_target_names(element) for element in target.elts))
+    if isinstance(target, ast.Starred):
+        return _assignment_target_names(target.value)
+    return set()
 
 
 def _uses_future_annotations(tree: ast.Module) -> bool:
