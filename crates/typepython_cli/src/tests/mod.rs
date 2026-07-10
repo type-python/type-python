@@ -61,7 +61,7 @@ pub(super) use typepython_emit::{EmitArtifact, write_runtime_outputs};
 pub(super) use typepython_graph::build as build_graph;
 pub(super) use typepython_incremental::IncrementalState;
 pub(super) use typepython_target::PythonTarget;
-pub(super) use zip::{ZipWriter, write::FileOptions};
+pub(super) use zip::{CompressionMethod, ZipWriter, write::FileOptions};
 
 #[test]
 fn early_cli_error_json_uses_the_versioned_envelope() {
@@ -798,6 +798,23 @@ pub(super) fn write_zip_archive(path: &Path, files: &[(&str, &str)]) {
     let file = fs::File::create(path).expect("zip archive should be created");
     let mut writer = ZipWriter::new(file);
     let options = FileOptions::default();
+    for (relative_path, contents) in files {
+        writer
+            .start_file(relative_path.replace('\\', "/"), options)
+            .expect("zip file entry should be created");
+        std::io::Write::write_all(&mut writer, contents.as_bytes())
+            .expect("zip file entry should be written");
+    }
+    writer.finish().expect("zip archive should finish");
+}
+
+pub(super) fn write_deflated_zip_archive(path: &Path, files: &[(&str, &str)]) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("archive parent should be created");
+    }
+    let file = fs::File::create(path).expect("zip archive should be created");
+    let mut writer = ZipWriter::new(file);
+    let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
     for (relative_path, contents) in files {
         writer
             .start_file(relative_path.replace('\\', "/"), options)

@@ -144,6 +144,28 @@ fn diff_api_surfaces_rejects_duplicate_archive_paths() {
 }
 
 #[test]
+fn diff_api_surfaces_rejects_excessive_archive_compression_ratio() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_rejects_excessive_archive_compression_ratio");
+    let error = {
+        let old_wheel = project_dir.join("demo-0.1.0-py3-none-any.whl");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(new_dir.join("app.pyi"), "def parse() -> int: ...\n")
+            .expect("new stub should be written");
+        let payload = "0".repeat(20 * 1024 * 1024);
+        write_deflated_zip_archive(&old_wheel, &[("app.pyi", payload.as_str())]);
+
+        diff_api_surfaces(&old_wheel, &new_dir)
+            .expect_err("excessive compression ratio should be rejected")
+            .to_string()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(error.contains("compression ratio"), "{error}");
+}
+
+#[test]
 fn diff_api_surfaces_reads_inline_typed_archive_sources() {
     let project_dir = temp_project_dir("diff_api_surfaces_reads_inline_typed_archive_sources");
     let report = {

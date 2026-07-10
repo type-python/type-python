@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    io::Read,
     path::{Path, PathBuf},
     process::ExitCode,
 };
@@ -18,7 +17,9 @@ use serde::Serialize;
 use tar::Archive as TarArchive;
 use zip::ZipArchive;
 
-use crate::archive::{ArchiveMemberPaths, ArchivePathKind};
+use crate::archive::{
+    ArchiveMemberPaths, ArchivePathKind, ArchiveReadBudget, BoundedArchiveReader,
+};
 use crate::{
     CLI_JSON_SCHEMA_VERSION, CommandSummary,
     cli::{ApiDiffArgs, OutputFormat},
@@ -390,18 +391,18 @@ fn collect_surface(root: &Path) -> Result<BTreeMap<String, BTreeMap<String, Publ
 }
 
 fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, PublicSymbol>>> {
-    let file =
-        fs::File::open(path).with_context(|| format!("unable to open {}", path.display()))?;
-    let mut archive = ZipArchive::new(file)
-        .with_context(|| format!("unable to read zip artifact {}", path.display()))?;
-    let mut modules = BTreeMap::new();
-    let mut typed_roots = Vec::new();
-    let mut sources = Vec::new();
     let kind = if path.extension().and_then(|extension| extension.to_str()) == Some("whl") {
         ArchivePathKind::Wheel
     } else {
         ArchivePathKind::Sdist
     };
+    let (mut file, mut budget) = ArchiveReadBudget::open(path, kind).map_err(anyhow::Error::msg)?;
+    budget.validate_zip_directory(&mut file).map_err(anyhow::Error::msg)?;
+    let mut archive = ZipArchive::new(file)
+        .with_context(|| format!("unable to read zip artifact {}", path.display()))?;
+    let mut modules = BTreeMap::new();
+    let mut typed_roots = Vec::new();
+    let mut sources = Vec::new();
     let mut member_paths = ArchiveMemberPaths::new(kind);
     for index in 0..archive.len() {
         let mut file = archive.by_index(index).with_context(|| {
@@ -409,6 +410,8 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
         })?;
         let entry_name =
             member_paths.register(file.name_raw(), file.is_dir()).map_err(anyhow::Error::msg)?;
+        let declared_bytes = file.size();
+        budget.register_member().map_err(anyhow::Error::msg)?;
         if file.is_dir() {
             continue;
         }
@@ -423,12 +426,18 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
         if entry_name.contains(".dist-info/") {
             continue;
         }
-        let mut source = String::new();
-        file.read_to_string(&mut source).with_context(|| {
-            format!("unable to read typed source entry {entry_name} from {}", path.display())
+        budget
+            .register_payload(&entry_name, declared_bytes, Some(file.compressed_size()))
+            .map_err(anyhow::Error::msg)?;
+        let bytes = budget
+            .read_entry(&mut file, &entry_name, declared_bytes)
+            .map_err(anyhow::Error::msg)?;
+        let source = String::from_utf8(bytes).with_context(|| {
+            format!("typed source entry {entry_name} in {} is not valid UTF-8", path.display())
         })?;
         sources.push((entry_name, source, kind));
     }
+    budget.verify_file_unchanged(&archive.into_inner()).map_err(anyhow::Error::msg)?;
     sources.sort_by(|left, right| {
         surface_source_priority(left.2)
             .cmp(&surface_source_priority(right.2))
@@ -454,10 +463,12 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
 }
 
 fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, PublicSymbol>>> {
-    let file =
-        fs::File::open(path).with_context(|| format!("unable to open {}", path.display()))?;
-    let decoder = GzDecoder::new(file);
-    let mut archive = TarArchive::new(decoder);
+    let kind = ArchivePathKind::Sdist;
+    let (file, mut budget) = ArchiveReadBudget::open(path, kind).map_err(anyhow::Error::msg)?;
+    let compressed = BoundedArchiveReader::compressed(file, kind);
+    let decoder = GzDecoder::new(compressed);
+    let decoded = BoundedArchiveReader::tar_stream(decoder, kind);
+    let mut archive = TarArchive::new(decoded);
     let mut modules = BTreeMap::new();
     let mut typed_roots = Vec::new();
     let mut sources = Vec::new();
@@ -473,7 +484,10 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
         let entry_path = member_paths
             .register(raw_path.as_ref(), entry_type.is_dir())
             .map_err(anyhow::Error::msg)?;
-        if !entry_type.is_file() {
+        let declared_bytes = entry.size();
+        budget.register_member().map_err(anyhow::Error::msg)?;
+        budget.register_payload(&entry_path, declared_bytes, None).map_err(anyhow::Error::msg)?;
+        if !entry_type.is_file() && !entry_type.is_contiguous() {
             continue;
         }
         if entry_path.ends_with("py.typed") {
@@ -484,12 +498,16 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
         let Some(kind) = surface_source_kind_from_archive_entry(&entry_path) else {
             continue;
         };
-        let mut source = String::new();
-        entry.read_to_string(&mut source).with_context(|| {
-            format!("unable to read typed source entry {entry_path} from {}", path.display())
+        let bytes = budget
+            .read_entry(&mut entry, &entry_path, declared_bytes)
+            .map_err(anyhow::Error::msg)?;
+        let source = String::from_utf8(bytes).with_context(|| {
+            format!("typed source entry {entry_path} in {} is not valid UTF-8", path.display())
         })?;
         sources.push((entry_path, source, kind));
     }
+    let compressed = archive.into_inner().into_inner().into_inner();
+    budget.verify_file_unchanged(&compressed.into_inner()).map_err(anyhow::Error::msg)?;
     sources.sort_by(|left, right| {
         surface_source_priority(left.2)
             .cmp(&surface_source_priority(right.2))

@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
-    io::Read,
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, ExitCode, Output},
     sync::OnceLock,
@@ -25,7 +24,10 @@ use typepython_target::{PythonTarget, RuntimeFeature};
 use zip::ZipArchive;
 
 use crate::api_diff::{ApiSurfaceDiffReport, api_surface_diff_diagnostics, diff_api_surfaces};
-use crate::archive::{ArchiveMemberPaths, ArchivePathKind, validate_wheel_record_path};
+use crate::archive::{
+    ArchiveMemberPaths, ArchivePathKind, ArchiveReadBudget, BoundedArchiveReader,
+    validate_wheel_record_path,
+};
 use crate::cli::{OutputFormat, VerifyArgs};
 use crate::discovery::normalize_glob_path;
 use crate::pipeline::{
@@ -766,7 +768,7 @@ pub(crate) fn verify_packaged_artifacts(
     let published_top_level_surface_files = published_top_level_surface_files(&expected_files);
 
     let supplied_diagnostics = supplied_artifacts
-        .par_iter()
+        .iter()
         .map(|artifact| {
             verify_supplied_artifact(
                 artifact,
@@ -2841,7 +2843,8 @@ fn read_zip_entries(
     path: &Path,
     kind: ArchivePathKind,
 ) -> std::result::Result<Vec<(String, Vec<u8>)>, String> {
-    let file = fs::File::open(path).map_err(|error| format!("unable to open archive: {error}"))?;
+    let (mut file, mut budget) = ArchiveReadBudget::open(path, kind)?;
+    budget.validate_zip_directory(&mut file)?;
     let mut archive =
         ZipArchive::new(file).map_err(|error| format!("unable to read zip archive: {error}"))?;
     let mut entries = Vec::new();
@@ -2852,22 +2855,28 @@ fn read_zip_entries(
             .by_index(index)
             .map_err(|error| format!("unable to read zip entry {index}: {error}"))?;
         let entry_path = member_paths.register(file.name_raw(), file.is_dir())?;
+        let declared_bytes = file.size();
+        budget.register_member()?;
+        budget.register_payload(&entry_path, declared_bytes, Some(file.compressed_size()))?;
         if file.is_dir() {
             continue;
         }
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
-            .map_err(|error| format!("unable to read zip entry `{entry_path}`: {error}"))?;
+        let bytes = budget.read_entry(&mut file, &entry_path, declared_bytes)?;
         entries.push((entry_path, bytes));
     }
+
+    budget.verify_file_unchanged(&archive.into_inner())?;
 
     Ok(entries)
 }
 
 fn read_tar_gz_entries(path: &Path) -> std::result::Result<Vec<(String, Vec<u8>)>, String> {
-    let file = fs::File::open(path).map_err(|error| format!("unable to open archive: {error}"))?;
-    let decoder = GzDecoder::new(file);
-    let mut archive = TarArchive::new(decoder);
+    let kind = ArchivePathKind::Sdist;
+    let (file, mut budget) = ArchiveReadBudget::open(path, kind)?;
+    let compressed = BoundedArchiveReader::compressed(file, kind);
+    let decoder = GzDecoder::new(compressed);
+    let decoded = BoundedArchiveReader::tar_stream(decoder, kind);
+    let mut archive = TarArchive::new(decoded);
     let mut entries = Vec::new();
     let mut member_paths = ArchiveMemberPaths::new(ArchivePathKind::Sdist);
 
@@ -2878,15 +2887,18 @@ fn read_tar_gz_entries(path: &Path) -> std::result::Result<Vec<(String, Vec<u8>)
         let entry_type = entry.header().entry_type();
         let raw_path = entry.path_bytes();
         let entry_path = member_paths.register(raw_path.as_ref(), entry_type.is_dir())?;
-        if !entry_type.is_file() {
+        let declared_bytes = entry.size();
+        budget.register_member()?;
+        budget.register_payload(&entry_path, declared_bytes, None)?;
+        if !entry_type.is_file() && !entry_type.is_contiguous() {
             continue;
         }
-        let mut bytes = Vec::new();
-        entry
-            .read_to_end(&mut bytes)
-            .map_err(|error| format!("unable to read tar entry `{entry_path}`: {error}"))?;
+        let bytes = budget.read_entry(&mut entry, &entry_path, declared_bytes)?;
         entries.push((entry_path, bytes));
     }
+
+    let compressed = archive.into_inner().into_inner().into_inner();
+    budget.verify_file_unchanged(&compressed.into_inner())?;
 
     Ok(entries)
 }

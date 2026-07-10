@@ -52,6 +52,26 @@ fn supplied_archive_reader_rejects_duplicate_member_paths() {
 }
 
 #[test]
+fn supplied_archive_reader_rejects_excessive_compression_ratio() {
+    let project_dir =
+        temp_project_dir("supplied_archive_reader_rejects_excessive_compression_ratio");
+    let error = {
+        let wheel = project_dir.join("demo-0.1.0-py3-none-any.whl");
+        let payload = "0".repeat(20 * 1024 * 1024);
+        write_deflated_zip_archive(&wheel, &[("payload.bin", payload.as_str())]);
+
+        inspect_supplied_archive_paths(&SuppliedVerifyArtifact {
+            kind: SuppliedArtifactKind::Wheel,
+            path: wheel,
+        })
+        .expect_err("excessive compression ratio should be rejected")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(error.contains("compression ratio"), "{error}");
+}
+
+#[test]
 fn verify_build_artifacts_reports_missing_runtime_and_marker_files() {
     let project_dir =
         temp_project_dir("verify_build_artifacts_reports_missing_runtime_and_marker_files");
