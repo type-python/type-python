@@ -219,7 +219,9 @@ fn callable_dynamic_positions(signature: &str) -> Option<CallableDynamicPosition
     let mut positions = CallableDynamicPositions::default();
     let mut found = false;
     for line in signature.lines() {
-        let function = line.find("def ")?;
+        let Some(function) = line.find("def ") else {
+            continue;
+        };
         let open = line[function..].find('(')? + function;
         let close = matching_parenthesis(line, open)?;
         let colon = line.rfind(':')?;

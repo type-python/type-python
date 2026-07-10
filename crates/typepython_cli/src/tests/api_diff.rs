@@ -773,6 +773,63 @@ fn diff_api_surfaces_classifies_parameter_any_by_contravariance() {
 }
 
 #[test]
+fn diff_api_surfaces_classifies_decorated_callable_any_variance() {
+    let project_dir = temp_project_dir("diff_api_surfaces_decorated_any_variance");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import Any, overload\n",
+                "def decorator(value): ...\n",
+                "@decorator\n",
+                "def load(value: Any) -> int: ...\n",
+                "class Box:\n",
+                "    @property\n",
+                "    def value(self) -> Any: ...\n",
+                "@overload\n",
+                "def parse(value: Any) -> int: ...\n",
+                "@overload\n",
+                "def parse(value: int) -> int: ...\n",
+            ),
+        )
+        .expect("old surface should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload\n",
+                "def decorator(value): ...\n",
+                "@decorator\n",
+                "def load(value: str) -> int: ...\n",
+                "class Box:\n",
+                "    @property\n",
+                "    def value(self) -> str: ...\n",
+                "@overload\n",
+                "def parse(value: str) -> int: ...\n",
+                "@overload\n",
+                "def parse(value: int) -> int: ...\n",
+            ),
+        )
+        .expect("new surface should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("decorated callables should compare")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let classifications = report
+        .changed
+        .iter()
+        .map(|change| (change.symbol.as_str(), change.classification.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(classifications.get("load"), Some(&"likely type-breaking"));
+    assert_eq!(classifications.get("Box.value"), Some(&"likely type-compatible"));
+    assert_eq!(classifications.get("parse"), Some(&"likely type-breaking"));
+}
+
+#[test]
 fn diff_api_surfaces_marks_mixed_any_variance_as_unknown_risk() {
     let project_dir = temp_project_dir("diff_api_surfaces_mixed_any_variance");
     let report = {
