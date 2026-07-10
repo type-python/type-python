@@ -1364,7 +1364,11 @@ pub(crate) fn runtime_annotation_compatibility_diagnostics(
                 parse_error.message,
             )
         };
-        diagnostics.push(Diagnostic::warning("TPY5004", message));
+        diagnostics.push(if parse_error.host_older_than_target {
+            Diagnostic::warning("TPY5004", message)
+        } else {
+            Diagnostic::error("TPY5004", message)
+        });
         return diagnostics;
     }
     if target_python >= PythonTarget::PYTHON_3_14 && !audit.consumers.is_empty() {

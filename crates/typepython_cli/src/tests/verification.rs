@@ -3742,7 +3742,9 @@ fn runtime_annotation_compatibility_diagnostics_enforces_target_syntax() {
     };
     remove_temp_project_dir(&project_dir);
 
-    let rendered = DiagnosticReport { diagnostics }.as_text();
+    let report = DiagnosticReport { diagnostics };
+    assert!(report.has_errors(), "confirmed target syntax incompatibility must block verify");
+    let rendered = report.as_text();
     assert!(rendered.contains("TPY5004"), "{rendered}");
     assert!(rendered.contains("not valid Python 3.9 syntax"), "{rendered}");
     assert!(!rendered.contains("audit failed"), "{rendered}");
