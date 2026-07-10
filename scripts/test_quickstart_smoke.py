@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import importlib.util
+import json
 import pathlib
 import tempfile
 import unittest
@@ -79,6 +79,19 @@ class QuickstartSmokeTests(unittest.TestCase):
 
         self.assertEqual(resolved, str(installed_entrypoint))
 
+    def test_assert_cli_version_rejects_stale_binary(self) -> None:
+        result = mock.Mock(stdout="typepython 0.9.0\n")
+        with (
+            mock.patch.object(
+                quickstart_smoke.importlib.metadata,
+                "version",
+                return_value="1.0.0-rc.1",
+            ),
+            mock.patch.object(quickstart_smoke.subprocess, "run", return_value=result),
+        ):
+            with self.assertRaisesRegex(SystemExit, "CLI version mismatch"):
+                quickstart_smoke.assert_cli_version("/fake/typepython")
+
     def test_main_uses_resolved_entrypoint_for_full_smoke_flow(self) -> None:
         commands: list[tuple[list[str], pathlib.Path | None]] = []
         entrypoint = "/fake/typepython"
@@ -101,11 +114,13 @@ class QuickstartSmokeTests(unittest.TestCase):
             mock.patch.object(
                 quickstart_smoke, "resolve_entrypoint", return_value=entrypoint
             ),
+            mock.patch.object(quickstart_smoke, "assert_cli_version") as assert_version,
             mock.patch.object(quickstart_smoke, "run", side_effect=fake_run),
         ):
             quickstart_smoke.main()
 
         assert_stdlib.assert_called_once_with()
+        assert_version.assert_called_once_with(entrypoint)
 
         self.assertEqual(
             [command for command, _ in commands],

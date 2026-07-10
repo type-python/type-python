@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import shutil
@@ -43,16 +44,44 @@ class build_py(_build_py):
                 "or install a prebuilt type-python wheel for a supported platform."
             )
 
-        subprocess.run(
-            [cargo, "build", "--release", "-p", "typepython-cli"],
+        target_dir = pathlib.Path(self.build_lib).parent / "typepython-cargo-target"
+        build = subprocess.run(
+            [
+                cargo,
+                "build",
+                "--release",
+                "-p",
+                "typepython-cli",
+                "--target-dir",
+                str(target_dir),
+                "--message-format=json-render-diagnostics",
+            ],
             cwd=ROOT,
             check=True,
+            stdout=subprocess.PIPE,
+            text=True,
         )
 
         binary_name = "typepython.exe" if os.name == "nt" else "typepython"
-        built_binary = ROOT / "target" / "release" / binary_name
-        if not built_binary.is_file():
-            raise FileNotFoundError(f"missing built TypePython CLI at {built_binary}")
+        built_binary = None
+        for line in build.stdout.splitlines():
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            target = message.get("target", {})
+            executable = message.get("executable")
+            if (
+                message.get("reason") == "compiler-artifact"
+                and target.get("name") == "typepython"
+                and "bin" in target.get("kind", [])
+                and executable
+            ):
+                built_binary = pathlib.Path(executable)
+        if built_binary is None or not built_binary.is_file():
+            raise FileNotFoundError(
+                "cargo did not report a built TypePython CLI executable for typepython-cli"
+            )
 
         destination_dir = pathlib.Path(self.build_lib) / "typepython" / "bin"
         destination_dir.mkdir(parents=True, exist_ok=True)

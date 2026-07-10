@@ -78,9 +78,25 @@ def assert_bundled_stdlib() -> None:
         )
 
 
+def assert_cli_version(entrypoint: str) -> None:
+    expected = importlib.metadata.version("type-python")
+    result = subprocess.run(
+        [entrypoint, "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    actual = result.stdout.strip()
+    if actual != f"typepython {expected}":
+        raise SystemExit(
+            f"installed wheel CLI version mismatch: expected typepython {expected}, got {actual}"
+        )
+
+
 def main() -> None:
     assert_bundled_stdlib()
     entrypoint = resolve_entrypoint()
+    assert_cli_version(entrypoint)
     run([entrypoint, "--help"])
 
     with tempfile.TemporaryDirectory(prefix="typepython-wheel-smoke-") as tmp:
