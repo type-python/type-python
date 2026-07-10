@@ -816,24 +816,68 @@ fn analyze_pipeline_state(
 fn syntax_tree_source_hashes(
     syntax_trees: &[typepython_syntax::SyntaxTree],
 ) -> BTreeMap<String, u64> {
-    syntax_trees
-        .iter()
-        .map(|tree| {
+    // A runtime `.py` and its authoritative companion `.pyi` intentionally share one logical
+    // module. Hash every contributing source together so either side invalidates that module.
+    let mut sources_by_module = BTreeMap::<String, Vec<&typepython_syntax::SyntaxTree>>::new();
+    for tree in syntax_trees {
+        sources_by_module.entry(tree.source.logical_module.clone()).or_default().push(tree);
+    }
+
+    sources_by_module
+        .into_iter()
+        .map(|(module, mut trees)| {
+            trees.sort_by(|left, right| {
+                source_kind_hash_tag(left.source.kind)
+                    .cmp(&source_kind_hash_tag(right.source.kind))
+                    .then_with(|| left.source.path.cmp(&right.source.path))
+                    .then_with(|| left.source.text.cmp(&right.source.text))
+            });
+
             let mut hash = 0xcbf29ce484222325_u64;
-            for byte in tree
-                .source
-                .logical_module
-                .as_bytes()
-                .iter()
-                .chain([0_u8].iter())
-                .chain(tree.source.text.as_bytes().iter())
-            {
-                hash ^= u64::from(*byte);
-                hash = hash.wrapping_mul(0x100000001b3_u64);
+            mix_source_hash_field(&mut hash, module.as_bytes());
+            for tree in trees {
+                mix_source_hash_field(&mut hash, &[source_kind_hash_tag(tree.source.kind)]);
+                mix_source_path_hash(&mut hash, &tree.source.path);
+                mix_source_hash_field(&mut hash, tree.source.text.as_bytes());
             }
-            (tree.source.logical_module.clone(), hash)
+            (module, hash)
         })
         .collect()
+}
+
+fn source_kind_hash_tag(kind: SourceKind) -> u8 {
+    match kind {
+        SourceKind::TypePython => 0,
+        SourceKind::Stub => 1,
+        SourceKind::Python => 2,
+    }
+}
+
+fn mix_source_hash_field(hash: &mut u64, bytes: &[u8]) {
+    for byte in (bytes.len() as u64).to_le_bytes().iter().chain(bytes) {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(0x100000001b3_u64);
+    }
+}
+
+#[cfg(unix)]
+fn mix_source_path_hash(hash: &mut u64, path: &Path) {
+    use std::os::unix::ffi::OsStrExt;
+
+    mix_source_hash_field(hash, path.as_os_str().as_bytes());
+}
+
+#[cfg(windows)]
+fn mix_source_path_hash(hash: &mut u64, path: &Path) {
+    use std::os::windows::ffi::OsStrExt;
+
+    let encoded = path.as_os_str().encode_wide().flat_map(u16::to_le_bytes).collect::<Vec<_>>();
+    mix_source_hash_field(hash, &encoded);
+}
+
+#[cfg(not(any(unix, windows)))]
+fn mix_source_path_hash(hash: &mut u64, path: &Path) {
+    mix_source_hash_field(hash, path.to_string_lossy().as_bytes());
 }
 
 fn cached_emit_artifacts(

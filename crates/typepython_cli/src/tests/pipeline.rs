@@ -908,6 +908,36 @@ fn run_build_like_command_rebuilds_outputs_after_check_updates_semantic_cache() 
 }
 
 #[test]
+fn run_build_like_command_rebuilds_companion_stub_after_stub_only_change() {
+    let project_dir =
+        temp_project_dir("run_build_like_command_rebuilds_companion_stub_after_stub_only_change");
+    let emitted_stub = {
+        fs::create_dir_all(project_dir.join("src/pkg")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/pkg/__init__.py"), "def make() -> object:\n    return 1\n")
+            .expect("test setup should succeed");
+        let companion_stub = project_dir.join("src/pkg/__init__.pyi");
+        fs::write(&companion_stub, "def make() -> int: ...\n").expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        run_build_like_command(&config, super::OutputFormat::Json, "build", Vec::new())
+            .expect("initial build should succeed");
+        fs::write(&companion_stub, "def make() -> str: ...\n")
+            .expect("companion stub should be updated");
+        run_build_like_command(&config, super::OutputFormat::Json, "build", Vec::new())
+            .expect("follow-up build should detect the companion stub change");
+
+        fs::read_to_string(project_dir.join(".typepython/build/pkg/__init__.pyi"))
+            .expect("emitted companion stub should exist")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(emitted_stub.contains("def make() -> str"), "{emitted_stub}");
+    assert!(!emitted_stub.contains("def make() -> int"), "{emitted_stub}");
+}
+
+#[test]
 fn run_build_like_command_removes_stale_outputs_for_deleted_modules() {
     let project_dir =
         temp_project_dir("run_build_like_command_removes_stale_outputs_for_deleted_modules");
