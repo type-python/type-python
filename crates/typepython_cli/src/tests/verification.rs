@@ -1293,7 +1293,18 @@ fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
                 ("app/__init__.py", "def build_user() -> int:\n    return 1\n"),
                 ("app/__init__.pyi", "def build_user() -> int: ...\n"),
                 ("app/py.typed", ""),
-                ("type_python-0.1.0.dist-info/METADATA", "Metadata-Version: 2.1\n"),
+                (
+                    "type_python-0.1.0.dist-info/METADATA",
+                    "Metadata-Version: 2.1\nName: type-python\nVersion: 0.1.0\n",
+                ),
+                (
+                    "type_python-0.1.0.dist-info/WHEEL",
+                    "Wheel-Version: 1.0\nGenerator: typepython-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+                ),
+                (
+                    "type_python-0.1.0.dist-info/RECORD",
+                    "app/__init__.py,,\napp/__init__.pyi,,\napp/py.typed,,\ntype_python-0.1.0.dist-info/METADATA,,\ntype_python-0.1.0.dist-info/WHEEL,,\ntype_python-0.1.0.dist-info/RECORD,,\n",
+                ),
             ],
         );
         write_tar_gz_archive(
@@ -1303,6 +1314,7 @@ fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
                 ("app/__init__.py", "def build_user() -> int:\n    return 1\n"),
                 ("app/__init__.pyi", "def build_user() -> int: ...\n"),
                 ("app/py.typed", ""),
+                ("PKG-INFO", "Metadata-Version: 2.1\nName: type-python\nVersion: 0.1.0\n"),
                 ("README.md", "type-python\n"),
             ],
         );
@@ -1324,6 +1336,73 @@ fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
     remove_temp_project_dir(&project_dir);
 
     assert!(diagnostics.is_empty());
+}
+
+#[test]
+fn verify_packaged_artifacts_rejects_missing_standard_archive_metadata() {
+    let project_dir =
+        temp_project_dir("verify_packaged_artifacts_rejects_missing_standard_archive_metadata");
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "def build_user() -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "def build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+            .expect("test setup should succeed");
+        let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
+        let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
+        write_zip_archive(
+            &wheel_path,
+            &[
+                ("app/__init__.py", "def build_user() -> int:\n    return 1\n"),
+                ("app/__init__.pyi", "def build_user() -> int: ...\n"),
+                ("app/py.typed", ""),
+                (
+                    "type_python-0.1.0.dist-info/METADATA",
+                    "Metadata-Version: 2.1\nName: type-python\nVersion: 0.1.0\n",
+                ),
+            ],
+        );
+        write_tar_gz_archive(
+            &sdist_path,
+            "type-python-0.1.0",
+            &[
+                ("app/__init__.py", "def build_user() -> int:\n    return 1\n"),
+                ("app/__init__.pyi", "def build_user() -> int: ...\n"),
+                ("app/py.typed", ""),
+            ],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_packaged_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+            &[
+                SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path },
+                SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: sdist_path },
+            ],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("dist-info/WHEEL"), "{rendered}");
+    assert!(rendered.contains("dist-info/RECORD"), "{rendered}");
+    assert!(rendered.contains("PKG-INFO"), "{rendered}");
 }
 
 #[test]
@@ -1836,7 +1915,7 @@ fn verify_packaged_artifacts_allows_extra_python_files_outside_package_root_in_w
         fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
             .expect("test setup should succeed");
         let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
-        write_zip_archive(
+        write_valid_wheel_archive(
             &wheel_path,
             &[
                 ("app/__init__.py", "pass\n"),
@@ -1978,7 +2057,7 @@ fn verify_packaged_artifacts_allows_extra_python_files_outside_package_root_in_s
         fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
             .expect("test setup should succeed");
         let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
-        write_tar_gz_archive(
+        write_valid_sdist_archive(
             &sdist_path,
             "type-python-0.1.0",
             &[
@@ -2098,7 +2177,7 @@ fn verify_packaged_artifacts_allows_top_level_backend_files_for_module_wheel() {
         fs::write(project_dir.join(".typepython/build/app.pyi"), "pass\n")
             .expect("test setup should succeed");
         let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
-        write_zip_archive(
+        write_valid_wheel_archive(
             &wheel_path,
             &[
                 ("app.py", "pass\n"),
@@ -2441,7 +2520,7 @@ fn verify_packaged_artifacts_allows_top_level_backend_files_for_module_sdist() {
         fs::write(project_dir.join(".typepython/build/app.pyi"), "pass\n")
             .expect("test setup should succeed");
         let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
-        write_tar_gz_archive(
+        write_valid_sdist_archive(
             &sdist_path,
             "type-python-0.1.0",
             &[

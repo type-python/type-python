@@ -787,6 +787,48 @@ pub(super) fn write_zip_archive(path: &Path, files: &[(&str, &str)]) {
     writer.finish().expect("zip archive should finish");
 }
 
+pub(super) fn write_valid_wheel_archive(path: &Path, files: &[(&str, &str)]) {
+    const DIST_INFO: &str = "type_python-0.1.0.dist-info";
+    const METADATA: &str = "Metadata-Version: 2.1\nName: type-python\nVersion: 0.1.0\n";
+    const WHEEL: &str = concat!(
+        "Wheel-Version: 1.0\n",
+        "Generator: typepython-test\n",
+        "Root-Is-Purelib: true\n",
+        "Tag: py3-none-any\n",
+    );
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("archive parent should be created");
+    }
+    let file = fs::File::create(path).expect("wheel archive should be created");
+    let mut writer = ZipWriter::new(file);
+    let options = FileOptions::default();
+    let mut record_paths = Vec::new();
+    for (relative_path, contents) in files {
+        let relative_path = relative_path.replace('\\', "/");
+        writer.start_file(&relative_path, options).expect("wheel file entry should be created");
+        std::io::Write::write_all(&mut writer, contents.as_bytes())
+            .expect("wheel file entry should be written");
+        record_paths.push(relative_path);
+    }
+    for (relative_path, contents) in
+        [(format!("{DIST_INFO}/METADATA"), METADATA), (format!("{DIST_INFO}/WHEEL"), WHEEL)]
+    {
+        writer.start_file(&relative_path, options).expect("wheel metadata entry should be created");
+        std::io::Write::write_all(&mut writer, contents.as_bytes())
+            .expect("wheel metadata entry should be written");
+        record_paths.push(relative_path);
+    }
+    let record_path = format!("{DIST_INFO}/RECORD");
+    record_paths.push(record_path.clone());
+    let record =
+        record_paths.into_iter().map(|path| format!("{path},,")).collect::<Vec<_>>().join("\n")
+            + "\n";
+    writer.start_file(record_path, options).expect("wheel RECORD entry should be created");
+    std::io::Write::write_all(&mut writer, record.as_bytes())
+        .expect("wheel RECORD entry should be written");
+    writer.finish().expect("wheel archive should finish");
+}
+
 pub(super) fn write_tar_gz_archive(path: &Path, root: &str, files: &[(&str, &str)]) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("archive parent should be created");
@@ -808,4 +850,11 @@ pub(super) fn write_tar_gz_archive(path: &Path, root: &str, files: &[(&str, &str
             .expect("tar.gz entry should be written");
     }
     builder.finish().expect("tar.gz archive should finish");
+}
+
+pub(super) fn write_valid_sdist_archive(path: &Path, root: &str, files: &[(&str, &str)]) {
+    const PKG_INFO: &str = "Metadata-Version: 2.1\nName: type-python\nVersion: 0.1.0\n";
+    let mut files_with_metadata = files.to_vec();
+    files_with_metadata.push(("PKG-INFO", PKG_INFO));
+    write_tar_gz_archive(path, root, &files_with_metadata);
 }

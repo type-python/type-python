@@ -1343,6 +1343,7 @@ fn verify_supplied_artifact(
     let mut diagnostics = Vec::new();
     match read_supplied_artifact_entries(artifact) {
         Ok(entries) => {
+            diagnostics.extend(archive_metadata_diagnostics(artifact, &entries));
             for (relative_path, expected_bytes) in expected_files {
                 match entries.get(relative_path) {
                     None => diagnostics.push(Diagnostic::error(
@@ -1397,6 +1398,221 @@ fn verify_supplied_artifact(
     }
 
     diagnostics
+}
+
+fn archive_metadata_diagnostics(
+    artifact: &SuppliedVerifyArtifact,
+    entries: &BTreeMap<String, Vec<u8>>,
+) -> Vec<Diagnostic> {
+    match artifact.kind {
+        SuppliedArtifactKind::Wheel => wheel_metadata_diagnostics(artifact, entries),
+        SuppliedArtifactKind::Sdist => sdist_metadata_diagnostics(artifact, entries),
+    }
+}
+
+fn wheel_metadata_diagnostics(
+    artifact: &SuppliedVerifyArtifact,
+    entries: &BTreeMap<String, Vec<u8>>,
+) -> Vec<Diagnostic> {
+    let dist_info_roots = entries
+        .keys()
+        .filter_map(|path| {
+            let (root, _) = path.split_once('/')?;
+            root.ends_with(".dist-info").then_some(root)
+        })
+        .collect::<BTreeSet<_>>();
+    if dist_info_roots.len() != 1 {
+        return vec![Diagnostic::error(
+            "TPY5003",
+            format!(
+                "wheel artifact `{}` must contain exactly one top-level `.dist-info` directory with METADATA, WHEEL, and RECORD; found {}",
+                artifact.path.display(),
+                dist_info_roots.len(),
+            ),
+        )];
+    }
+
+    let Some(dist_info) = dist_info_roots.iter().next().copied() else {
+        return Vec::new();
+    };
+    let metadata_path = format!("{dist_info}/METADATA");
+    let wheel_path = format!("{dist_info}/WHEEL");
+    let record_path = format!("{dist_info}/RECORD");
+    let mut diagnostics = Vec::new();
+    diagnostics.extend(required_archive_file_diagnostics(
+        artifact,
+        entries,
+        [&metadata_path, &wheel_path, &record_path],
+    ));
+
+    if let Some(metadata) = entries.get(&metadata_path) {
+        diagnostics.extend(required_metadata_header_diagnostics(
+            artifact,
+            &metadata_path,
+            metadata,
+            &["Metadata-Version", "Name", "Version"],
+        ));
+    }
+    if let Some(wheel) = entries.get(&wheel_path) {
+        diagnostics.extend(required_metadata_header_diagnostics(
+            artifact,
+            &wheel_path,
+            wheel,
+            &["Wheel-Version", "Tag"],
+        ));
+    }
+    if let Some(record) = entries.get(&record_path) {
+        match record_paths(record) {
+            Ok(recorded_paths) => {
+                let missing = entries
+                    .keys()
+                    .filter(|path| !recorded_paths.contains(path.as_str()))
+                    .take(6)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !missing.is_empty() {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY5003",
+                        format!(
+                            "wheel artifact `{}` has an incomplete `{record_path}`; missing entr{} {}",
+                            artifact.path.display(),
+                            if missing.len() == 1 { "y" } else { "ies" },
+                            missing.join(", "),
+                        ),
+                    ));
+                }
+            }
+            Err(error) => diagnostics.push(Diagnostic::error(
+                "TPY5003",
+                format!(
+                    "wheel artifact `{}` contains invalid `{record_path}`: {error}",
+                    artifact.path.display(),
+                ),
+            )),
+        }
+    }
+    diagnostics
+}
+
+fn sdist_metadata_diagnostics(
+    artifact: &SuppliedVerifyArtifact,
+    entries: &BTreeMap<String, Vec<u8>>,
+) -> Vec<Diagnostic> {
+    let Some(metadata) = entries.get("PKG-INFO") else {
+        return vec![Diagnostic::error(
+            "TPY5003",
+            format!(
+                "sdist artifact `{}` is missing required root `PKG-INFO` metadata",
+                artifact.path.display(),
+            ),
+        )];
+    };
+    required_metadata_header_diagnostics(
+        artifact,
+        "PKG-INFO",
+        metadata,
+        &["Metadata-Version", "Name", "Version"],
+    )
+}
+
+fn required_archive_file_diagnostics<'a>(
+    artifact: &SuppliedVerifyArtifact,
+    entries: &BTreeMap<String, Vec<u8>>,
+    required: impl IntoIterator<Item = &'a String>,
+) -> Vec<Diagnostic> {
+    required
+        .into_iter()
+        .filter(|path| !entries.contains_key(path.as_str()))
+        .map(|path| {
+            Diagnostic::error(
+                "TPY5003",
+                format!(
+                    "{} artifact `{}` is missing required metadata file `{path}`",
+                    artifact.kind.label(),
+                    artifact.path.display(),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn required_metadata_header_diagnostics(
+    artifact: &SuppliedVerifyArtifact,
+    metadata_path: &str,
+    bytes: &[u8],
+    required_headers: &[&str],
+) -> Vec<Diagnostic> {
+    let Ok(rendered) = std::str::from_utf8(bytes) else {
+        return vec![Diagnostic::error(
+            "TPY5003",
+            format!(
+                "{} artifact `{}` contains non-UTF-8 metadata in `{metadata_path}`",
+                artifact.kind.label(),
+                artifact.path.display(),
+            ),
+        )];
+    };
+    let present = rendered
+        .lines()
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            (!value.trim().is_empty()).then_some(name.trim())
+        })
+        .collect::<BTreeSet<_>>();
+    required_headers
+        .iter()
+        .filter(|header| !present.contains(**header))
+        .map(|header| {
+            Diagnostic::error(
+                "TPY5003",
+                format!(
+                    "{} artifact `{}` metadata `{metadata_path}` is missing or has an empty `{header}`",
+                    artifact.kind.label(),
+                    artifact.path.display(),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn record_paths(bytes: &[u8]) -> std::result::Result<BTreeSet<String>, String> {
+    let rendered = std::str::from_utf8(bytes)
+        .map_err(|error| format!("RECORD is not valid UTF-8: {error}"))?;
+    let mut paths = BTreeSet::new();
+    for (index, line) in rendered.lines().enumerate() {
+        if line.is_empty() {
+            continue;
+        }
+        let path = record_first_field(line)
+            .ok_or_else(|| format!("line {} is not valid CSV", index + 1))?;
+        if path.is_empty() {
+            return Err(format!("line {} has an empty path", index + 1));
+        }
+        paths.insert(normalize_archive_path(&path));
+    }
+    Ok(paths)
+}
+
+fn record_first_field(line: &str) -> Option<String> {
+    if let Some(remainder) = line.strip_prefix('"') {
+        let mut value = String::new();
+        let mut characters = remainder.chars().peekable();
+        while let Some(character) = characters.next() {
+            if character != '"' {
+                value.push(character);
+                continue;
+            }
+            if characters.peek() == Some(&'"') {
+                characters.next();
+                value.push('"');
+                continue;
+            }
+            return (characters.next() == Some(',')).then_some(value);
+        }
+        None
+    } else {
+        line.split_once(',').map(|(path, _)| path.to_owned())
+    }
 }
 
 fn verify_external_checker(
