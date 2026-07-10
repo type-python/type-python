@@ -1579,6 +1579,24 @@ fn check_infers_cross_module_generic_method_with_provider_bound() {
 }
 
 #[test]
+fn check_resolves_method_result_stored_in_bare_local_assignment() {
+    let result = check_temp_typepython_source(concat!(
+        "class Item:\n",
+        "    def to_json(self) -> str:\n",
+        "        return \"{}\"\n\n",
+        "class Repository:\n",
+        "    def save(self, data: str) -> bool:\n",
+        "        return True\n\n",
+        "def save_item(repo: Repository, item: Item) -> bool:\n",
+        "    data = item.to_json()\n",
+        "    return repo.save(data)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
 fn check_resolves_method_argument_expansions_in_function_scope() {
     let result = check_temp_typepython_source(concat!(
         "from typing import TypedDict\n\n",

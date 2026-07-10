@@ -4333,6 +4333,68 @@ fn parse_retains_direct_method_call_result_metadata() {
 }
 
 #[test]
+fn parse_retains_direct_method_call_result_metadata_for_bare_assignment() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("methods.py"),
+        kind: SourceKind::Python,
+        logical_module: String::new(),
+        text: String::from(
+            "def build(box: Box) -> str:\n    result = box.get()\n    return result\n",
+        ),
+    });
+
+    assert!(tree.diagnostics.is_empty());
+    assert!(tree.statements.iter().any(|statement| matches!(
+        statement,
+        SyntaxStatement::Value(ValueStatement {
+            names,
+            annotation: None,
+            value_method_owner_name,
+            value_method_name,
+            value_method_through_instance: false,
+            owner_name,
+            line,
+            ..
+        }) if names == &[String::from("result")]
+            && value_method_owner_name.as_deref() == Some("box")
+            && value_method_name.as_deref() == Some("get")
+            && owner_name.as_deref() == Some("build")
+            && *line == 2
+    )));
+}
+
+#[test]
+fn parse_retains_instance_method_call_result_metadata_for_bare_assignment() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("methods.py"),
+        kind: SourceKind::Python,
+        logical_module: String::new(),
+        text: String::from(
+            "def build() -> str:\n    result = make_box().get()\n    return result\n",
+        ),
+    });
+
+    assert!(tree.diagnostics.is_empty());
+    assert!(tree.statements.iter().any(|statement| matches!(
+        statement,
+        SyntaxStatement::Value(ValueStatement {
+            names,
+            annotation: None,
+            value_method_owner_name,
+            value_method_name,
+            value_method_through_instance: true,
+            owner_name,
+            line,
+            ..
+        }) if names == &[String::from("result")]
+            && value_method_owner_name.as_deref() == Some("make_box")
+            && value_method_name.as_deref() == Some("get")
+            && owner_name.as_deref() == Some("build")
+            && *line == 2
+    )));
+}
+
+#[test]
 fn parse_retains_direct_method_call_result_metadata_through_instance() {
     let tree = parse(SourceFile {
         path: PathBuf::from("methods.py"),
