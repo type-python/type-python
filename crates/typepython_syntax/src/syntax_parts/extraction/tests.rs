@@ -2080,6 +2080,49 @@ fn parse_collects_nested_calls_returns_and_assignments_in_control_flow_suites() 
 }
 
 #[test]
+fn parse_collects_control_flow_facts_through_every_nested_suite() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("nested-suite-facts.py"),
+        kind: SourceKind::Python,
+        logical_module: String::new(),
+        text: String::from(
+            "def produce(values, ctx):\n    if values:\n        for value in values:\n            with ctx:\n                try:\n                    yield \"wrong\"\n                except Error as error:\n                    assert error\n                    match value:\n                        case 1:\n                            value += 1\n",
+        ),
+    });
+
+    assert!(tree.diagnostics.is_empty(), "{}", tree.diagnostics.as_text());
+    assert!(
+        tree.statements
+            .iter()
+            .any(|statement| matches!(statement, SyntaxStatement::For(value) if value.line == 3))
+    );
+    assert!(
+        tree.statements
+            .iter()
+            .any(|statement| matches!(statement, SyntaxStatement::With(value) if value.line == 4))
+    );
+    assert!(tree.statements.iter().any(
+        |statement| matches!(statement, SyntaxStatement::Yield(value) if value.line == 6 && value.owner_name == "produce")
+    ));
+    assert!(tree.statements.iter().any(
+        |statement| matches!(statement, SyntaxStatement::ExceptHandler(value) if value.line == 7)
+    ));
+    assert!(
+        tree.statements.iter().any(
+            |statement| matches!(statement, SyntaxStatement::Assert(value) if value.line == 8)
+        )
+    );
+    assert!(
+        tree.statements
+            .iter()
+            .any(|statement| matches!(statement, SyntaxStatement::Match(value) if value.line == 9))
+    );
+    assert!(tree.statements.iter().any(
+        |statement| matches!(statement, SyntaxStatement::Invalidate(value) if value.line == 11)
+    ));
+}
+
+#[test]
 fn parse_retains_direct_call_literal_arg_types() {
     let tree = parse(SourceFile {
         path: PathBuf::from("call-types.py"),

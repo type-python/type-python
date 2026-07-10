@@ -11151,6 +11151,35 @@ fn check_accepts_tpy_yield_and_yield_from() {
 }
 
 #[test]
+fn check_reports_generator_yield_mismatch_inside_nested_suites() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Generator\n\n",
+        "def produce(values: list[int]) -> Generator[int, None, None]:\n",
+        "    for value in values:\n",
+        "        if value:\n",
+        "            yield \"wrong\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(result.diagnostics.has_errors(), "{rendered}");
+    assert!(rendered.contains("yields `str`"), "{rendered}");
+    assert!(rendered.contains("expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_resolves_loop_targets_inside_nested_suites() {
+    let result = check_temp_typepython_source(concat!(
+        "def first(values: list[int]) -> int:\n",
+        "    if values:\n",
+        "        for value in values:\n",
+        "            return value\n",
+        "    return 0\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_reports_generator_yield_type_mismatch() {
     let result = check(&ModuleGraph {
         nodes: vec![ModuleNode {

@@ -57,44 +57,55 @@ pub(in super::super) fn collect_yield_statements(
     owner_type_name: Option<&str>,
     statements: &mut Vec<SyntaxStatement>,
 ) {
+    collect_yield_statements_in_scope(source, suite, None, owner_type_name, statements);
+}
+
+fn collect_yield_statements_in_scope(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
     for stmt in suite {
         match stmt {
             Stmt::FunctionDef(function) => {
-                for body_stmt in &function.body {
-                    let line =
-                        offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
-                    if let Some(yield_statement) = extract_yield_statement(
-                        source,
-                        body_stmt,
-                        line,
-                        function.name.as_str(),
-                        owner_type_name,
-                    ) {
-                        statements.push(yield_statement);
-                    }
-                }
-                collect_yield_statements(source, &function.body, owner_type_name, statements);
+                collect_yield_statements_in_scope(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::ClassDef(class_def) => {
-                collect_yield_statements(
+                collect_yield_statements_in_scope(
                     source,
                     &class_def.body,
+                    None,
                     Some(class_def.name.as_str()),
                     statements,
                 );
             }
-            Stmt::If(if_stmt) => {
-                collect_yield_statements(source, &if_stmt.body, owner_type_name, statements);
-                for_each_if_false_suite(if_stmt, |suite| {
-                    collect_yield_statements(source, suite, owner_type_name, statements);
+            _ => {
+                if let Some(owner_name) = owner_name {
+                    let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                    if let Some(yield_statement) =
+                        extract_yield_statement(source, stmt, line, owner_name, owner_type_name)
+                    {
+                        statements.push(yield_statement);
+                    }
+                }
+                for_each_nested_suite(stmt, |nested| {
+                    collect_yield_statements_in_scope(
+                        source,
+                        nested,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 });
             }
-            Stmt::Match(match_stmt) => {
-                for case in &match_stmt.cases {
-                    collect_yield_statements(source, &case.body, owner_type_name, statements);
-                }
-            }
-            _ => {}
         }
     }
 }
@@ -126,76 +137,26 @@ pub(in super::super) fn collect_if_statements(
                     statements,
                 );
             }
-            Stmt::Try(try_stmt) => {
-                collect_if_statements(
-                    source,
-                    &try_stmt.body,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                for handler in &try_stmt.handlers {
-                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_if_statements(
-                        source,
-                        &handler.body,
-                        owner_name,
-                        owner_type_name,
-                        statements,
-                    );
+            _ => {
+                if let Stmt::If(if_stmt) = stmt {
+                    let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                    if !statements.iter().any(|statement| statement_line(statement) == line) {
+                        statements.push(SyntaxStatement::If(IfStatement {
+                            owner_name: owner_name.map(str::to_owned),
+                            owner_type_name: owner_type_name.map(str::to_owned),
+                            guard: extract_guard_condition(source, &if_stmt.test),
+                            line,
+                            true_start_line: suite_start_line(source, &if_stmt.body),
+                            true_end_line: suite_end_line(source, &if_stmt.body),
+                            false_start_line: if_false_start_line(source, if_stmt),
+                            false_end_line: if_false_end_line(source, if_stmt),
+                        }));
+                    }
                 }
-                collect_if_statements(
-                    source,
-                    &try_stmt.orelse,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                collect_if_statements(
-                    source,
-                    &try_stmt.finalbody,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-            }
-            Stmt::If(if_stmt) => {
-                let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
-                if !statements.iter().any(|statement| statement_line(statement) == line) {
-                    statements.push(SyntaxStatement::If(IfStatement {
-                        owner_name: owner_name.map(str::to_owned),
-                        owner_type_name: owner_type_name.map(str::to_owned),
-                        guard: extract_guard_condition(source, &if_stmt.test),
-                        line,
-                        true_start_line: suite_start_line(source, &if_stmt.body),
-                        true_end_line: suite_end_line(source, &if_stmt.body),
-                        false_start_line: if_false_start_line(source, if_stmt),
-                        false_end_line: if_false_end_line(source, if_stmt),
-                    }));
-                }
-                collect_if_statements(
-                    source,
-                    &if_stmt.body,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                for_each_if_false_suite(if_stmt, |suite| {
-                    collect_if_statements(source, suite, owner_name, owner_type_name, statements);
+                for_each_nested_suite(stmt, |nested| {
+                    collect_if_statements(source, nested, owner_name, owner_type_name, statements);
                 });
             }
-            Stmt::Match(match_stmt) => {
-                for case in &match_stmt.cases {
-                    collect_if_statements(
-                        source,
-                        &case.body,
-                        owner_name,
-                        owner_type_name,
-                        statements,
-                    );
-                }
-            }
-            _ => {}
         }
     }
 }
@@ -227,80 +188,28 @@ pub(in super::super) fn collect_assert_statements(
                     statements,
                 );
             }
-            Stmt::Try(try_stmt) => {
-                collect_assert_statements(
-                    source,
-                    &try_stmt.body,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                for handler in &try_stmt.handlers {
-                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_assert_statements(
-                        source,
-                        &handler.body,
-                        owner_name,
-                        owner_type_name,
-                        statements,
-                    );
+            _ => {
+                if let Stmt::Assert(assert_stmt) = stmt {
+                    let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                    if !statements.iter().any(|statement| statement_line(statement) == line) {
+                        statements.push(SyntaxStatement::Assert(AssertStatement {
+                            owner_name: owner_name.map(str::to_owned),
+                            owner_type_name: owner_type_name.map(str::to_owned),
+                            guard: extract_guard_condition(source, &assert_stmt.test),
+                            line,
+                        }));
+                    }
                 }
-                collect_assert_statements(
-                    source,
-                    &try_stmt.orelse,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                collect_assert_statements(
-                    source,
-                    &try_stmt.finalbody,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-            }
-            Stmt::If(if_stmt) => {
-                collect_assert_statements(
-                    source,
-                    &if_stmt.body,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                for_each_if_false_suite(if_stmt, |suite| {
+                for_each_nested_suite(stmt, |nested| {
                     collect_assert_statements(
                         source,
-                        suite,
+                        nested,
                         owner_name,
                         owner_type_name,
                         statements,
                     );
                 });
             }
-            Stmt::Match(match_stmt) => {
-                for case in &match_stmt.cases {
-                    collect_assert_statements(
-                        source,
-                        &case.body,
-                        owner_name,
-                        owner_type_name,
-                        statements,
-                    );
-                }
-            }
-            Stmt::Assert(assert_stmt) => {
-                let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
-                if !statements.iter().any(|statement| statement_line(statement) == line) {
-                    statements.push(SyntaxStatement::Assert(AssertStatement {
-                        owner_name: owner_name.map(str::to_owned),
-                        owner_type_name: owner_type_name.map(str::to_owned),
-                        guard: extract_guard_condition(source, &assert_stmt.test),
-                        line,
-                    }));
-                }
-            }
-            _ => {}
         }
     }
 }
@@ -332,124 +241,91 @@ pub(in super::super) fn collect_invalidation_statements(
                     statements,
                 );
             }
-            Stmt::Try(try_stmt) => {
-                collect_invalidation_statements(
-                    source,
-                    &try_stmt.body,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                for handler in &try_stmt.handlers {
-                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_invalidation_statements(
-                        source,
-                        &handler.body,
-                        owner_name,
-                        owner_type_name,
-                        statements,
-                    );
+            _ => {
+                let invalidation = match stmt {
+                    Stmt::AugAssign(stmt) => {
+                        let names = extract_assignment_names(&stmt.target);
+                        (!names.is_empty()).then(|| {
+                            let line =
+                                offset_to_line_column(source, stmt.range.start().to_usize()).0;
+                            SyntaxStatement::Invalidate(InvalidationStatement {
+                                kind: InvalidationKind::RebindLike,
+                                owner_name: owner_name.map(str::to_owned),
+                                owner_type_name: owner_type_name.map(str::to_owned),
+                                names,
+                                line,
+                            })
+                        })
+                    }
+                    Stmt::Delete(stmt) => {
+                        let names = stmt
+                            .targets
+                            .iter()
+                            .flat_map(extract_assignment_names)
+                            .collect::<Vec<_>>();
+                        (!names.is_empty()).then(|| {
+                            let line =
+                                offset_to_line_column(source, stmt.range.start().to_usize()).0;
+                            SyntaxStatement::Invalidate(InvalidationStatement {
+                                kind: InvalidationKind::Delete,
+                                owner_name: owner_name.map(str::to_owned),
+                                owner_type_name: owner_type_name.map(str::to_owned),
+                                names,
+                                line,
+                            })
+                        })
+                    }
+                    Stmt::Global(stmt) => {
+                        let names = stmt
+                            .names
+                            .iter()
+                            .map(|name| name.as_str().to_owned())
+                            .collect::<Vec<_>>();
+                        (!names.is_empty()).then(|| {
+                            let line =
+                                offset_to_line_column(source, stmt.range.start().to_usize()).0;
+                            SyntaxStatement::Invalidate(InvalidationStatement {
+                                kind: InvalidationKind::ScopeChange,
+                                owner_name: owner_name.map(str::to_owned),
+                                owner_type_name: owner_type_name.map(str::to_owned),
+                                names,
+                                line,
+                            })
+                        })
+                    }
+                    Stmt::Nonlocal(stmt) => {
+                        let names = stmt
+                            .names
+                            .iter()
+                            .map(|name| name.as_str().to_owned())
+                            .collect::<Vec<_>>();
+                        (!names.is_empty()).then(|| {
+                            let line =
+                                offset_to_line_column(source, stmt.range.start().to_usize()).0;
+                            SyntaxStatement::Invalidate(InvalidationStatement {
+                                kind: InvalidationKind::ScopeChange,
+                                owner_name: owner_name.map(str::to_owned),
+                                owner_type_name: owner_type_name.map(str::to_owned),
+                                names,
+                                line,
+                            })
+                        })
+                    }
+                    _ => None,
+                };
+                if let Some(invalidation) = invalidation {
+                    statements.push(invalidation);
                 }
-                collect_invalidation_statements(
-                    source,
-                    &try_stmt.orelse,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                collect_invalidation_statements(
-                    source,
-                    &try_stmt.finalbody,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-            }
-            Stmt::If(if_stmt) => {
-                collect_invalidation_statements(
-                    source,
-                    &if_stmt.body,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                for_each_if_false_suite(if_stmt, |suite| {
+                for_each_nested_suite(stmt, |nested| {
                     collect_invalidation_statements(
                         source,
-                        suite,
+                        nested,
                         owner_name,
                         owner_type_name,
                         statements,
                     );
                 });
             }
-            Stmt::Match(match_stmt) => {
-                for case in &match_stmt.cases {
-                    collect_invalidation_statements(
-                        source,
-                        &case.body,
-                        owner_name,
-                        owner_type_name,
-                        statements,
-                    );
-                }
-            }
-            Stmt::AugAssign(stmt) => {
-                let names = extract_assignment_names(&stmt.target);
-                if !names.is_empty() {
-                    let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
-                    statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
-                        kind: InvalidationKind::RebindLike,
-                        owner_name: owner_name.map(str::to_owned),
-                        owner_type_name: owner_type_name.map(str::to_owned),
-                        names,
-                        line,
-                    }));
-                }
-            }
-            Stmt::Delete(stmt) => {
-                let names =
-                    stmt.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>();
-                if !names.is_empty() {
-                    let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
-                    statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
-                        kind: InvalidationKind::Delete,
-                        owner_name: owner_name.map(str::to_owned),
-                        owner_type_name: owner_type_name.map(str::to_owned),
-                        names,
-                        line,
-                    }));
-                }
-            }
-            Stmt::Global(stmt) => {
-                let names =
-                    stmt.names.iter().map(|name| name.as_str().to_owned()).collect::<Vec<_>>();
-                if !names.is_empty() {
-                    let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
-                    statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
-                        kind: InvalidationKind::ScopeChange,
-                        owner_name: owner_name.map(str::to_owned),
-                        owner_type_name: owner_type_name.map(str::to_owned),
-                        names,
-                        line,
-                    }));
-                }
-            }
-            Stmt::Nonlocal(stmt) => {
-                let names =
-                    stmt.names.iter().map(|name| name.as_str().to_owned()).collect::<Vec<_>>();
-                if !names.is_empty() {
-                    let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
-                    statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
-                        kind: InvalidationKind::ScopeChange,
-                        owner_name: owner_name.map(str::to_owned),
-                        owner_type_name: owner_type_name.map(str::to_owned),
-                        names,
-                        line,
-                    }));
-                }
-            }
-            _ => {}
         }
     }
 }
@@ -481,39 +357,6 @@ pub(in super::super) fn collect_match_statements(
                     statements,
                 );
             }
-            Stmt::Try(try_stmt) => {
-                collect_match_statements(
-                    source,
-                    &try_stmt.body,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                for handler in &try_stmt.handlers {
-                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_match_statements(
-                        source,
-                        &handler.body,
-                        owner_name,
-                        owner_type_name,
-                        statements,
-                    );
-                }
-                collect_match_statements(
-                    source,
-                    &try_stmt.orelse,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                collect_match_statements(
-                    source,
-                    &try_stmt.finalbody,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-            }
             _ => {
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
                 if let Some(match_statement) =
@@ -521,6 +364,15 @@ pub(in super::super) fn collect_match_statements(
                 {
                     statements.push(match_statement);
                 }
+                for_each_nested_suite(stmt, |nested| {
+                    collect_match_statements(
+                        source,
+                        nested,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
+                });
             }
         }
     }
@@ -553,17 +405,6 @@ pub(in super::super) fn collect_for_statements(
                     statements,
                 );
             }
-            Stmt::Match(match_stmt) => {
-                for case in &match_stmt.cases {
-                    collect_for_statements(
-                        source,
-                        &case.body,
-                        owner_name,
-                        owner_type_name,
-                        statements,
-                    );
-                }
-            }
             _ => {
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
                 if let Some(for_statement) =
@@ -571,6 +412,9 @@ pub(in super::super) fn collect_for_statements(
                 {
                     statements.push(for_statement);
                 }
+                for_each_nested_suite(stmt, |nested| {
+                    collect_for_statements(source, nested, owner_name, owner_type_name, statements);
+                });
             }
         }
     }
@@ -603,17 +447,6 @@ pub(in super::super) fn collect_with_statements(
                     statements,
                 );
             }
-            Stmt::Match(match_stmt) => {
-                for case in &match_stmt.cases {
-                    collect_with_statements(
-                        source,
-                        &case.body,
-                        owner_name,
-                        owner_type_name,
-                        statements,
-                    );
-                }
-            }
             _ => {
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
                 statements.extend(extract_with_statements(
@@ -623,6 +456,15 @@ pub(in super::super) fn collect_with_statements(
                     owner_name,
                     owner_type_name,
                 ));
+                for_each_nested_suite(stmt, |nested| {
+                    collect_with_statements(
+                        source,
+                        nested,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
+                });
             }
         }
     }
@@ -655,61 +497,32 @@ pub(in super::super) fn collect_except_handler_statements(
                     statements,
                 );
             }
-            Stmt::Try(try_stmt) => {
-                for handler in &try_stmt.handlers {
-                    let line = offset_to_line_column(source, handler.range().start().to_usize()).0;
-                    if let Some(statement) = extract_except_handler_statement(
-                        source,
-                        handler,
-                        line,
-                        owner_name,
-                        owner_type_name,
-                    ) {
-                        statements.push(statement);
+            _ => {
+                if let Stmt::Try(try_stmt) = stmt {
+                    for handler in &try_stmt.handlers {
+                        let line =
+                            offset_to_line_column(source, handler.range().start().to_usize()).0;
+                        if let Some(statement) = extract_except_handler_statement(
+                            source,
+                            handler,
+                            line,
+                            owner_name,
+                            owner_type_name,
+                        ) {
+                            statements.push(statement);
+                        }
                     }
-                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                }
+                for_each_nested_suite(stmt, |nested| {
                     collect_except_handler_statements(
                         source,
-                        &handler.body,
+                        nested,
                         owner_name,
                         owner_type_name,
                         statements,
                     );
-                }
-                collect_except_handler_statements(
-                    source,
-                    &try_stmt.body,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                collect_except_handler_statements(
-                    source,
-                    &try_stmt.orelse,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                collect_except_handler_statements(
-                    source,
-                    &try_stmt.finalbody,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
+                });
             }
-            Stmt::Match(match_stmt) => {
-                for case in &match_stmt.cases {
-                    collect_except_handler_statements(
-                        source,
-                        &case.body,
-                        owner_name,
-                        owner_type_name,
-                        statements,
-                    );
-                }
-            }
-            _ => {}
         }
     }
 }
