@@ -463,7 +463,7 @@ pub(super) fn direct_method_call_diagnostics(
             keyword_names: call.keyword_names.clone(),
             keyword_arg_values: call.keyword_arg_values.clone(),
             keyword_expansion_values: call.keyword_expansion_values.clone(),
-            line: 1,
+            line: call.line,
         };
 
         let overloads = candidates
@@ -476,35 +476,48 @@ pub(super) fn direct_method_call_diagnostics(
                 node,
                 nodes,
                 &direct_call,
+                call.current_owner_name.as_deref(),
+                call.current_owner_type_name.as_deref(),
                 &owner_type,
                 &overloads,
                 context.assignability_options(),
             ) {
                 ResolvedOverloadSelection::Selected(candidate) => {
                     let signature = candidate.signature_sites;
-                    if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
+                    if let Some(diagnostic) =
+                        direct_source_function_arity_diagnostic_in_scope_with_context(
                         context,
                         node,
                         nodes,
                         &direct_call,
                         &signature,
+                        call.current_owner_name.as_deref(),
+                        call.current_owner_type_name.as_deref(),
                     ) {
                         diagnostics.push(diagnostic);
                     }
-                    diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
+                    diagnostics.extend(
+                        direct_source_function_keyword_diagnostics_in_scope_with_context(
+                            context,
+                            node,
+                            nodes,
+                            &direct_call,
+                            &signature,
+                            call.current_owner_name.as_deref(),
+                            call.current_owner_type_name.as_deref(),
+                        ),
+                    );
+                    let type_diagnostics =
+                        direct_source_function_type_diagnostics_in_scope_with_context(
                         context,
                         node,
                         nodes,
                         &direct_call,
                         &signature,
-                    ));
-                    diagnostics.extend(direct_source_function_type_diagnostics_with_context(
-                        context,
-                        node,
-                        nodes,
-                        &direct_call,
-                        &signature,
-                    ));
+                        call.current_owner_name.as_deref(),
+                        call.current_owner_type_name.as_deref(),
+                    );
+                    diagnostics.extend(type_diagnostics);
                     continue;
                 }
                 ResolvedOverloadSelection::Ambiguous { applicable_count } => {
@@ -541,33 +554,45 @@ pub(super) fn direct_method_call_diagnostics(
             nodes,
             target,
             &direct_call,
+            call.current_owner_name.as_deref(),
+            call.current_owner_type_name.as_deref(),
             &owner_type,
             target_callable.as_ref(),
             context.assignability_options(),
         ) {
             Ok(resolved) => {
-                if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
-                    context,
-                    node,
-                    nodes,
-                    &direct_call,
-                    &resolved.signature_sites,
-                ) {
+                if let Some(diagnostic) =
+                    direct_source_function_arity_diagnostic_in_scope_with_context(
+                        context,
+                        node,
+                        nodes,
+                        &direct_call,
+                        &resolved.signature_sites,
+                        call.current_owner_name.as_deref(),
+                        call.current_owner_type_name.as_deref(),
+                    )
+                {
                     diagnostics.push(diagnostic);
                 }
-                diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
+                diagnostics.extend(
+                    direct_source_function_keyword_diagnostics_in_scope_with_context(
+                        context,
+                        node,
+                        nodes,
+                        &direct_call,
+                        &resolved.signature_sites,
+                        call.current_owner_name.as_deref(),
+                        call.current_owner_type_name.as_deref(),
+                    ),
+                );
+                diagnostics.extend(direct_source_function_type_diagnostics_in_scope_with_context(
                     context,
                     node,
                     nodes,
                     &direct_call,
                     &resolved.signature_sites,
-                ));
-                diagnostics.extend(direct_source_function_type_diagnostics_with_context(
-                    context,
-                    node,
-                    nodes,
-                    &direct_call,
-                    &resolved.signature_sites,
+                    call.current_owner_name.as_deref(),
+                    call.current_owner_type_name.as_deref(),
                 ));
                 continue;
             }
@@ -588,28 +613,36 @@ pub(super) fn direct_method_call_diagnostics(
             .as_ref()
             .map(|callable| method_signature_sites_from_semantics(target, callable, &class_decl.name))
             .unwrap_or_default();
-        if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
-            context,
-            node,
-            nodes,
-            &direct_call,
-            &fallback_signature,
-        ) {
+        if let Some(diagnostic) =
+            direct_source_function_arity_diagnostic_in_scope_with_context(
+                context,
+                node,
+                nodes,
+                &direct_call,
+                &fallback_signature,
+                call.current_owner_name.as_deref(),
+                call.current_owner_type_name.as_deref(),
+            )
+        {
             diagnostics.push(diagnostic);
         }
-        diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
+        diagnostics.extend(direct_source_function_keyword_diagnostics_in_scope_with_context(
             context,
             node,
             nodes,
             &direct_call,
             &fallback_signature,
+            call.current_owner_name.as_deref(),
+            call.current_owner_type_name.as_deref(),
         ));
-        diagnostics.extend(direct_source_function_type_diagnostics_with_context(
+        diagnostics.extend(direct_source_function_type_diagnostics_in_scope_with_context(
             context,
             node,
             nodes,
             &direct_call,
             &fallback_signature,
+            call.current_owner_name.as_deref(),
+            call.current_owner_type_name.as_deref(),
         ));
     }
 

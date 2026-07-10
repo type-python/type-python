@@ -1417,6 +1417,201 @@ fn check_accepts_parameter_forwarding_in_function_scope_call_args() {
 }
 
 #[test]
+fn check_accepts_parameter_forwarding_in_method_call_args() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Protocol\n\n",
+        "class SupportsRead(Protocol):\n",
+        "    def read(self, size: int = -1) -> str: ...\n\n",
+        "def read_prefix(reader: SupportsRead, size: int) -> str:\n",
+        "    local: int = size\n",
+        "    return reader.read(size=local)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_reports_method_parameter_forwarding_type_mismatch_with_actual_type() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Protocol\n\n",
+        "class SupportsRead(Protocol):\n",
+        "    def read(self, size: int = -1) -> str: ...\n\n",
+        "def read_prefix(reader: SupportsRead, text: str) -> str:\n",
+        "    return reader.read(text)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("passes `str` where parameter expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_infers_generic_method_type_from_parameter_forwarding() {
+    let result = check_temp_typepython_source(concat!(
+        "class Client:\n",
+        "    def identity[T](self, value: T) -> T:\n",
+        "        return value\n\n",
+        "def forward(client: Client, value: int) -> int:\n",
+        "    return client.identity(value)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_infers_generic_method_type_from_keyword_parameter_forwarding() {
+    let result = check_temp_typepython_source(concat!(
+        "class Client:\n",
+        "    def identity[T](self, *, value: T) -> T:\n",
+        "        return value\n\n",
+        "def forward(client: Client, value: int) -> int:\n",
+        "    return client.identity(value=value)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_infers_generic_method_type_from_scoped_collection_literal() {
+    let result = check_temp_typepython_source(concat!(
+        "class Client:\n",
+        "    def first[T](self, values: list[list[T]]) -> T:\n",
+        "        return values[0][0]\n\n",
+        "def forward(client: Client, value: int) -> int:\n",
+        "    return client.first([[value]])\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_prefers_scoped_callable_parameter_in_method_call() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable\n\n",
+        "def callback(value: int) -> int:\n",
+        "    return value\n\n",
+        "class Runner:\n",
+        "    def use(self, fn: Callable[[str], str]) -> None:\n",
+        "        ...\n\n",
+        "def forward(runner: Runner, callback: Callable[[str], str]) -> None:\n",
+        "    runner.use(callback)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_infers_paramspec_method_from_scoped_callable_parameter() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable\n\n",
+        "def callback(value: int) -> int:\n",
+        "    return value\n\n",
+        "class Runner:\n",
+        "    def preserve[**P, R](self, callback: Callable[P, R]) -> Callable[P, R]:\n",
+        "        return callback\n\n",
+        "def forward(\n",
+        "    runner: Runner, callback: Callable[[str], str]\n",
+        ") -> Callable[[str], str]:\n",
+        "    return runner.preserve(callback)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_infers_imported_generic_dot_call_from_caller_scope() {
+    let result = check_temp_project_sources(&[
+        (
+            "lib.tpy",
+            "lib",
+            SourceKind::TypePython,
+            "def identity[T](value: T) -> T:\n    return value\n",
+        ),
+        (
+            "app.tpy",
+            "app",
+            SourceKind::TypePython,
+            concat!(
+                "import lib\n\n",
+                "def forward(value: int) -> int:\n",
+                "    return lib.identity(value)\n",
+            ),
+        ),
+    ]);
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_infers_cross_module_generic_method_with_provider_bound() {
+    let result = check_temp_project_sources(&[
+        (
+            "lib.tpy",
+            "lib",
+            SourceKind::TypePython,
+            concat!(
+                "typealias Number = int\n\n",
+                "class Client:\n",
+                "    def identity[T: Number](self, value: T) -> T:\n",
+                "        return value\n",
+            ),
+        ),
+        (
+            "app.tpy",
+            "app",
+            SourceKind::TypePython,
+            concat!(
+                "from lib import Client\n\n",
+                "def forward(client: Client, value: int) -> int:\n",
+                "    return client.identity(value)\n",
+            ),
+        ),
+    ]);
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_resolves_method_argument_expansions_in_function_scope() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import TypedDict\n\n",
+        "class Options(TypedDict, closed=True):\n",
+        "    label: str\n\n",
+        "class Client:\n",
+        "    def combine(self, value: int, *, label: str) -> None:\n",
+        "        ...\n\n",
+        "def forward(client: Client, args: tuple[int], options: Options) -> None:\n",
+        "    client.combine(*args, **options)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_resolves_direct_call_argument_expansions_in_function_scope() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import TypedDict\n\n",
+        "class Options(TypedDict, closed=True):\n",
+        "    label: str\n\n",
+        "def combine(value: int, *, label: str) -> None:\n",
+        "    ...\n\n",
+        "def forward(args: tuple[int], options: Options) -> None:\n",
+        "    combine(*args, **options)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
 fn check_reports_parameter_forwarding_type_mismatch_with_actual_type() {
     let result = check_temp_typepython_source(concat!(
         "def takes_int(value: int) -> None:\n",

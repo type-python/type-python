@@ -290,6 +290,29 @@ pub(super) fn direct_source_function_arity_diagnostic_with_context(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Option<Diagnostic> {
+    direct_source_function_arity_diagnostic_in_scope_with_context(
+        context, node, nodes, call, signature, None, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn direct_source_function_arity_diagnostic_in_scope_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+) -> Option<Diagnostic> {
+    let call_scope = context
+        .load_direct_call_context_sites(node)
+        .into_iter()
+        .find(|site| site.line == call.line && site.callee == call.callee);
+    let current_owner_name = current_owner_name
+        .or_else(|| call_scope.as_ref().and_then(|site| site.owner_name.as_deref()));
+    let current_owner_type_name = current_owner_type_name
+        .or_else(|| call_scope.as_ref().and_then(|site| site.owner_type_name.as_deref()));
     let positional_params = signature
         .iter()
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
@@ -298,11 +321,13 @@ pub(super) fn direct_source_function_arity_diagnostic_with_context(
     let expected_positional_arg_types =
         expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
     let (positional_types, variadic_starred_types) =
-        expanded_positional_arg_types_with_options(
+        expanded_positional_arg_types_in_scope_with_options(
             node,
             nodes,
             call,
             &expected_positional_arg_types,
+            current_owner_name,
+            current_owner_type_name,
             context.assignability_options(),
         );
     if !has_variadic
@@ -324,7 +349,14 @@ pub(super) fn direct_source_function_arity_diagnostic_with_context(
     }
 
     let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
-    let keyword_expansions = resolved_keyword_expansions_with_context(context, node, nodes, call);
+    let keyword_expansions = resolved_keyword_expansions_in_scope_with_context(
+        context,
+        node,
+        nodes,
+        call,
+        current_owner_name,
+        current_owner_type_name,
+    );
     let unpack_shape =
         unpack_typed_dict_shape_from_signature_with_context(context, node, nodes, signature);
     let missing = signature
@@ -387,6 +419,29 @@ pub(super) fn direct_source_function_keyword_diagnostics_with_context(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
+    direct_source_function_keyword_diagnostics_in_scope_with_context(
+        context, node, nodes, call, signature, None, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn direct_source_function_keyword_diagnostics_in_scope_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+) -> Vec<Diagnostic> {
+    let call_scope = context
+        .load_direct_call_context_sites(node)
+        .into_iter()
+        .find(|site| site.line == call.line && site.callee == call.callee);
+    let current_owner_name = current_owner_name
+        .or_else(|| call_scope.as_ref().and_then(|site| site.owner_name.as_deref()));
+    let current_owner_type_name = current_owner_type_name
+        .or_else(|| call_scope.as_ref().and_then(|site| site.owner_type_name.as_deref()));
     let unpack_shape =
         unpack_typed_dict_shape_from_signature_with_context(context, node, nodes, signature);
     let keyword_variadic_annotation = signature
@@ -406,14 +461,23 @@ pub(super) fn direct_source_function_keyword_diagnostics_with_context(
         || unpack_shape.as_ref().is_some_and(|shape| shape.extra_items.is_some());
     let expected_positional_arg_types =
         expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
-    let (positional_types, _) = expanded_positional_arg_types_with_options(
+    let (positional_types, _) = expanded_positional_arg_types_in_scope_with_options(
         node,
         nodes,
         call,
         &expected_positional_arg_types,
+        current_owner_name,
+        current_owner_type_name,
         context.assignability_options(),
     );
-    let keyword_expansions = resolved_keyword_expansions_with_context(context, node, nodes, call);
+    let keyword_expansions = resolved_keyword_expansions_in_scope_with_context(
+        context,
+        node,
+        nodes,
+        call,
+        current_owner_name,
+        current_owner_type_name,
+    );
     let mut diagnostics = call.keyword_names
         .iter()
         .filter_map(|keyword| {
@@ -611,19 +675,45 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
+    direct_source_function_type_diagnostics_in_scope_with_context(
+        context, node, nodes, call, signature, None, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn direct_source_function_type_diagnostics_in_scope_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+) -> Vec<Diagnostic> {
     let expected_positional_arg_types =
         expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
     let expected_keyword_arg_types =
         expected_keyword_arg_types_from_signature_sites(signature, &call.keyword_names);
+    let options = context.assignability_options();
+    let call_scope = context
+        .load_direct_call_context_sites(node)
+        .into_iter()
+        .find(|site| site.line == call.line && site.callee == call.callee);
+    let scope_owner_name = current_owner_name
+        .or_else(|| call_scope.as_ref().and_then(|site| site.owner_name.as_deref()));
+    let scope_owner_type_name = current_owner_type_name
+        .or_else(|| call_scope.as_ref().and_then(|site| site.owner_type_name.as_deref()));
     let mut diagnostics = call
         .arg_values
         .iter()
         .enumerate()
         .flat_map(|(index, metadata)| {
-            resolve_contextual_call_arg_semantic_type_with_context(
+            resolve_contextual_call_arg_semantic_type_in_scope_with_context(
                 context,
                 node,
                 nodes,
+                scope_owner_name,
+                scope_owner_type_name,
                 call.line,
                 metadata,
                 expected_positional_arg_types.get(index).and_then(|expected| expected.as_deref()),
@@ -633,10 +723,12 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         })
         .collect::<Vec<_>>();
     diagnostics.extend(call.keyword_arg_values.iter().enumerate().flat_map(|(index, metadata)| {
-        resolve_contextual_call_arg_semantic_type_with_context(
+        resolve_contextual_call_arg_semantic_type_in_scope_with_context(
             context,
             node,
             nodes,
+            scope_owner_name,
+            scope_owner_type_name,
             call.line,
             metadata,
             expected_keyword_arg_types.get(index).and_then(|expected| expected.as_deref()),
@@ -644,14 +736,6 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         .into_iter()
         .flat_map(|result| result.diagnostics)
     }));
-    let options = context.assignability_options();
-    let call_scope = context
-        .load_direct_call_context_sites(node)
-        .into_iter()
-        .find(|site| site.line == call.line && site.callee == call.callee);
-    let scope_owner_name = call_scope.as_ref().and_then(|site| site.owner_name.as_deref());
-    let scope_owner_type_name =
-        call_scope.as_ref().and_then(|site| site.owner_type_name.as_deref());
     let resolved_keyword_arg_types = resolved_keyword_arg_semantic_types_in_scope_with_options(
         node,
         nodes,
@@ -671,7 +755,14 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
             scope_owner_type_name,
             options,
         );
-    let keyword_expansions = resolved_keyword_expansions_with_context(context, node, nodes, call);
+    let keyword_expansions = resolved_keyword_expansions_in_scope_with_context(
+        context,
+        node,
+        nodes,
+        call,
+        scope_owner_name,
+        scope_owner_type_name,
+    );
     let param_types = signature
         .iter()
         .filter(|param| !param.keyword_variadic)
@@ -743,12 +834,35 @@ pub(super) fn expanded_positional_arg_types_with_options(
     expected_types: &[Option<String>],
     options: AssignabilityOptions,
 ) -> (Vec<String>, Vec<String>) {
+    expanded_positional_arg_types_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        None,
+        None,
+        options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn expanded_positional_arg_types_in_scope_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> (Vec<String>, Vec<String>) {
     let (positional_types, variadic_starred_types) =
-        expanded_positional_arg_semantic_types_with_options(
+        expanded_positional_arg_semantic_types_in_scope_with_options(
             node,
             nodes,
             call,
             expected_types,
+            current_owner_name,
+            current_owner_type_name,
             options,
         );
     let positional_types =
@@ -820,7 +934,14 @@ pub(super) fn expanded_positional_arg_semantic_types_in_scope_with_options(
         ));
     }
     let mut variadic_starred_types = Vec::new();
-    for expansion in resolved_starred_positional_expansions_with_options(node, nodes, call, options) {
+    for expansion in resolved_starred_positional_expansions_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        current_owner_name,
+        current_owner_type_name,
+        options,
+    ) {
         match expansion {
             PositionalExpansion::Fixed(types) => positional_types.extend(
                 types
@@ -856,12 +977,35 @@ pub(super) fn expanded_positional_arg_semantic_types_with_expected_semantic_and_
     expected_types: &[Option<SemanticType>],
     options: AssignabilityOptions,
 ) -> (Vec<SemanticType>, Vec<SemanticType>) {
+    expanded_positional_arg_semantic_types_with_expected_semantic_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        None,
+        None,
+        options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn expanded_positional_arg_semantic_types_with_expected_semantic_in_scope_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<SemanticType>],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> (Vec<SemanticType>, Vec<SemanticType>) {
     let mut positional_types =
-        resolved_call_arg_semantic_types_with_expected_semantic_and_options(
+        resolved_call_arg_semantic_types_with_expected_semantic_in_scope_with_options(
             node,
             nodes,
             call,
             expected_types,
+            current_owner_name,
+            current_owner_type_name,
             options,
         );
     if positional_types.len() < call.arg_count {
@@ -871,7 +1015,14 @@ pub(super) fn expanded_positional_arg_semantic_types_with_expected_semantic_and_
         ));
     }
     let mut variadic_starred_types = Vec::new();
-    for expansion in resolved_starred_positional_expansions_with_options(node, nodes, call, options) {
+    for expansion in resolved_starred_positional_expansions_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        current_owner_name,
+        current_owner_type_name,
+        options,
+    ) {
         match expansion {
             PositionalExpansion::Fixed(types) => positional_types.extend(
                 types
@@ -937,10 +1088,12 @@ pub(super) fn resolved_call_arg_semantic_types_in_scope_with_options(
         .iter()
         .enumerate()
         .map(|(index, metadata)| {
-            resolve_contextual_call_arg_semantic_type_with_context(
+            resolve_contextual_call_arg_semantic_type_in_scope_with_context(
                 &context,
                 node,
                 nodes,
+                current_owner_name,
+                current_owner_type_name,
                 call.line,
                 metadata,
                 expected_types.get(index).and_then(|expected| expected.as_deref()),
@@ -991,6 +1144,27 @@ pub(super) fn resolved_call_arg_semantic_types_with_expected_semantic_and_option
     expected_types: &[Option<SemanticType>],
     options: AssignabilityOptions,
 ) -> Vec<SemanticType> {
+    resolved_call_arg_semantic_types_with_expected_semantic_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        None,
+        None,
+        options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolved_call_arg_semantic_types_with_expected_semantic_in_scope_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<SemanticType>],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> Vec<SemanticType> {
     let context = checker_context_for_assignability_options(nodes, options);
     let arg_types = call.positional_arg_type_texts();
     if call.arg_values.is_empty() {
@@ -1000,10 +1174,12 @@ pub(super) fn resolved_call_arg_semantic_types_with_expected_semantic_and_option
         .iter()
         .enumerate()
         .map(|(index, metadata)| {
-            resolve_contextual_call_arg_semantic_type_with_expected_semantic(
+            resolve_contextual_call_arg_semantic_type_with_expected_semantic_in_scope(
                 &context,
                 node,
                 nodes,
+                current_owner_name,
+                current_owner_type_name,
                 call.line,
                 metadata,
                 expected_types.get(index).and_then(|expected| expected.as_ref()),
@@ -1011,7 +1187,14 @@ pub(super) fn resolved_call_arg_semantic_types_with_expected_semantic_and_option
             .map(|result| result.actual_type)
             .or_else(|| {
                 resolve_direct_expression_semantic_type_from_metadata_with_options(
-                    node, nodes, None, None, None, call.line, metadata, options,
+                    node,
+                    nodes,
+                    None,
+                    current_owner_name,
+                    current_owner_type_name,
+                    call.line,
+                    metadata,
+                    options,
                 )
             })
             .unwrap_or_else(|| {
@@ -1077,10 +1260,12 @@ pub(super) fn resolved_keyword_arg_semantic_types_in_scope_with_options(
         .iter()
         .enumerate()
         .map(|(index, metadata)| {
-            resolve_contextual_call_arg_semantic_type_with_context(
+            resolve_contextual_call_arg_semantic_type_in_scope_with_context(
                 &context,
                 node,
                 nodes,
+                current_owner_name,
+                current_owner_type_name,
                 call.line,
                 metadata,
                 expected_types.get(index).and_then(|expected| expected.as_deref()),
@@ -1131,6 +1316,27 @@ pub(super) fn resolved_keyword_arg_semantic_types_with_expected_semantic_and_opt
     expected_types: &[Option<SemanticType>],
     options: AssignabilityOptions,
 ) -> Vec<SemanticType> {
+    resolved_keyword_arg_semantic_types_with_expected_semantic_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        expected_types,
+        None,
+        None,
+        options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolved_keyword_arg_semantic_types_with_expected_semantic_in_scope_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<SemanticType>],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> Vec<SemanticType> {
     let context = checker_context_for_assignability_options(nodes, options);
     let keyword_arg_types = call.keyword_arg_type_texts();
     if call.keyword_arg_values.is_empty() {
@@ -1140,10 +1346,12 @@ pub(super) fn resolved_keyword_arg_semantic_types_with_expected_semantic_and_opt
         .iter()
         .enumerate()
         .map(|(index, metadata)| {
-            resolve_contextual_call_arg_semantic_type_with_expected_semantic(
+            resolve_contextual_call_arg_semantic_type_with_expected_semantic_in_scope(
                 &context,
                 node,
                 nodes,
+                current_owner_name,
+                current_owner_type_name,
                 call.line,
                 metadata,
                 expected_types.get(index).and_then(|expected| expected.as_ref()),
@@ -1151,7 +1359,14 @@ pub(super) fn resolved_keyword_arg_semantic_types_with_expected_semantic_and_opt
             .map(|result| result.actual_type)
             .or_else(|| {
                 resolve_direct_expression_semantic_type_from_metadata_with_options(
-                    node, nodes, None, None, None, call.line, metadata, options,
+                    node,
+                    nodes,
+                    None,
+                    current_owner_name,
+                    current_owner_type_name,
+                    call.line,
+                    metadata,
+                    options,
                 )
             })
             .unwrap_or_else(|| {

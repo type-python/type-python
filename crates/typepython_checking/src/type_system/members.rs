@@ -201,6 +201,8 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             node,
             nodes,
             current_line,
+            current_owner_name,
+            current_owner_type_name,
             owner_name,
             method_name,
             options,
@@ -249,7 +251,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             keyword_names: call.keyword_names.clone(),
             keyword_arg_values: call.keyword_arg_values.clone(),
             keyword_expansion_values: call.keyword_expansion_values.clone(),
-            line: 1,
+            line: current_line,
         };
         let overloads = methods
             .iter()
@@ -260,6 +262,8 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             node,
             nodes,
             &call,
+            current_owner_name,
+            current_owner_type_name,
             &owner_type,
             &overloads,
             options,
@@ -283,13 +287,15 @@ pub(super) fn resolve_direct_method_return_semantic_type(
                 keyword_names: call.keyword_names.clone(),
                 keyword_arg_values: call.keyword_arg_values.clone(),
                 keyword_expansion_values: call.keyword_expansion_values.clone(),
-                line: 1,
+                line: current_line,
             };
             if let Some(return_type) = resolve_method_call_candidate_detailed(
                 node,
                 nodes,
                 method,
                 &call,
+                current_owner_name,
+                current_owner_type_name,
                 &owner_type,
                 declaration_callable_semantics(method).as_ref(),
                 options,

@@ -1195,6 +1195,29 @@ pub(super) fn resolve_contextual_typed_dict_literal_semantic_type_with_context(
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
 ) -> Option<ContextualTypedDictLiteralSemanticResult> {
+    resolve_contextual_typed_dict_literal_semantic_type_in_scope_with_context(
+        context,
+        node,
+        nodes,
+        None,
+        None,
+        current_line,
+        metadata,
+        expected,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_contextual_typed_dict_literal_semantic_type_in_scope_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<ContextualTypedDictLiteralSemanticResult> {
     let entries = metadata.value_dict_entries.as_ref()?;
     let actual_type = lower_type_text_or_name(expected?);
     let target_shape =
@@ -1212,8 +1235,8 @@ pub(super) fn resolve_contextual_typed_dict_literal_semantic_type_with_context(
         entries,
         &target_shape,
         None,
-        None,
-        None,
+        current_owner_name,
+        current_owner_type_name,
     );
     Some(ContextualTypedDictLiteralSemanticResult { actual_type, diagnostics })
 }
@@ -1349,10 +1372,12 @@ fn resolve_contextual_collection_literal_semantic_type_for_expected(
             let diagnostics = elements
                 .iter()
                 .flat_map(|element| {
-                    resolve_contextual_call_arg_semantic_type_with_context(
+                    resolve_contextual_call_arg_semantic_type_in_scope_with_context(
                         context,
                         node,
                         nodes,
+                        current_owner_name,
+                        current_owner_type_name,
                         current_line,
                         element,
                         Some(&render_semantic_type(&args[0])),
@@ -1367,10 +1392,12 @@ fn resolve_contextual_collection_literal_semantic_type_for_expected(
                 elements
                     .iter()
                     .map(|element| {
-                        resolve_contextual_call_arg_semantic_type_with_context(
+                        resolve_contextual_call_arg_semantic_type_in_scope_with_context(
                             context,
                             node,
                             nodes,
+                            current_owner_name,
+                            current_owner_type_name,
                             current_line,
                             element,
                             Some(&render_semantic_type(&args[0])),
@@ -1394,10 +1421,12 @@ fn resolve_contextual_collection_literal_semantic_type_for_expected(
             let diagnostics = elements
                 .iter()
                 .flat_map(|element| {
-                    resolve_contextual_call_arg_semantic_type_with_context(
+                    resolve_contextual_call_arg_semantic_type_in_scope_with_context(
                         context,
                         node,
                         nodes,
+                        current_owner_name,
+                        current_owner_type_name,
                         current_line,
                         element,
                         Some(&render_semantic_type(&args[0])),
@@ -1412,10 +1441,12 @@ fn resolve_contextual_collection_literal_semantic_type_for_expected(
                 elements
                     .iter()
                     .map(|element| {
-                        resolve_contextual_call_arg_semantic_type_with_context(
+                        resolve_contextual_call_arg_semantic_type_in_scope_with_context(
                             context,
                             node,
                             nodes,
+                            current_owner_name,
+                            current_owner_type_name,
                             current_line,
                             element,
                             Some(&render_semantic_type(&args[0])),
@@ -1446,10 +1477,12 @@ fn resolve_contextual_collection_literal_semantic_type_for_expected(
                         .key_value
                         .as_deref()
                         .and_then(|key| {
-                            resolve_contextual_call_arg_semantic_type_with_context(
+                            resolve_contextual_call_arg_semantic_type_in_scope_with_context(
                                 context,
                                 node,
                                 nodes,
+                                current_owner_name,
+                                current_owner_type_name,
                                 current_line,
                                 key,
                                 Some(&render_semantic_type(&args[0])),
@@ -1457,14 +1490,17 @@ fn resolve_contextual_collection_literal_semantic_type_for_expected(
                         })
                         .into_iter()
                         .flat_map(|result| result.diagnostics);
-                    let value_diagnostics = resolve_contextual_call_arg_semantic_type_with_context(
-                        context,
-                        node,
-                        nodes,
-                        current_line,
-                        &entry.value,
-                        Some(&render_semantic_type(&args[1])),
-                    )
+                    let value_diagnostics =
+                        resolve_contextual_call_arg_semantic_type_in_scope_with_context(
+                            context,
+                            node,
+                            nodes,
+                            current_owner_name,
+                            current_owner_type_name,
+                            current_line,
+                            &entry.value,
+                            Some(&render_semantic_type(&args[1])),
+                        )
                     .into_iter()
                     .flat_map(|result| result.diagnostics);
                     key_diagnostics.chain(value_diagnostics)
@@ -1480,10 +1516,12 @@ fn resolve_contextual_collection_literal_semantic_type_for_expected(
                             .key_value
                             .as_deref()
                             .and_then(|key| {
-                                resolve_contextual_call_arg_semantic_type_with_context(
+                                resolve_contextual_call_arg_semantic_type_in_scope_with_context(
                                     context,
                                     node,
                                     nodes,
+                                    current_owner_name,
+                                    current_owner_type_name,
                                     current_line,
                                     key,
                                     Some(&render_semantic_type(&args[0])),
@@ -1501,10 +1539,12 @@ fn resolve_contextual_collection_literal_semantic_type_for_expected(
                 entries
                     .iter()
                     .map(|entry| {
-                        resolve_contextual_call_arg_semantic_type_with_context(
+                        resolve_contextual_call_arg_semantic_type_in_scope_with_context(
                             context,
                             node,
                             nodes,
+                            current_owner_name,
+                            current_owner_type_name,
                             current_line,
                             &entry.value,
                             Some(&render_semantic_type(&args[1])),
@@ -1541,12 +1581,35 @@ pub(super) fn resolve_contextual_call_arg_semantic_type_with_context(
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
 ) -> Option<ContextualCallArgSemanticResult> {
+    resolve_contextual_call_arg_semantic_type_in_scope_with_context(
+        context,
+        node,
+        nodes,
+        None,
+        None,
+        current_line,
+        metadata,
+        expected,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_contextual_call_arg_semantic_type_in_scope_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<ContextualCallArgSemanticResult> {
     if let Some(lambda) = metadata.value_lambda.as_deref()
         && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type_with_options(
             node,
             nodes,
-            None,
-            None,
+            current_owner_name,
+            current_owner_type_name,
             current_line,
             lambda,
             expected,
@@ -1556,13 +1619,33 @@ pub(super) fn resolve_contextual_call_arg_semantic_type_with_context(
     {
         return Some(ContextualCallArgSemanticResult { actual_type, diagnostics: Vec::new() });
     }
+    if expected.and_then(parse_callable_annotation_parts).is_some()
+        && let Some(function_name) = metadata.value_name.as_deref()
+        && let Some(actual_type) = resolve_direct_name_reference_semantic_type_with_context(
+            context,
+            node,
+            nodes,
+            None,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            function_name,
+        )
+        && actual_type.callable_parts().is_some()
+    {
+        return Some(ContextualCallArgSemanticResult { actual_type, diagnostics: Vec::new() });
+    }
     if let Some(actual_type) = resolve_contextual_named_callable_semantic_type(node, nodes, metadata, expected) {
         return Some(ContextualCallArgSemanticResult { actual_type, diagnostics: Vec::new() });
     }
-    if let Some(result) = resolve_contextual_typed_dict_literal_semantic_type_with_context(
+    if let Some(result) =
+        resolve_contextual_typed_dict_literal_semantic_type_in_scope_with_context(
         context,
         node,
         nodes,
+        current_owner_name,
+        current_owner_type_name,
         current_line,
         metadata,
         expected,
@@ -1572,20 +1655,47 @@ pub(super) fn resolve_contextual_call_arg_semantic_type_with_context(
             diagnostics: result.diagnostics,
         });
     }
-    resolve_contextual_collection_literal_semantic_type_with_context(
+    resolve_contextual_collection_literal_semantic_type_in_scope_with_context(
         context,
         node,
         nodes,
+        None,
+        current_owner_name,
+        current_owner_type_name,
         current_line,
         metadata,
         expected,
     )
 }
 
+#[allow(dead_code)]
 pub(super) fn resolve_contextual_call_arg_semantic_type_with_expected_semantic(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&SemanticType>,
+) -> Option<ContextualCallArgSemanticResult> {
+    resolve_contextual_call_arg_semantic_type_with_expected_semantic_in_scope(
+        context,
+        node,
+        nodes,
+        None,
+        None,
+        current_line,
+        metadata,
+        expected,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_contextual_call_arg_semantic_type_with_expected_semantic_in_scope(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
     current_line: usize,
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&SemanticType>,
@@ -1595,14 +1705,31 @@ pub(super) fn resolve_contextual_call_arg_semantic_type_with_expected_semantic(
         && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type_with_options(
             node,
             nodes,
-            None,
-            None,
+            current_owner_name,
+            current_owner_type_name,
             current_line,
             lambda,
             expected_text.as_deref(),
             None,
             context.assignability_options(),
         )
+    {
+        return Some(ContextualCallArgSemanticResult { actual_type, diagnostics: Vec::new() });
+    }
+    if expected.and_then(SemanticType::callable_parts).is_some()
+        && let Some(function_name) = metadata.value_name.as_deref()
+        && let Some(actual_type) = resolve_direct_name_reference_semantic_type_with_context(
+            context,
+            node,
+            nodes,
+            None,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            function_name,
+        )
+        && actual_type.callable_parts().is_some()
     {
         return Some(ContextualCallArgSemanticResult { actual_type, diagnostics: Vec::new() });
     }
@@ -1613,10 +1740,13 @@ pub(super) fn resolve_contextual_call_arg_semantic_type_with_expected_semantic(
     {
         return Some(ContextualCallArgSemanticResult { actual_type, diagnostics: Vec::new() });
     }
-    if let Some(result) = resolve_contextual_typed_dict_literal_semantic_type_with_context(
+    if let Some(result) =
+        resolve_contextual_typed_dict_literal_semantic_type_in_scope_with_context(
         context,
         node,
         nodes,
+        current_owner_name,
+        current_owner_type_name,
         current_line,
         metadata,
         expected_text.as_deref(),
@@ -1626,10 +1756,13 @@ pub(super) fn resolve_contextual_call_arg_semantic_type_with_expected_semantic(
             diagnostics: result.diagnostics,
         });
     }
-    resolve_contextual_collection_literal_semantic_type_with_context(
+    resolve_contextual_collection_literal_semantic_type_in_scope_with_context(
         context,
         node,
         nodes,
+        None,
+        current_owner_name,
+        current_owner_type_name,
         current_line,
         metadata,
         expected_text.as_deref(),

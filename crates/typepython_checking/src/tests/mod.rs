@@ -981,6 +981,8 @@ fn resolve_method_call_candidate_instantiates_owner_generic_arguments() {
         &graph.nodes,
         method,
         &direct_call,
+        None,
+        None,
         &crate::lower_type_text_or_name("Box[int]"),
         super::declaration_callable_semantics(method).as_ref(),
         crate::AssignabilityOptions::default(),

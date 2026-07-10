@@ -146,10 +146,13 @@ pub(super) fn resolve_imported_module_member_reference_semantic_type(
     .semantic_type(node)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_imported_module_method_return_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     current_line: usize,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
     owner_name: &str,
     method_name: &str,
     options: AssignabilityOptions,
@@ -178,11 +181,13 @@ pub(super) fn resolve_imported_module_method_return_semantic_type(
                 .copied()
                 .filter(|declaration| declaration.kind == DeclarationKind::Overload)
                 .collect::<Vec<_>>();
-            match resolve_direct_overload_selection(
+            match resolve_direct_overload_selection_in_scope(
                 node,
                 nodes,
                 &call,
                 &overloads,
+                current_owner_name,
+                current_owner_type_name,
                 options,
             ) {
                 ResolvedOverloadSelection::Selected(candidate) => candidate.return_type,
@@ -196,11 +201,13 @@ pub(super) fn resolve_imported_module_method_return_semantic_type(
                     && call.line == current_line
             })?;
             let call = imported_module_method_call_site(module_node, call);
-            resolve_direct_call_candidate_detailed_with_options(
+            resolve_direct_call_candidate_detailed_in_scope_with_options(
                 node,
                 nodes,
                 *methods.first()?,
                 &call,
+                current_owner_name,
+                current_owner_type_name,
                 options,
             )
             .ok()?
@@ -221,7 +228,7 @@ pub(super) fn imported_module_method_call_site(
         keyword_names: call.keyword_names.clone(),
         keyword_arg_values: call.keyword_arg_values.clone(),
         keyword_expansion_values: call.keyword_expansion_values.clone(),
-        line: 1,
+        line: call.line,
     }
 }
 
@@ -269,38 +276,49 @@ pub(super) fn imported_module_method_call_diagnostics(
         .filter(|declaration| declaration.kind == DeclarationKind::Overload)
         .collect::<Vec<_>>();
     if !overloads.is_empty() {
-        match resolve_direct_overload_selection(
+        match resolve_direct_overload_selection_in_scope(
             node,
             nodes,
             &direct_call,
             &overloads,
+            call.current_owner_name.as_deref(),
+            call.current_owner_type_name.as_deref(),
             context.assignability_options(),
         ) {
             ResolvedOverloadSelection::Selected(candidate) => {
                 let signature = candidate.signature_sites;
-                if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
+                if let Some(diagnostic) =
+                    direct_source_function_arity_diagnostic_in_scope_with_context(
                     context,
                     node,
                     nodes,
                     &direct_call,
                     &signature,
+                    call.current_owner_name.as_deref(),
+                    call.current_owner_type_name.as_deref(),
                 )
                 {
                     diagnostics.push(diagnostic);
                 }
-                diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
+                diagnostics.extend(
+                    direct_source_function_keyword_diagnostics_in_scope_with_context(
+                        context,
+                        node,
+                        nodes,
+                        &direct_call,
+                        &signature,
+                        call.current_owner_name.as_deref(),
+                        call.current_owner_type_name.as_deref(),
+                    ),
+                );
+                diagnostics.extend(direct_source_function_type_diagnostics_in_scope_with_context(
                     context,
                     node,
                     nodes,
                     &direct_call,
                     &signature,
-                ));
-                diagnostics.extend(direct_source_function_type_diagnostics_with_context(
-                    context,
-                    node,
-                    nodes,
-                    &direct_call,
-                    &signature,
+                    call.current_owner_name.as_deref(),
+                    call.current_owner_type_name.as_deref(),
                 ));
                 return Some(diagnostics);
             }
@@ -343,11 +361,13 @@ pub(super) fn imported_module_method_call_diagnostics(
         return Some(diagnostics);
     }
 
-    let signature = match resolve_direct_call_candidate_detailed_with_options(
+    let signature = match resolve_direct_call_candidate_detailed_in_scope_with_options(
         node,
         nodes,
         callable_candidates[0],
         &direct_call,
+        call.current_owner_name.as_deref(),
+        call.current_owner_type_name.as_deref(),
         context.assignability_options(),
     ) {
         Ok(candidate) => candidate.signature_sites,
@@ -362,29 +382,35 @@ pub(super) fn imported_module_method_call_diagnostics(
         }
         Err(_) => declaration_signature_sites(callable_candidates[0]),
     };
-    if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
+    if let Some(diagnostic) = direct_source_function_arity_diagnostic_in_scope_with_context(
         context,
         node,
         nodes,
         &direct_call,
         &signature,
+        call.current_owner_name.as_deref(),
+        call.current_owner_type_name.as_deref(),
     )
     {
         diagnostics.push(diagnostic);
     }
-    diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
+    diagnostics.extend(direct_source_function_keyword_diagnostics_in_scope_with_context(
         context,
         node,
         nodes,
         &direct_call,
         &signature,
+        call.current_owner_name.as_deref(),
+        call.current_owner_type_name.as_deref(),
     ));
-    diagnostics.extend(direct_source_function_type_diagnostics_with_context(
+    diagnostics.extend(direct_source_function_type_diagnostics_in_scope_with_context(
         context,
         node,
         nodes,
         &direct_call,
         &signature,
+        call.current_owner_name.as_deref(),
+        call.current_owner_type_name.as_deref(),
     ));
     Some(diagnostics)
 }

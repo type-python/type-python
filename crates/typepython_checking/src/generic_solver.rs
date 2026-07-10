@@ -408,10 +408,15 @@ fn expected_keyword_arg_semantic_types_from_semantic_params(
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn infer_single_argument_bindings_detailed(
     solver: &mut GenericSolverState,
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
+    call_node: &typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
     nodes: &[typepython_graph::ModuleNode],
     annotation: &SemanticType,
     actual_type: SemanticType,
@@ -424,6 +429,10 @@ fn infer_single_argument_bindings_detailed(
     let bindings = infer_callable_param_spec_bindings(
         context,
         node,
+        call_node,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
         nodes,
         annotation,
         &actual_type,
@@ -849,6 +858,10 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed_with_context(
             &mut solver,
             context,
             node,
+            node,
+            None,
+            None,
+            call.line,
             nodes,
             &annotation,
             actual.clone(),
@@ -870,6 +883,10 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed_with_context(
             &mut solver,
             context,
             node,
+            node,
+            None,
+            None,
+            call.line,
             nodes,
             &annotation,
             actual_type,
@@ -880,6 +897,7 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed_with_context(
     solver.finish_detailed(node, nodes)
 }
 
+#[allow(dead_code)]
 pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detailed_with_options(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -888,12 +906,38 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
     call: &typepython_binding::CallSite,
     options: AssignabilityOptions,
 ) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
-    let context = checker_context_for_assignability_options(nodes, options);
-    infer_generic_type_param_substitutions_from_semantic_params_detailed_with_context(
-        &context, node, nodes, function, params, call,
+    infer_generic_type_param_substitutions_from_semantic_params_detailed_in_scope_with_options(
+        node, node, nodes, function, params, call, None, None, options,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detailed_in_scope_with_options(
+    node: &typepython_graph::ModuleNode,
+    call_node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    function: &Declaration,
+    params: &[SemanticCallableParam],
+    call: &typepython_binding::CallSite,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
+    let context = checker_context_for_assignability_options(nodes, options);
+    infer_generic_type_param_substitutions_from_semantic_params_detailed_in_scope_with_context(
+        &context,
+        node,
+        call_node,
+        nodes,
+        function,
+        params,
+        call,
+        current_owner_name,
+        current_owner_type_name,
+    )
+}
+
+#[allow(dead_code)]
 pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detailed_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -902,27 +946,49 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
     params: &[SemanticCallableParam],
     call: &typepython_binding::CallSite,
 ) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
+    infer_generic_type_param_substitutions_from_semantic_params_detailed_in_scope_with_context(
+        context, node, node, nodes, function, params, call, None, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detailed_in_scope_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    call_node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    function: &Declaration,
+    params: &[SemanticCallableParam],
+    call: &typepython_binding::CallSite,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
     let options = context.assignability_options();
     let mut solver = GenericSolverState::new_with_options(function, options);
     let expected_positional_arg_types =
         expected_positional_arg_semantic_types_from_semantic_params(params, call.arg_count);
     let (positional_types, variadic_starred_types) =
-        expanded_positional_arg_semantic_types_with_expected_semantic_and_options(
-            node,
+        expanded_positional_arg_semantic_types_with_expected_semantic_in_scope_with_options(
+            call_node,
             nodes,
             call,
             &expected_positional_arg_types,
+            current_owner_name,
+            current_owner_type_name,
             options,
         );
     let expected_keyword_arg_types =
         expected_keyword_arg_semantic_types_from_semantic_params(params, &call.keyword_names);
-    let keyword_arg_types = resolved_keyword_arg_semantic_types_with_expected_semantic_and_options(
-        node,
-        nodes,
-        call,
-        &expected_keyword_arg_types,
-        options,
-    );
+    let keyword_arg_types =
+        resolved_keyword_arg_semantic_types_with_expected_semantic_in_scope_with_options(
+            call_node,
+            nodes,
+            call,
+            &expected_keyword_arg_types,
+            current_owner_name,
+            current_owner_type_name,
+            options,
+        );
     let mut positional_index = 0;
 
     for param in params.iter().filter(|param| !param.keyword_only && !param.keyword_variadic) {
@@ -954,6 +1020,10 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
             &mut solver,
             context,
             node,
+            call_node,
+            current_owner_name,
+            current_owner_type_name,
+            call.line,
             nodes,
             &annotation,
             actual.clone(),
@@ -975,6 +1045,10 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
             &mut solver,
             context,
             node,
+            call_node,
+            current_owner_name,
+            current_owner_type_name,
+            call.line,
             nodes,
             &annotation,
             actual_type,
@@ -1084,6 +1158,10 @@ pub(crate) fn instantiate_direct_function_param_annotation(
 pub(crate) fn infer_callable_param_spec_bindings(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
+    call_node: &typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
     nodes: &[typepython_graph::ModuleNode],
     annotation: &SemanticType,
     actual: &SemanticType,
@@ -1104,8 +1182,16 @@ pub(crate) fn infer_callable_param_spec_bindings(
         return Some(GenericTypeParamSubstitutions::default());
     }
 
-    let (actual_binding, actual_return) =
-        resolve_callable_shape_from_actual(context, node, nodes, actual, actual_value)?;
+    let (actual_binding, actual_return) = resolve_callable_shape_from_actual(
+        context,
+        call_node,
+        nodes,
+        actual,
+        actual_value,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+    )?;
     let mut bindings = infer_callable_param_expr_bindings(
         node,
         nodes,
@@ -1234,13 +1320,43 @@ pub(crate) fn insert_param_spec_binding(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_callable_shape_from_actual(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     actual: &SemanticType,
     actual_value: Option<&typepython_syntax::DirectExprMetadata>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
 ) -> Option<(ParamListBinding, SemanticType)> {
+    let shape_from_actual = || {
+        let (params, return_type) = actual.callable_parts()?;
+        let SemanticCallableParams::ParamList(param_types) = params else {
+            return None;
+        };
+        Some((
+            ParamListBinding {
+                params: synthesize_semantic_param_list_binding(param_types.clone()),
+            },
+            return_type.clone(),
+        ))
+    };
+    if let Some(function_name) = actual_value.and_then(|value| value.value_name.as_deref())
+        && name_has_contextual_local_binding(
+            context,
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            function_name,
+        )
+        && actual.callable_parts().is_some()
+    {
+        return shape_from_actual();
+    }
     if let Some(actual_value) = actual_value
         && let Some(shape) =
             resolve_callable_shape_from_metadata(context, node, nodes, actual_value, actual)
@@ -1248,14 +1364,7 @@ pub(crate) fn resolve_callable_shape_from_actual(
         return Some(shape);
     }
 
-    let (params, return_type) = actual.callable_parts()?;
-    let SemanticCallableParams::ParamList(param_types) = params else {
-        return None;
-    };
-    Some((
-        ParamListBinding { params: synthesize_semantic_param_list_binding(param_types.clone()) },
-        return_type.clone(),
-    ))
+    shape_from_actual()
 }
 
 pub(crate) fn resolve_callable_shape_from_metadata(

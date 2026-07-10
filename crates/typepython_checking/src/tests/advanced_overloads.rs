@@ -357,6 +357,21 @@ fn check_accepts_direct_overloaded_call_assignment_type_match() {
 }
 
 #[test]
+fn check_selects_direct_overload_from_parameter_forwarding() {
+    let result = check_temp_typepython_source(concat!(
+        "overload def parse(value: int) -> str: ...\n",
+        "overload def parse(value: str) -> int: ...\n",
+        "def parse(value):\n",
+        "    return value\n\n",
+        "def forward(value: int) -> str:\n",
+        "    result: str = parse(value)\n",
+        "    return result\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_direct_overloaded_none_argument_when_strict_nulls_is_disabled() {
     let result = check_temp_typepython_source_with_checker_options(
         concat!(
@@ -426,6 +441,8 @@ fn method_overload_selection_honors_strict_nulls_option() {
         node,
         &graph.nodes,
         &call,
+        None,
+        None,
         &crate::SemanticType::Name(String::from("Base")),
         &overloads,
         crate::AssignabilityOptions {
@@ -442,6 +459,111 @@ fn method_overload_selection_honors_strict_nulls_option() {
             );
         }
         other => panic!("expected strict-null-disabled method overload selection: {other:?}"),
+    }
+}
+
+#[test]
+fn method_overload_selection_resolves_arguments_in_caller_scope() {
+    let mut node = type_relation_node_with_base_child();
+    for (parameter_type, return_type) in [("int", "str"), ("str", "int")] {
+        node.declarations.push(declaration! {
+            name: String::from("parse"),
+            kind: DeclarationKind::Overload,
+            metadata: callable_metadata(&format!("(self,value:{parameter_type})->{return_type}")),
+            value_type_expr: None,
+            method_kind: Some(typepython_syntax::MethodKind::Instance),
+            class_kind: None,
+            owner: Some(DeclarationOwner {
+                kind: DeclarationOwnerKind::Class,
+                name: String::from("Base"),
+            }),
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: Vec::new(),
+        });
+    }
+    node.declarations.push(declaration! {
+        name: String::from("forward"),
+        kind: DeclarationKind::Function,
+        metadata: callable_metadata("(value:int)->str"),
+        value_type_expr: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    });
+    let graph = normalize_test_graph(&ModuleGraph { nodes: vec![node] });
+    let node = &graph.nodes[0];
+    let overloads = node
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Overload)
+        .map(|declaration| (declaration, None))
+        .collect::<Vec<_>>();
+    let mut argument = crate::synthetic_direct_expr_metadata("unknown");
+    argument.value_type_expr = None;
+    argument.value_name = Some(String::from("value"));
+    let call = typepython_binding::CallSite {
+        callee: String::from("Base.parse"),
+        arg_count: 1,
+        arg_values: vec![argument],
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+    assert_eq!(
+        crate::resolve_direct_expression_semantic_type_from_metadata_with_options(
+            node,
+            &graph.nodes,
+            None,
+            Some("forward"),
+            None,
+            call.line,
+            &call.arg_values[0],
+            crate::AssignabilityOptions::default(),
+        )
+        .as_ref()
+        .map(crate::diagnostic_type_text),
+        Some(String::from("int")),
+    );
+
+    let selection = crate::resolve_method_overload_selection(
+        node,
+        &graph.nodes,
+        &call,
+        Some("forward"),
+        None,
+        &crate::SemanticType::Name(String::from("Base")),
+        &overloads,
+        crate::AssignabilityOptions::default(),
+    );
+
+    match selection {
+        crate::ResolvedOverloadSelection::Selected(candidate) => {
+            assert_eq!(
+                candidate.return_type.as_ref().map(crate::diagnostic_type_text),
+                Some(String::from("str"))
+            );
+        }
+        other => panic!("expected caller-scoped method overload selection: {other:?}"),
     }
 }
 
@@ -941,6 +1063,8 @@ fn imported_module_method_return_semantic_type_stays_semantic() {
             &graph.nodes[1],
             &graph.nodes,
             1,
+            None,
+            None,
             "helpers",
             "box_value",
             crate::AssignabilityOptions::default(),

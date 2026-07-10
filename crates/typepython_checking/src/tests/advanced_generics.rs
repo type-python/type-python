@@ -418,6 +418,10 @@ fn check_paramspec_shape_inference_uses_context_decorated_metadata() {
     let substitutions = crate::infer_callable_param_spec_bindings(
         &context,
         node,
+        node,
+        None,
+        None,
+        1,
         &graph.nodes,
         &crate::lower_type_text_or_name("Callable[P, str]"),
         &crate::lower_type_text_or_name("Callable[[str], str]"),

@@ -701,6 +701,7 @@ pub(super) fn ambiguous_overload_call_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
+    let call_context_sites = context.load_direct_call_context_sites(node);
     node.calls
         .iter()
         .filter_map(|call| {
@@ -709,11 +710,16 @@ pub(super) fn ambiguous_overload_call_diagnostics(
                 return None;
             }
 
-            match resolve_direct_overload_selection(
+            let call_scope = call_context_sites
+                .iter()
+                .find(|site| site.line == call.line && site.callee == call.callee);
+            match resolve_direct_overload_selection_in_scope(
                 node,
                 nodes,
                 call,
                 &overloads,
+                call_scope.and_then(|site| site.owner_name.as_deref()),
+                call_scope.and_then(|site| site.owner_type_name.as_deref()),
                 context.assignability_options(),
             ) {
                 ResolvedOverloadSelection::Ambiguous { applicable_count }
@@ -867,6 +873,7 @@ pub(super) enum ResolvedOverloadSelection<'a> {
     NotApplicable { runtime_generic_failures: Vec<(&'a Declaration, DirectCallResolutionFailure)> },
 }
 
+#[allow(dead_code)]
 pub(super) fn resolve_overload_selection_from_attempts_with_options<'a>(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -877,17 +884,37 @@ pub(super) fn resolve_overload_selection_from_attempts_with_options<'a>(
     )>,
     options: AssignabilityOptions,
 ) -> ResolvedOverloadSelection<'a> {
+    resolve_overload_selection_from_attempts_in_scope_with_options(
+        node, nodes, call, attempts, None, None, options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_overload_selection_from_attempts_in_scope_with_options<'a>(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    attempts: Vec<(
+        &'a Declaration,
+        Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure>,
+    )>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> ResolvedOverloadSelection<'a> {
     let mut applicable = Vec::new();
     let mut runtime_generic_failures = Vec::new();
 
     for (declaration, attempt) in attempts {
         match attempt {
             Ok(candidate)
-                if call_signature_params_are_applicable_with_options(
+                if call_signature_params_are_applicable_in_scope_with_options(
                     node,
                     nodes,
                     call,
                     &candidate.signature_params,
+                    current_owner_name,
+                    current_owner_type_name,
                     options,
                 ) =>
             {
@@ -976,23 +1003,46 @@ pub(super) fn call_signature_params_are_applicable_with_options(
     params: &[SemanticCallableParam],
     options: AssignabilityOptions,
 ) -> bool {
+    call_signature_params_are_applicable_in_scope_with_options(
+        node, nodes, call, params, None, None, options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn call_signature_params_are_applicable_in_scope_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    params: &[SemanticCallableParam],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> bool {
     let context = checker_context_for_assignability_options(nodes, options);
     let positional_params = params
         .iter()
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
         .collect::<Vec<_>>();
     let has_variadic = params.iter().any(|param| param.variadic);
-    let starred_positional =
-        resolved_starred_positional_expansions_with_options(node, nodes, call, options);
+    let starred_positional = resolved_starred_positional_expansions_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        current_owner_name,
+        current_owner_type_name,
+        options,
+    );
     let expected_positional_arg_types =
         expected_positional_arg_semantic_types_from_params(params, call.arg_count);
     let expected_keyword_arg_types =
         expected_keyword_arg_semantic_types_from_params(params, &call.keyword_names);
     if call.arg_values.iter().enumerate().any(|(index, metadata)| {
-        resolve_contextual_call_arg_semantic_type_with_expected_semantic(
+        resolve_contextual_call_arg_semantic_type_with_expected_semantic_in_scope(
             &context,
             node,
             nodes,
+            current_owner_name,
+            current_owner_type_name,
             call.line,
             metadata,
             expected_positional_arg_types.get(index).and_then(|expected| expected.as_ref()),
@@ -1002,10 +1052,12 @@ pub(super) fn call_signature_params_are_applicable_with_options(
         return false;
     }
     if call.keyword_arg_values.iter().enumerate().any(|(index, metadata)| {
-        resolve_contextual_call_arg_semantic_type_with_expected_semantic(
+        resolve_contextual_call_arg_semantic_type_with_expected_semantic_in_scope(
             &context,
             node,
             nodes,
+            current_owner_name,
+            current_owner_type_name,
             call.line,
             metadata,
             expected_keyword_arg_types.get(index).and_then(|expected| expected.as_ref()),
@@ -1015,26 +1067,31 @@ pub(super) fn call_signature_params_are_applicable_with_options(
         return false;
     }
     let resolved_keyword_arg_types =
-        resolved_keyword_arg_semantic_types_with_expected_semantic_and_options(
+        resolved_keyword_arg_semantic_types_with_expected_semantic_in_scope_with_options(
             node,
             nodes,
             call,
             &expected_keyword_arg_types,
+            current_owner_name,
+            current_owner_type_name,
             options,
         )
         .into_iter()
         .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
         .collect::<Vec<_>>();
-    let mut positional_types = resolved_call_arg_semantic_types_with_expected_semantic_and_options(
-        node,
-        nodes,
-        call,
-        &expected_positional_arg_types,
-        options,
-    )
-    .into_iter()
-    .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
-    .collect::<Vec<_>>();
+    let mut positional_types =
+        resolved_call_arg_semantic_types_with_expected_semantic_in_scope_with_options(
+            node,
+            nodes,
+            call,
+            &expected_positional_arg_types,
+            current_owner_name,
+            current_owner_type_name,
+            options,
+        )
+        .into_iter()
+        .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
+        .collect::<Vec<_>>();
     let mut variadic_starred_types = Vec::new();
     for expansion in &starred_positional {
         match expansion {
@@ -1051,7 +1108,14 @@ pub(super) fn call_signature_params_are_applicable_with_options(
     }
     let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
     let accepts_extra_keywords = params.iter().any(|param| param.keyword_variadic);
-    let keyword_expansions = resolved_keyword_expansions_with_context(&context, node, nodes, call);
+    let keyword_expansions = resolved_keyword_expansions_in_scope_with_context(
+        &context,
+        node,
+        nodes,
+        call,
+        current_owner_name,
+        current_owner_type_name,
+    );
     if call.keyword_names.iter().any(|keyword| {
         !params.iter().any(|param| param.name == **keyword && !param.positional_only)
             && !accepts_extra_keywords
@@ -1289,6 +1353,19 @@ pub(super) fn resolved_starred_positional_expansions_with_options(
     call: &typepython_binding::CallSite,
     options: AssignabilityOptions,
 ) -> Vec<PositionalExpansion> {
+    resolved_starred_positional_expansions_in_scope_with_options(
+        node, nodes, call, None, None, options,
+    )
+}
+
+pub(super) fn resolved_starred_positional_expansions_in_scope_with_options(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> Vec<PositionalExpansion> {
     let mut expansions = Vec::new();
     let starred_arg_types = call.starred_arg_type_texts();
     let count = call.starred_arg_values.len().max(starred_arg_types.len());
@@ -1298,7 +1375,14 @@ pub(super) fn resolved_starred_positional_expansions_with_options(
             .get(index)
             .and_then(|metadata| {
                 resolve_direct_expression_semantic_type_from_metadata_with_options(
-                    node, nodes, None, None, None, call.line, metadata, options,
+                    node,
+                    nodes,
+                    None,
+                    current_owner_name,
+                    current_owner_type_name,
+                    call.line,
+                    metadata,
+                    options,
                 )
             })
             .or_else(|| {
@@ -1351,6 +1435,17 @@ pub(super) fn resolved_keyword_expansions_with_context(
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
 ) -> Vec<KeywordExpansion> {
+    resolved_keyword_expansions_in_scope_with_context(context, node, nodes, call, None, None)
+}
+
+pub(super) fn resolved_keyword_expansions_in_scope_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+) -> Vec<KeywordExpansion> {
     let mut expansions = Vec::new();
     let keyword_expansion_types = call.keyword_expansion_type_texts();
     let count = call.keyword_expansion_values.len().max(keyword_expansion_types.len());
@@ -1363,8 +1458,8 @@ pub(super) fn resolved_keyword_expansions_with_context(
                     node,
                     nodes,
                     None,
-                    None,
-                    None,
+                    current_owner_name,
+                    current_owner_type_name,
                     call.line,
                     metadata,
                     context.assignability_options(),
@@ -2710,7 +2805,7 @@ pub(super) fn name_is_unknown_boundary(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn name_has_contextual_local_binding(
+pub(super) fn name_has_contextual_local_binding(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -2823,7 +2918,7 @@ fn source_param_semantic_type(param: &typepython_syntax::DirectFunctionParamSite
         .unwrap_or_else(|| SemanticType::Name(String::from("dynamic")))
 }
 
-fn source_scope_param_semantic_type_with_context(
+pub(super) fn source_scope_param_semantic_type_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     current_owner_name: Option<&str>,

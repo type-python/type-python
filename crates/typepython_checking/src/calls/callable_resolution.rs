@@ -159,6 +159,29 @@ impl DirectCallResolutionFailure {
     }
 }
 
+fn declaration_provider_node<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
+    declaration: &Declaration,
+) -> &'a typepython_graph::ModuleNode {
+    if node
+        .declarations
+        .iter()
+        .any(|candidate| std::ptr::eq(candidate, declaration))
+    {
+        return node;
+    }
+    nodes
+        .iter()
+        .find(|candidate| {
+            candidate
+                .declarations
+                .iter()
+                .any(|candidate| std::ptr::eq(candidate, declaration))
+        })
+        .unwrap_or(node)
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "call candidate resolution threads semantic call context and assignability policy"
@@ -166,9 +189,12 @@ impl DirectCallResolutionFailure {
 fn resolve_callable_candidate_from_semantics<'a>(
     context: Option<&CheckerContext<'_>>,
     node: &typepython_graph::ModuleNode,
+    call_node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     declaration: &'a Declaration,
     call: &typepython_binding::CallSite,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
     signature: Vec<typepython_syntax::DirectFunctionParamSite>,
     semantic_params: Vec<SemanticCallableParam>,
     return_type: Option<SemanticType>,
@@ -177,22 +203,28 @@ fn resolve_callable_candidate_from_semantics<'a>(
     let substitutions = if declaration.type_params.is_empty() {
         GenericTypeParamSubstitutions::default()
     } else if let Some(context) = context {
-        infer_generic_type_param_substitutions_from_semantic_params_detailed_with_context(
+        infer_generic_type_param_substitutions_from_semantic_params_detailed_in_scope_with_context(
             context,
             node,
+            call_node,
             nodes,
             declaration,
             &semantic_params,
             call,
+            current_owner_name,
+            current_owner_type_name,
         )
         .map_err(DirectCallResolutionFailure::GenericSolve)?
     } else {
-        infer_generic_type_param_substitutions_from_semantic_params_detailed_with_options(
+        infer_generic_type_param_substitutions_from_semantic_params_detailed_in_scope_with_options(
             node,
+            call_node,
             nodes,
             declaration,
             &semantic_params,
             call,
+            current_owner_name,
+            current_owner_type_name,
             options,
         )
         .map_err(DirectCallResolutionFailure::GenericSolve)?
@@ -256,15 +288,31 @@ pub(super) fn resolve_direct_call_candidate_detailed_with_options<'a>(
     call: &typepython_binding::CallSite,
     options: AssignabilityOptions,
 ) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
-    let provider_node = resolve_function_provider_with_node(nodes, node, &call.callee)
-        .map(|(provider_node, _)| provider_node)
-        .unwrap_or(node);
+    resolve_direct_call_candidate_detailed_in_scope_with_options(
+        node, nodes, declaration, call, None, None, options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_direct_call_candidate_detailed_in_scope_with_options<'a>(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    declaration: &'a Declaration,
+    call: &typepython_binding::CallSite,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
+    let provider_node = declaration_provider_node(node, nodes, declaration);
     resolve_callable_candidate_from_semantics(
         None,
         provider_node,
+        node,
         nodes,
         declaration,
         call,
+        current_owner_name,
+        current_owner_type_name,
         declaration_signature_sites(declaration),
         declaration_semantic_signature_params(declaration).unwrap_or_default(),
         declaration_signature_return_semantic_type(declaration),
@@ -294,15 +342,20 @@ pub(super) fn resolve_direct_call_candidate_with_context_detailed<'a>(
             unresolved: Vec::new(),
         }
     })?;
-    let provider_node = resolve_function_provider_with_node(nodes, node, &call.callee)
-        .map(|(provider_node, _)| provider_node)
-        .unwrap_or(node);
+    let provider_node = declaration_provider_node(node, nodes, declaration);
+    let call_scope = context
+        .load_direct_call_context_sites(node)
+        .into_iter()
+        .find(|site| site.line == call.line && site.callee == call.callee);
     resolve_callable_candidate_from_semantics(
         Some(context),
         provider_node,
+        node,
         nodes,
         declaration,
         call,
+        call_scope.as_ref().and_then(|site| site.owner_name.as_deref()),
+        call_scope.as_ref().and_then(|site| site.owner_type_name.as_deref()),
         callable_signature_sites_from_semantics(&callable),
         callable_semantic_params_from_semantics(&callable),
         callable.return_type,
@@ -310,6 +363,7 @@ pub(super) fn resolve_direct_call_candidate_with_context_detailed<'a>(
     )
 }
 
+#[allow(dead_code)]
 pub(super) fn resolve_direct_overload_selection<'a>(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -317,29 +371,57 @@ pub(super) fn resolve_direct_overload_selection<'a>(
     overloads: &[&'a Declaration],
     options: AssignabilityOptions,
 ) -> ResolvedOverloadSelection<'a> {
+    resolve_direct_overload_selection_in_scope(
+        node, nodes, call, overloads, None, None, options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_direct_overload_selection_in_scope<'a>(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    overloads: &[&'a Declaration],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    options: AssignabilityOptions,
+) -> ResolvedOverloadSelection<'a> {
     let attempts = overloads
         .iter()
         .map(|declaration| {
             (
                 *declaration,
-                resolve_direct_call_candidate_detailed_with_options(
+                resolve_direct_call_candidate_detailed_in_scope_with_options(
                     node,
                     nodes,
                     declaration,
                     call,
+                    current_owner_name,
+                    current_owner_type_name,
                     options,
                 ),
             )
         })
         .collect::<Vec<_>>();
-    resolve_overload_selection_from_attempts_with_options(node, nodes, call, attempts, options)
+    resolve_overload_selection_from_attempts_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        attempts,
+        current_owner_name,
+        current_owner_type_name,
+        options,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_method_call_candidate_detailed<'a>(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     declaration: &'a Declaration,
     call: &typepython_binding::CallSite,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
     owner_type: &SemanticType,
     callable: Option<&SemanticCallableDeclaration>,
     options: AssignabilityOptions,
@@ -367,15 +449,16 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
             }
         })?,
     };
-    let provider_node = resolve_function_provider_with_node(nodes, node, &call.callee)
-        .map(|(provider_node, _)| provider_node)
-        .unwrap_or(node);
+    let provider_node = declaration_provider_node(node, nodes, declaration);
     resolve_callable_candidate_from_semantics(
         None,
         provider_node,
+        node,
         nodes,
         declaration,
         call,
+        current_owner_name,
+        current_owner_type_name,
         method_signature_sites_from_semantics(declaration, &callable, &owner_type_name)
             .into_iter()
             .map(|param| instantiate_direct_function_param(param, &owner_substitutions))
@@ -390,10 +473,13 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_method_overload_selection<'a>(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
     owner_type: &SemanticType,
     overloads: &[(&'a Declaration, Option<SemanticCallableDeclaration>)],
     options: AssignabilityOptions,
@@ -408,6 +494,8 @@ pub(super) fn resolve_method_overload_selection<'a>(
                     nodes,
                     declaration,
                     call,
+                    current_owner_name,
+                    current_owner_type_name,
                     owner_type,
                     callable.as_ref(),
                     options,
@@ -415,7 +503,15 @@ pub(super) fn resolve_method_overload_selection<'a>(
             )
         })
         .collect::<Vec<_>>();
-    resolve_overload_selection_from_attempts_with_options(node, nodes, call, attempts, options)
+    resolve_overload_selection_from_attempts_in_scope_with_options(
+        node,
+        nodes,
+        call,
+        attempts,
+        current_owner_name,
+        current_owner_type_name,
+        options,
+    )
 }
 
 #[allow(dead_code)]
@@ -1610,6 +1706,13 @@ pub(super) fn resolve_direct_callable_return_semantic_type_for_line_with_context
         .iter()
         .find(|call| call.callee == callee && call.line == line)
         .or_else(|| node.calls.iter().find(|call| call.callee == callee))?;
+    let call_scope = context
+        .load_direct_call_context_sites(node)
+        .into_iter()
+        .find(|site| site.line == call.line && site.callee == call.callee);
+    let current_owner_name = call_scope.as_ref().and_then(|site| site.owner_name.as_deref());
+    let current_owner_type_name =
+        call_scope.as_ref().and_then(|site| site.owner_type_name.as_deref());
     let overloads = resolve_direct_overloads(node, nodes, callee);
     if !overloads.is_empty() {
         let attempts = overloads
@@ -1617,21 +1720,25 @@ pub(super) fn resolve_direct_callable_return_semantic_type_for_line_with_context
             .map(|declaration| {
                 (
                     *declaration,
-                    resolve_direct_call_candidate_detailed_with_options(
+                    resolve_direct_call_candidate_detailed_in_scope_with_options(
                         node,
                         nodes,
                         declaration,
                         call,
+                        current_owner_name,
+                        current_owner_type_name,
                         options,
                     ),
                 )
             })
             .collect::<Vec<_>>();
-        return match resolve_overload_selection_from_attempts_with_options(
+        return match resolve_overload_selection_from_attempts_in_scope_with_options(
             node,
             nodes,
             call,
             attempts,
+            current_owner_name,
+            current_owner_type_name,
             options,
         ) {
             ResolvedOverloadSelection::Selected(candidate) => candidate.return_type,
@@ -1644,7 +1751,7 @@ pub(super) fn resolve_direct_callable_return_semantic_type_for_line_with_context
         return decorated_function_return_semantic_type_from_semantic_callable(&callable_type);
     }
     let function = resolve_direct_function(node, nodes, callee)?;
-    resolve_direct_call_candidate_detailed_with_options(node, nodes, function, call, options)
+    resolve_direct_call_candidate_with_context_detailed(context, node, nodes, function, call)
         .ok()?
         .return_type
 }
