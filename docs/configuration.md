@@ -173,9 +173,9 @@ emit_style = "compat"
 [typing]
 
 # Typing profile preset. Overrides individual settings when set.
-# Values: "library", "application", "migration", or null
-# Default: null
-profile = null
+# Values: "library", "application", or "migration"
+# Default: unset (omit this key to use the individual settings below)
+# profile = "application"
 
 # Enable strict type checking mode.
 # Default: true

@@ -102,7 +102,7 @@ runtime_validators = false                       # Experimental: emit runtime va
 emit_style = "compat"                            # "compat" or "native"; defaults by target version
 
 [typing]
-profile = null                                    # "library", "application", or "migration"
+# profile = "application"                       # Optional: "library", "application", or "migration"
 strict = true                                    # Master strictness
 strict_nulls = true                              # None excluded from T
 imports = "unknown"                              # "unknown" or "dynamic"
