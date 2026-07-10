@@ -2,6 +2,7 @@
 
 mod adapter;
 mod api_diff;
+mod archive;
 mod cli;
 mod compat;
 mod discovery;

@@ -1,6 +1,31 @@
 use super::*;
 
 #[test]
+fn supplied_archive_reader_rejects_unsafe_member_paths() {
+    let project_dir = temp_project_dir("supplied_archive_reader_rejects_unsafe_member_paths");
+    let errors = {
+        let wheel = project_dir.join("demo-0.1.0-py3-none-any.whl");
+        let sdist = project_dir.join("demo-0.1.0.zip");
+        write_zip_archive(&wheel, &[("../outside.py", "pass\n")]);
+        write_zip_archive(&sdist, &[("demo-0.1.0/../../outside.py", "pass\n")]);
+
+        [
+            SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel },
+            SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: sdist },
+        ]
+        .iter()
+        .map(|artifact| {
+            inspect_supplied_archive_paths(artifact)
+                .expect_err("unsafe archive member path should be rejected")
+        })
+        .collect::<Vec<_>>()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(errors.iter().all(|error| error.contains("forbidden component `..`")), "{errors:?}");
+}
+
+#[test]
 fn verify_build_artifacts_reports_missing_runtime_and_marker_files() {
     let project_dir =
         temp_project_dir("verify_build_artifacts_reports_missing_runtime_and_marker_files");

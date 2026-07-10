@@ -25,6 +25,7 @@ use typepython_target::{PythonTarget, RuntimeFeature};
 use zip::ZipArchive;
 
 use crate::api_diff::{ApiSurfaceDiffReport, api_surface_diff_diagnostics, diff_api_surfaces};
+use crate::archive::{ArchiveMemberPaths, ArchivePathKind, validate_wheel_record_path};
 use crate::cli::{OutputFormat, VerifyArgs};
 use crate::discovery::normalize_glob_path;
 use crate::pipeline::{
@@ -2275,7 +2276,10 @@ fn record_paths(bytes: &[u8]) -> std::result::Result<BTreeSet<String>, String> {
         if path.is_empty() {
             return Err(format!("line {} has an empty path", index + 1));
         }
-        paths.insert(normalize_archive_path(&path));
+        paths.insert(
+            validate_wheel_record_path(&path)
+                .map_err(|error| format!("line {} has an invalid path: {error}", index + 1))?,
+        );
     }
     Ok(paths)
 }
@@ -2804,7 +2808,9 @@ fn read_supplied_artifact_entries(
                 return Err(String::from("expected a .whl or .zip file"));
             }
             Ok(SuppliedArchiveEntries {
-                entries: read_zip_entries(&artifact.path)?.into_iter().collect(),
+                entries: read_zip_entries(&artifact.path, ArchivePathKind::Wheel)?
+                    .into_iter()
+                    .collect(),
                 common_root: None,
             })
         }
@@ -2812,7 +2818,7 @@ fn read_supplied_artifact_entries(
             let entries = if path_text.ends_with(".tar.gz") || path_text.ends_with(".tgz") {
                 read_tar_gz_entries(&artifact.path)?
             } else if path_text.ends_with(".zip") {
-                read_zip_entries(&artifact.path)?
+                read_zip_entries(&artifact.path, ArchivePathKind::Sdist)?
             } else {
                 return Err(String::from("expected a .tar.gz, .tgz, or .zip file"));
             };
@@ -2823,23 +2829,35 @@ fn read_supplied_artifact_entries(
     }
 }
 
-fn read_zip_entries(path: &Path) -> std::result::Result<Vec<(String, Vec<u8>)>, String> {
+#[cfg(test)]
+pub(crate) fn inspect_supplied_archive_paths(
+    artifact: &SuppliedVerifyArtifact,
+) -> std::result::Result<Vec<String>, String> {
+    read_supplied_artifact_entries(artifact).map(|archive| archive.entries.into_keys().collect())
+}
+
+fn read_zip_entries(
+    path: &Path,
+    kind: ArchivePathKind,
+) -> std::result::Result<Vec<(String, Vec<u8>)>, String> {
     let file = fs::File::open(path).map_err(|error| format!("unable to open archive: {error}"))?;
     let mut archive =
         ZipArchive::new(file).map_err(|error| format!("unable to read zip archive: {error}"))?;
     let mut entries = Vec::new();
+    let mut member_paths = ArchiveMemberPaths::new(kind);
 
     for index in 0..archive.len() {
         let mut file = archive
             .by_index(index)
             .map_err(|error| format!("unable to read zip entry {index}: {error}"))?;
+        let entry_path = member_paths.register(file.name_raw(), file.is_dir())?;
         if file.is_dir() {
             continue;
         }
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)
-            .map_err(|error| format!("unable to read zip entry `{}`: {error}", file.name()))?;
-        entries.push((normalize_archive_path(file.name()), bytes));
+            .map_err(|error| format!("unable to read zip entry `{entry_path}`: {error}"))?;
+        entries.push((entry_path, bytes));
     }
 
     Ok(entries)
@@ -2850,24 +2868,23 @@ fn read_tar_gz_entries(path: &Path) -> std::result::Result<Vec<(String, Vec<u8>)
     let decoder = GzDecoder::new(file);
     let mut archive = TarArchive::new(decoder);
     let mut entries = Vec::new();
+    let mut member_paths = ArchiveMemberPaths::new(ArchivePathKind::Sdist);
 
     for entry in
         archive.entries().map_err(|error| format!("unable to read tar archive: {error}"))?
     {
         let mut entry = entry.map_err(|error| format!("unable to read tar entry: {error}"))?;
-        if !entry.header().entry_type().is_file() {
+        let entry_type = entry.header().entry_type();
+        let raw_path = entry.path_bytes();
+        let entry_path = member_paths.register(raw_path.as_ref(), entry_type.is_dir())?;
+        if !entry_type.is_file() {
             continue;
         }
-        let entry_path = entry
-            .path()
-            .map_err(|error| format!("unable to read tar entry path: {error}"))?
-            .display()
-            .to_string();
         let mut bytes = Vec::new();
         entry
             .read_to_end(&mut bytes)
             .map_err(|error| format!("unable to read tar entry `{entry_path}`: {error}"))?;
-        entries.push((normalize_archive_path(&entry_path), bytes));
+        entries.push((entry_path, bytes));
     }
 
     Ok(entries)
@@ -2906,13 +2923,6 @@ fn common_archive_root(entries: &[(String, Vec<u8>)]) -> Option<String> {
     }
 
     root.map(str::to_owned)
-}
-
-fn normalize_archive_path(path: &str) -> String {
-    path.split('/')
-        .filter(|component| !component.is_empty() && *component != ".")
-        .collect::<Vec<_>>()
-        .join("/")
 }
 
 fn verify_incremental_snapshot(path: &Path) -> Result<(), String> {

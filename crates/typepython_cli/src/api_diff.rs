@@ -18,6 +18,7 @@ use serde::Serialize;
 use tar::Archive as TarArchive;
 use zip::ZipArchive;
 
+use crate::archive::{ArchiveMemberPaths, ArchivePathKind};
 use crate::{
     CLI_JSON_SCHEMA_VERSION, CommandSummary,
     cli::{ApiDiffArgs, OutputFormat},
@@ -396,11 +397,21 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
     let mut modules = BTreeMap::new();
     let mut typed_roots = Vec::new();
     let mut sources = Vec::new();
+    let kind = if path.extension().and_then(|extension| extension.to_str()) == Some("whl") {
+        ArchivePathKind::Wheel
+    } else {
+        ArchivePathKind::Sdist
+    };
+    let mut member_paths = ArchiveMemberPaths::new(kind);
     for index in 0..archive.len() {
         let mut file = archive.by_index(index).with_context(|| {
             format!("unable to read entry {index} from zip artifact {}", path.display())
         })?;
-        let entry_name = file.name().to_owned();
+        let entry_name =
+            member_paths.register(file.name_raw(), file.is_dir()).map_err(anyhow::Error::msg)?;
+        if file.is_dir() {
+            continue;
+        }
         if entry_name.ends_with("py.typed") {
             insert_py_typed_marker(&mut modules);
             typed_roots.push(archive_typed_root(&entry_name));
@@ -450,17 +461,21 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
     let mut modules = BTreeMap::new();
     let mut typed_roots = Vec::new();
     let mut sources = Vec::new();
+    let mut member_paths = ArchiveMemberPaths::new(ArchivePathKind::Sdist);
     for entry in archive
         .entries()
         .with_context(|| format!("unable to read tar artifact {}", path.display()))?
     {
         let mut entry =
             entry.with_context(|| format!("unable to read tar entry in {}", path.display()))?;
-        let entry_path = entry
-            .path()
-            .with_context(|| format!("unable to read tar entry path in {}", path.display()))?
-            .to_string_lossy()
-            .into_owned();
+        let entry_type = entry.header().entry_type();
+        let raw_path = entry.path_bytes();
+        let entry_path = member_paths
+            .register(raw_path.as_ref(), entry_type.is_dir())
+            .map_err(anyhow::Error::msg)?;
+        if !entry_type.is_file() {
+            continue;
+        }
         if entry_path.ends_with("py.typed") {
             insert_py_typed_marker(&mut modules);
             typed_roots.push(archive_typed_root(&entry_path));
