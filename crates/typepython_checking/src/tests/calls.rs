@@ -1037,6 +1037,41 @@ fn check_reports_union_member_access_for_method_reference_on_optional_owner() {
 }
 
 #[test]
+fn check_allows_any_and_dynamic_union_member_branches() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Any\n\n",
+        "class Known:\n",
+        "    value: int\n\n",
+        "def read_any(owner: Known | Any) -> object:\n",
+        "    return owner.whatever\n\n",
+        "def call_dynamic(owner: Known | dynamic) -> None:\n",
+        "    owner.whatever()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
+fn check_allows_any_optional_member_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        concat!(
+            "from typing import Any\n\n",
+            "def read(owner: Any | None) -> object:\n",
+            "    return owner.value\n",
+        ),
+        ParseOptions::default(),
+        crate::CheckerOptions {
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
 fn check_reports_missing_member_after_method_reference_support() {
     let result = check_temp_typepython_source(concat!(
         "class Client:\n",

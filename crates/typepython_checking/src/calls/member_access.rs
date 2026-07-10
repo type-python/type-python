@@ -134,6 +134,11 @@ fn union_owner_member_diagnostic(
     line: usize,
 ) -> Option<Diagnostic> {
     let branches = semantic_member_union_branches(owner_type, context.strict_nulls)?;
+    if branches.iter().any(|branch| {
+        matches!(branch.strip_annotated(), SemanticType::Name(name) if matches!(name.as_str(), "Any" | "dynamic"))
+    }) {
+        return None;
+    }
     let available = branches
         .iter()
         .filter_map(|branch| {
@@ -184,7 +189,7 @@ pub(super) fn type_has_readable_member_with_context(
     type_name: &str,
     member: &str,
 ) -> bool {
-    if standard_object_member(member) {
+    if matches!(type_name, "Any" | "dynamic") || standard_object_member(member) {
         return true;
     }
     let Some((class_node, class_decl)) = resolve_direct_base(context.nodes, node, type_name) else {
@@ -291,7 +296,7 @@ pub(super) fn union_member_guard_suggestion(
 pub(super) fn isinstance_guard_type_name(type_name: &str) -> Option<String> {
     let normalized = normalize_type_text(type_name);
     if normalized.is_empty()
-        || matches!(normalized.as_str(), "None" | "dynamic" | "unknown")
+        || matches!(normalized.as_str(), "None" | "Any" | "dynamic" | "unknown")
         || normalized.contains('[')
         || normalized.contains('|')
     {
