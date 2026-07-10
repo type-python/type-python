@@ -44,6 +44,11 @@ class PackagingContractTests(unittest.TestCase):
     def test_packaging_docs_and_build_contract_explain_wheel_strategy(self) -> None:
         pyproject = read_text("pyproject.toml")
         setup = read_text("setup.py")
+        manifest = read_text("MANIFEST.in")
+        makefile = read_text("Makefile")
+        rust_workflow = read_text(".github/workflows/rust.yml")
+        publish_workflow = read_text(".github/workflows/publish.yml")
+        sdist_smoke = read_text("scripts/sdist_smoke.py")
         packaging = read_text("docs/packaging.md")
         getting_started = read_text("docs/getting-started.md")
         beta = read_text("docs/beta-readiness.md")
@@ -58,6 +63,21 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn("typepython/stdlib/", packaging)
         self.assertIn('"py.typed"', pyproject)
         self.assertTrue((REPO_ROOT / "typepython" / "py.typed").is_file())
+        for graft in ("graft crates", "graft stdlib", "graft templates"):
+            self.assertIn(graft, manifest)
+
+        self.assertIn("sdist-smoke:", makefile)
+        self.assertIn("sdist-smoke", makefile.split("beta-release-gate:", 1)[1])
+        self.assertIn("scripts/sdist_smoke.py dist/*.tar.gz", rust_workflow)
+        self.assertIn("scripts/sdist_smoke.py dist/*.tar.gz", publish_workflow)
+        self.assertIn('"crates/typepython_cli/src/main.rs"', sdist_smoke)
+        self.assertIn('"stdlib/BASELINE.toml"', sdist_smoke)
+        self.assertIn('"templates/typepython.toml"', sdist_smoke)
+        self.assertIn('"typepython/py.typed"', sdist_smoke)
+        self.assertIn('"--wheel"', sdist_smoke)
+        self.assertIn("validate_sdist_contents(source_root)", sdist_smoke)
+        self.assertIn('"quickstart_smoke.py"', sdist_smoke)
+        self.assertIn("source-distribution smoke", " ".join(packaging.split()).lower())
 
         for text in (packaging, getting_started, beta, readme, pypi_readme):
             normalized = " ".join(text.split())

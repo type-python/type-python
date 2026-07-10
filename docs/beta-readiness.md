@@ -117,6 +117,9 @@ A Beta release candidate must pass the tracked release gate before the classifie
   P0-P4 author-time semantics example and asserts portable output
 - fuzz smoke: `parser`, `type_expr`, `lowering_stub`, and `checker`
 - package build and metadata check: `python -m build --sdist --wheel` and `python -m twine check dist/*`
+- source-distribution smoke: `python scripts/sdist_smoke.py dist/*.tar.gz`, which validates required
+  `MANIFEST.in` content, rebuilds a wheel from the unpacked sdist, installs it in an isolated
+  environment, and runs the installed-package quickstart
 - installed wheel quickstart smoke, including `typepython --help`, `init`, `check`, `build`, and
   `verify`, proving the installed wheel uses its bundled Rust CLI without `cargo`
 - editor integration contract: `python scripts/test_editor_integrations.py`, which verifies the

@@ -57,6 +57,7 @@ jobs:
           scripts/test_industrial_perf_smoke.py
           scripts/test_editor_integrations.py
           scripts/test_packaging_contracts.py
+          scripts/test_sdist_smoke.py
 
       - name: Check bundled stdlib baseline
         run: python scripts/refresh_stdlib_stubs.py --check
@@ -78,6 +79,9 @@ jobs:
 
       - name: Validate Python distribution metadata
         run: python -m twine check dist/*
+
+      - name: Rebuild and smoke the source distribution
+        run: python scripts/sdist_smoke.py dist/*.tar.gz
 
   industrial-performance-smoke:
     runs-on: ubuntu-latest

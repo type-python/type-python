@@ -32,6 +32,13 @@ source need:
 The build error must mention Rust 1.94.0 and `cargo` rather than failing with a
 missing binary later.
 
+The source-distribution smoke gate validates the archive rather than rebuilding
+from the checkout: it unpacks the generated sdist, requires the Rust workspace,
+bundled stdlib, templates, Python package, and `py.typed` marker to be present,
+builds a wheel from that unpacked tree, installs the wheel into an isolated
+virtual environment, and runs `scripts/quickstart_smoke.py`. This catches
+`MANIFEST.in` drift that a direct checkout wheel build and `twine check` cannot.
+
 ## Runtime Launcher Resolution
 
 The Python launcher resolves the CLI in this order:

@@ -349,6 +349,7 @@ The fuzz targets cover parser entrypoints without discarding selector bytes, ide
 | `make docs`                       | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`                                   | Generate rustdoc                      |
 | `make package-check`              | `python3 -m build --sdist --wheel` + `python3 -m twine check dist/*`                           | Validate Python package artifacts     |
 | `make quickstart-smoke`           | build wheel + install into a temporary venv + `scripts/quickstart_smoke.py`                    | Validate installed CLI workflow       |
+| `make sdist-smoke`                | rebuild a wheel from the unpacked sdist + install + quickstart smoke                           | Validate sdist completeness           |
 | `make bump-version VERSION=0.0.8` | `python3 scripts/bump_version.py 0.0.8`                                                        | Sync Rust and Python package versions |
 | `make ci`                         | `fmt-check` + `lint` + `test-fast` + `test-cli-verification` + `repo-contracts` + `bench-check` + `package-check` | Repository validation target          |
 
@@ -381,7 +382,10 @@ During development, option 3 means you can run `python -m typepython check --pro
 
 - Build release artifacts from a clean checkout. The source distribution uses `MANIFEST.in` with `graft` rules over the Rust workspace and bundled stdlib snapshot, so untracked files under packaged directories can be swept into a locally-built sdist.
 - Use `make bump-version VERSION=X.Y.Z` for version updates. This synchronizes `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, and `typepython/__init__.py` in one step. `./scripts/bootstrap-rust.sh X.Y.Z` is also accepted for release-prep sessions that should confirm the pinned Rust toolchain before applying the same version sync.
-- Validate both artifacts before publishing: `python -m build --sdist --wheel` and `python -m twine check dist/*`.
+- Validate both artifacts before publishing: `python -m build --sdist --wheel`,
+  `python -m twine check dist/*`, and `make sdist-smoke`. The sdist smoke must
+  build from the unpacked archive so missing `MANIFEST.in` grafts cannot be
+  hidden by files in the checkout.
 - If you intend `pip install type-python` to work without a Rust toolchain, publish platform wheels for each supported target in addition to the sdist. The release workflow uses `cibuildwheel` to publish Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64 wheels.
 
 ### Publishing to PyPI
@@ -393,7 +397,10 @@ The repository publishes to PyPI through GitHub Actions Trusted Publishing in th
 3. Optionally verify the sync guard with `cargo test -p typepython-cli packaged_versions_stay_in_sync`.
 4. Commit the version bump and push it to GitHub.
 5. Create a GitHub release from a tag named `vX.Y.Z`, where `X.Y.Z` exactly matches `pyproject.toml`.
-6. The `publish` workflow validates the tag/version match, builds the sdist, builds wheel artifacts with `cibuildwheel`, smoke-tests each wheel with a Quick Start install/build flow, runs `twine check`, and then publishes to PyPI.
+6. The `publish` workflow validates the tag/version match, builds the sdist,
+   rebuilds and smoke-tests a wheel from that unpacked sdist, builds wheel
+   artifacts with `cibuildwheel`, smoke-tests each wheel with a Quick Start
+   install/build flow, runs `twine check`, and then publishes to PyPI.
 
 Linux wheel publishing uses the `manylinux2014` image through `cibuildwheel`, which gives PyPI-compatible Linux wheel tags for the bundled CLI binary. If you expand wheel coverage to more architectures later, keep that manylinux or musllinux compatibility requirement in place.
 
