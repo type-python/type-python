@@ -33,6 +33,27 @@ fn check_accepts_keyword_and_default_arguments_in_direct_calls() {
 }
 
 #[test]
+fn check_reports_mismatched_numeric_and_bytes_literals() {
+    let result = check_temp_typepython_source(concat!(
+        "def takes_int(value: int) -> int:\n",
+        "    return value\n\n",
+        "integer: int = 1.5\n",
+        "text: str = b\"bytes\"\n",
+        "takes_int(-3.5)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(result.diagnostics.has_errors(), "{rendered}");
+    assert!(rendered.contains("assigns `float` where `integer` expects `int`"), "{rendered}");
+    assert!(rendered.contains("assigns `bytes` where `text` expects `str`"), "{rendered}");
+    assert!(
+        rendered.contains("call to `takes_int`")
+            && rendered.contains("passes `float` where parameter expects `int`"),
+        "{rendered}"
+    );
+}
+
+#[test]
 fn check_decorated_callable_transform_honors_strict_nulls_option() {
     let result = check_temp_typepython_source_with_checker_options(
         concat!(

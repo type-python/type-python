@@ -203,14 +203,27 @@ pub(in super::super) fn infer_literal_arg_type(expr: &Expr) -> String {
 
 pub(in super::super) fn infer_direct_literal_type(expr: &Expr) -> Option<String> {
     match expr {
-        Expr::NumberLiteral(_) => Some(String::from("int")),
+        Expr::NumberLiteral(number) => Some(match &number.value {
+            ruff_python_ast::Number::Int(_) => String::from("int"),
+            ruff_python_ast::Number::Float(_) => String::from("float"),
+            ruff_python_ast::Number::Complex { .. } => String::from("complex"),
+        }),
         Expr::StringLiteral(_) => Some(String::from("str")),
+        Expr::BytesLiteral(_) => Some(String::from("bytes")),
+        Expr::FString(_) => Some(String::from("str")),
         Expr::BooleanLiteral(_) => Some(String::from("bool")),
         Expr::NoneLiteral(_) => Some(String::from("None")),
         Expr::Compare(_) => Some(String::from("bool")),
-        Expr::UnaryOp(unary) if unary.op == ruff_python_ast::UnaryOp::Not => {
-            Some(String::from("bool"))
-        }
+        Expr::UnaryOp(unary) => match unary.op {
+            ruff_python_ast::UnaryOp::Not => Some(String::from("bool")),
+            ruff_python_ast::UnaryOp::UAdd | ruff_python_ast::UnaryOp::USub => {
+                infer_direct_literal_type(&unary.operand)
+                    .filter(|value| is_direct_numeric_type(value))
+            }
+            ruff_python_ast::UnaryOp::Invert => {
+                infer_direct_literal_type(&unary.operand).filter(|value| value == "int")
+            }
+        },
         Expr::BoolOp(bool_op) => {
             let mut types =
                 bool_op.values.iter().map(infer_direct_literal_type).collect::<Option<Vec<_>>>()?;

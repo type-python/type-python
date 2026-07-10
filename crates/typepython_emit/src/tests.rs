@@ -621,6 +621,27 @@ fn generate_inferred_shadow_stub_uses_unknown_fallback_and_infers_simple_returns
 }
 
 #[test]
+fn generate_inferred_shadow_stub_distinguishes_literal_runtime_types() {
+    let stub = generate_inferred_stub_source(
+        concat!(
+            "INTEGER = 1\n",
+            "REAL = -1.5\n",
+            "IMAGINARY = 2j\n",
+            "DATA = b\"bytes\"\n",
+            "MESSAGE = f\"value={INTEGER}\"\n",
+        ),
+        InferredStubMode::Shadow,
+    )
+    .expect("shadow stub generation should succeed");
+
+    assert!(stub.contains("INTEGER: int"), "{stub}");
+    assert!(stub.contains("REAL: float"), "{stub}");
+    assert!(stub.contains("IMAGINARY: complex"), "{stub}");
+    assert!(stub.contains("DATA: bytes"), "{stub}");
+    assert!(stub.contains("MESSAGE: str"), "{stub}");
+}
+
+#[test]
 fn generate_inferred_migration_stub_marks_missing_types_and_init_attrs() {
     let stub = generate_inferred_stub_source(
             "class User:\n    def __init__(self, name):\n        self.name = name\n        self.age = 3\n\n    @property\n    def title(self):\n        return self.name\n",

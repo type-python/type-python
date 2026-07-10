@@ -1207,14 +1207,26 @@ fn infer_expr_type(expr: &Expr, context: &StubInferenceContext) -> Option<String
             }
             None
         }
-        Expr::NumberLiteral(_) => Some(String::from("int")),
+        Expr::NumberLiteral(number) => Some(match &number.value {
+            ruff_python_ast::Number::Int(_) => String::from("int"),
+            ruff_python_ast::Number::Float(_) => String::from("float"),
+            ruff_python_ast::Number::Complex { .. } => String::from("complex"),
+        }),
         Expr::StringLiteral(_) => Some(String::from("str")),
+        Expr::BytesLiteral(_) => Some(String::from("bytes")),
+        Expr::FString(_) => Some(String::from("str")),
         Expr::BooleanLiteral(_) => Some(String::from("bool")),
         Expr::NoneLiteral(_) => Some(String::from("None")),
         Expr::Compare(_) => Some(String::from("bool")),
-        Expr::UnaryOp(unary) if unary.op == ruff_python_ast::UnaryOp::Not => {
-            Some(String::from("bool"))
-        }
+        Expr::UnaryOp(unary) => match unary.op {
+            ruff_python_ast::UnaryOp::Not => Some(String::from("bool")),
+            ruff_python_ast::UnaryOp::UAdd | ruff_python_ast::UnaryOp::USub => {
+                infer_expr_type(&unary.operand, context).filter(|value| is_numeric_type(value))
+            }
+            ruff_python_ast::UnaryOp::Invert => {
+                infer_expr_type(&unary.operand, context).filter(|value| value == "int")
+            }
+        },
         Expr::BoolOp(bool_op) => normalize_union_types(
             bool_op.values.iter().filter_map(|value| infer_expr_type(value, context)).collect(),
         ),

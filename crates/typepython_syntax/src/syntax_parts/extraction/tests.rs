@@ -2118,6 +2118,29 @@ fn parse_retains_direct_call_literal_arg_types() {
 }
 
 #[test]
+fn parse_distinguishes_numeric_bytes_fstring_and_unary_literal_arg_types() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("literal-types.py"),
+        kind: SourceKind::Python,
+        logical_module: String::new(),
+        text: String::from("build(1, 1.5, 2j, b\"x\", f\"x\", -3.5, ~1)\n"),
+    });
+
+    assert!(tree.diagnostics.is_empty());
+    let [SyntaxStatement::Call(statement)] = tree.statements.as_slice() else {
+        panic!("expected direct call statement");
+    };
+    assert_eq!(
+        statement
+            .arg_values
+            .iter()
+            .map(|metadata| metadata.rendered_value_type().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        ["int", "float", "complex", "bytes", "str", "float", "int"]
+    );
+}
+
+#[test]
 fn parse_retains_direct_call_container_literal_arg_types() {
     let tree = parse(SourceFile {
         path: PathBuf::from("call-container-types.py"),
