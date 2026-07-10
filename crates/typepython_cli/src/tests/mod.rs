@@ -19,6 +19,7 @@ pub(super) use super::pipeline::{
     should_emit_build_outputs, validated_clean_target, watch_targets, write_incremental_snapshot,
 };
 pub(super) use super::type_health::{build_type_health_report_for_target, run_type_health};
+pub(super) use super::verification::prepend_pythonpath;
 pub(super) use super::verification::{
     CheckerAllowlistEntry, SuppliedArtifactKind, SuppliedVerifyArtifact, TypePortabilityReport,
     allowlisted_checker_diagnostic, expand_checker_list, external_checker_invocation,

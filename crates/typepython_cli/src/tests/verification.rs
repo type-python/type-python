@@ -3188,6 +3188,18 @@ fn verify_runtime_public_name_parity_reports_runtime_import_failure() {
 }
 
 #[test]
+fn annotation_runtime_pythonpath_uses_platform_path_encoding() {
+    let root = PathBuf::from("annotation-runtime-root");
+    let first = PathBuf::from("existing-one");
+    let second = PathBuf::from("existing-two");
+    let existing = env::join_paths([&first, &second]).expect("test paths should be joinable");
+
+    let joined = prepend_pythonpath(&root, Some(&existing)).expect("paths should be joinable");
+
+    assert_eq!(env::split_paths(&joined).collect::<Vec<_>>(), vec![root, first, second]);
+}
+
+#[test]
 fn runtime_annotation_compatibility_diagnostics_warns_for_py314_consumers() {
     let project_dir =
         temp_project_dir("runtime_annotation_compatibility_diagnostics_warns_for_py314_consumers");

@@ -1240,17 +1240,24 @@ pub(crate) fn runtime_annotation_compatibility_diagnostics(
     diagnostics
 }
 
-fn annotation_runtime_pythonpath() -> Option<String> {
+fn annotation_runtime_pythonpath() -> Option<std::ffi::OsString> {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let annotation_module = repo_root.join("typepython/annotation_compat.py");
     if !annotation_module.exists() {
-        return env::var("PYTHONPATH").ok().filter(|value| !value.is_empty());
+        return env::var_os("PYTHONPATH").filter(|value| !value.is_empty());
     }
-    let repo_root = repo_root.to_string_lossy().into_owned();
-    match env::var("PYTHONPATH") {
-        Ok(existing) if !existing.is_empty() => Some(format!("{repo_root}:{existing}")),
-        _ => Some(repo_root),
+    prepend_pythonpath(&repo_root, env::var_os("PYTHONPATH").as_deref()).ok()
+}
+
+pub(crate) fn prepend_pythonpath(
+    path: &Path,
+    existing: Option<&std::ffi::OsStr>,
+) -> Result<std::ffi::OsString, env::JoinPathsError> {
+    let mut paths = vec![path.to_path_buf()];
+    if let Some(existing) = existing.filter(|value| !value.is_empty()) {
+        paths.extend(env::split_paths(existing));
     }
+    env::join_paths(paths)
 }
 
 fn verify_supplied_artifact(
