@@ -179,6 +179,31 @@ class AnnotationCompatTests(unittest.TestCase):
 
         self.assertEqual(audit.consumers, ())
 
+    def test_audit_source_does_not_treat_relative_imports_as_consumers(self) -> None:
+        audit = annotation_compat.audit_source(
+            "import typing\n"
+            "from . import typing\n"
+            "from .annotationlib import get_annotations as annotation_get\n"
+            "from .dataclasses import dataclass\n"
+            "from .fastapi import Depends, FastAPI\n"
+            "from .inspect import get_annotations as inspect_get\n"
+            "from .pydantic import BaseModel, Field\n"
+            "from .typing import get_type_hints\n\n"
+            "app = FastAPI()\n\n"
+            "@dataclass\n"
+            "class User(BaseModel):\n"
+            "    name: str = Field()\n\n"
+            "@app.get('/users')\n"
+            "def load(current: str = Depends()) -> User:\n"
+            "    typing.get_type_hints(User)\n"
+            "    get_type_hints(User)\n"
+            "    inspect_get(User)\n"
+            "    annotation_get(User)\n"
+            "    return User(name=current)\n"
+        )
+
+        self.assertEqual(audit.consumers, ())
+
     def test_audit_source_flags_type_checking_only_annotation_imports(self) -> None:
         audit = annotation_compat.audit_source(
             "from typing import TYPE_CHECKING, get_type_hints\n"

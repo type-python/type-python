@@ -395,14 +395,17 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
             self._bind_runtime_name(local_name, canonical_name)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        if node.module is None:
-            return
         for alias in node.names:
             if alias.name == "*":
                 continue
+            canonical_name = (
+                f"{node.module}.{alias.name}"
+                if node.level == 0 and node.module is not None
+                else None
+            )
             self._bind_runtime_name(
                 alias.asname or alias.name,
-                f"{node.module}.{alias.name}",
+                canonical_name,
             )
 
     def visit_Assign(self, node: ast.Assign) -> None:
