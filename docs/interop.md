@@ -93,7 +93,7 @@ When downstream consumers type-check the emitted `.py`/`.pyi` files, they use th
 
 ## Runtime Annotation Compatibility
 
-Generated runtime modules may be consumed by frameworks that inspect annotations with `typing.get_type_hints`, `inspect.get_annotations`, Python 3.14+ `annotationlib.get_annotations`, or dataclass-like registration decorators. TypePython's Python package exposes `typepython.annotation_compat` so smoke tests and generated-artifact probes can use one compatibility layer across Python 3.10 through 3.14.
+Generated runtime modules may be consumed by frameworks that inspect annotations with `typing.get_type_hints`, `typing_extensions.get_annotations`, `inspect.get_annotations`, Python 3.14+ `annotationlib.get_annotations`, or dataclass-like registration decorators. TypePython's Python package exposes `typepython.annotation_compat` so smoke tests and generated-artifact probes can use one compatibility layer across Python 3.10 through 3.14.
 
 The helper provides:
 

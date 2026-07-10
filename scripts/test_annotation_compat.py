@@ -204,6 +204,7 @@ class AnnotationCompatTests(unittest.TestCase):
             "import dataclasses as dc\n"
             "import inspect as ins\n"
             "import typing as t\n"
+            "from typing_extensions import get_annotations as te_annotations\n"
             "from fastapi import Depends as Dep, FastAPI as API\n"
             "from pydantic import BaseModel as Model, Field as PField\n\n"
             "app = API()\n\n"
@@ -215,6 +216,7 @@ class AnnotationCompatTests(unittest.TestCase):
             "    t.get_type_hints(User)\n"
             "    ins.get_annotations(User)\n"
             "    al.get_annotations(User)\n"
+            "    te_annotations(User)\n"
             "    return User(name=current)\n"
         )
 
@@ -324,6 +326,7 @@ class AnnotationCompatTests(unittest.TestCase):
             "from .inspect import get_annotations as inspect_get\n"
             "from .pydantic import BaseModel, Field\n"
             "from .typing import get_type_hints\n\n"
+            "from .typing_extensions import get_annotations as extensions_get\n\n"
             "app = FastAPI()\n\n"
             "@dataclass\n"
             "class User(BaseModel):\n"
@@ -334,6 +337,7 @@ class AnnotationCompatTests(unittest.TestCase):
             "    get_type_hints(User)\n"
             "    inspect_get(User)\n"
             "    annotation_get(User)\n"
+            "    extensions_get(User)\n"
             "    return User(name=current)\n"
         )
 
