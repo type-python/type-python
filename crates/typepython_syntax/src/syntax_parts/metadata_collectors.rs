@@ -599,6 +599,7 @@ pub fn collect_frozen_field_mutation_sites(source: &str) -> Vec<FrozenFieldMutat
             parsed.suite(),
             None,
             None,
+            false,
             &mut sites,
         );
         sites
@@ -610,8 +611,10 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
     suite: &[Stmt],
     owner_name: Option<&str>,
     owner_type_name: Option<&str>,
+    instance_initializer_body: bool,
     sites: &mut Vec<FrozenFieldMutationSite>,
 ) {
+    let mut reaches_every_successful_exit = instance_initializer_body;
     for stmt in suite {
         let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
         sites.extend(extract_frozen_field_mutation_sites_from_stmt(
@@ -620,15 +623,22 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
             line,
             owner_name,
             owner_type_name,
+            reaches_every_successful_exit,
         ));
 
         match stmt {
             Stmt::FunctionDef(function) => {
+                let is_direct_instance_initializer = owner_type_name.is_some()
+                    && owner_name.is_none()
+                    && function.name.as_str() == "__init__"
+                    && method_kind_from_decorators(&function.decorator_list)
+                        == MethodKind::Instance;
                 collect_frozen_field_mutation_sites_in_suite(
                     source,
                     &function.body,
                     Some(function.name.as_str()),
                     owner_type_name,
+                    is_direct_instance_initializer,
                     sites,
                 );
             }
@@ -636,8 +646,9 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                 collect_frozen_field_mutation_sites_in_suite(
                     source,
                     &class_def.body,
-                    owner_name,
+                    None,
                     Some(class_def.name.as_str()),
+                    false,
                     sites,
                 );
             }
@@ -647,6 +658,7 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                     &try_stmt.body,
                     owner_name,
                     owner_type_name,
+                    false,
                     sites,
                 );
                 for handler in &try_stmt.handlers {
@@ -656,6 +668,7 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                         &handler.body,
                         owner_name,
                         owner_type_name,
+                        false,
                         sites,
                     );
                 }
@@ -664,6 +677,7 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                     &try_stmt.orelse,
                     owner_name,
                     owner_type_name,
+                    false,
                     sites,
                 );
                 collect_frozen_field_mutation_sites_in_suite(
@@ -671,6 +685,7 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                     &try_stmt.finalbody,
                     owner_name,
                     owner_type_name,
+                    false,
                     sites,
                 );
             }
@@ -680,6 +695,7 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                     &if_stmt.body,
                     owner_name,
                     owner_type_name,
+                    false,
                     sites,
                 );
                 for_each_if_false_suite(if_stmt, |suite| {
@@ -688,6 +704,7 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                         suite,
                         owner_name,
                         owner_type_name,
+                        false,
                         sites,
                     );
                 });
@@ -699,6 +716,7 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                         &case.body,
                         owner_name,
                         owner_type_name,
+                        false,
                         sites,
                     );
                 }
@@ -709,6 +727,7 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                     &for_stmt.body,
                     owner_name,
                     owner_type_name,
+                    false,
                     sites,
                 );
                 collect_frozen_field_mutation_sites_in_suite(
@@ -716,6 +735,7 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                     &for_stmt.orelse,
                     owner_name,
                     owner_type_name,
+                    false,
                     sites,
                 );
             }
@@ -725,6 +745,7 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                     &while_stmt.body,
                     owner_name,
                     owner_type_name,
+                    false,
                     sites,
                 );
                 collect_frozen_field_mutation_sites_in_suite(
@@ -732,6 +753,7 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                     &while_stmt.orelse,
                     owner_name,
                     owner_type_name,
+                    false,
                     sites,
                 );
             }
@@ -741,12 +763,55 @@ pub(super) fn collect_frozen_field_mutation_sites_in_suite(
                     &with_stmt.body,
                     owner_name,
                     owner_type_name,
+                    false,
                     sites,
                 );
             }
             _ => {}
         }
+
+        if reaches_every_successful_exit && statement_contains_return(stmt) {
+            reaches_every_successful_exit = false;
+        }
     }
+}
+
+fn statement_contains_return(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Return(_) => true,
+        Stmt::Try(try_stmt) => {
+            suite_contains_return(&try_stmt.body)
+                || try_stmt.handlers.iter().any(|handler| {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    suite_contains_return(&handler.body)
+                })
+                || suite_contains_return(&try_stmt.orelse)
+                || suite_contains_return(&try_stmt.finalbody)
+        }
+        Stmt::If(if_stmt) => {
+            suite_contains_return(&if_stmt.body)
+                || if_stmt
+                    .elif_else_clauses
+                    .iter()
+                    .any(|clause| suite_contains_return(&clause.body))
+        }
+        Stmt::Match(match_stmt) => {
+            match_stmt.cases.iter().any(|case| suite_contains_return(&case.body))
+        }
+        Stmt::For(for_stmt) => {
+            suite_contains_return(&for_stmt.body) || suite_contains_return(&for_stmt.orelse)
+        }
+        Stmt::While(while_stmt) => {
+            suite_contains_return(&while_stmt.body) || suite_contains_return(&while_stmt.orelse)
+        }
+        Stmt::With(with_stmt) => suite_contains_return(&with_stmt.body),
+        Stmt::FunctionDef(_) | Stmt::ClassDef(_) => false,
+        _ => false,
+    }
+}
+
+fn suite_contains_return(suite: &[Stmt]) -> bool {
+    suite.iter().any(statement_contains_return)
 }
 
 pub(super) fn extract_frozen_field_mutation_sites_from_stmt(
@@ -755,8 +820,10 @@ pub(super) fn extract_frozen_field_mutation_sites_from_stmt(
     line: usize,
     owner_name: Option<&str>,
     owner_type_name: Option<&str>,
+    definitely_initializes_instance: bool,
 ) -> Vec<FrozenFieldMutationSite> {
-    let owner = MutationOwnerContext { line, owner_name, owner_type_name };
+    let owner =
+        MutationOwnerContext { line, owner_name, owner_type_name, definitely_initializes_instance };
     match stmt {
         Stmt::Assign(assign) => assign
             .targets
@@ -771,6 +838,21 @@ pub(super) fn extract_frozen_field_mutation_sites_from_stmt(
                     owner,
                 )
             })
+            .collect(),
+        Stmt::AnnAssign(assign) => assign
+            .value
+            .as_deref()
+            .and_then(|value| {
+                extract_frozen_field_mutation_site(
+                    source,
+                    &assign.target,
+                    Some(value),
+                    FrozenFieldMutationKind::Assignment,
+                    None,
+                    owner,
+                )
+            })
+            .into_iter()
             .collect(),
         Stmt::AugAssign(assign) => extract_frozen_field_mutation_site(
             source,
@@ -805,6 +887,7 @@ pub(super) struct MutationOwnerContext<'a> {
     line: usize,
     owner_name: Option<&'a str>,
     owner_type_name: Option<&'a str>,
+    definitely_initializes_instance: bool,
 }
 
 pub(super) fn extract_frozen_field_mutation_site(
@@ -826,6 +909,9 @@ pub(super) fn extract_frozen_field_mutation_site(
         value: value.map(|expr| extract_direct_expr_metadata(source, expr)),
         owner_name: owner.owner_name.map(str::to_owned),
         owner_type_name: owner.owner_type_name.map(str::to_owned),
+        definitely_initializes_instance: owner.definitely_initializes_instance
+            && kind == FrozenFieldMutationKind::Assignment
+            && matches!(attribute.value.as_ref(), Expr::Name(name) if name.id.as_str() == "self"),
         line: owner.line,
     })
 }
@@ -1871,7 +1957,12 @@ pub(super) fn extract_typed_dict_mutation_sites_from_stmt(
     owner_name: Option<&str>,
     owner_type_name: Option<&str>,
 ) -> Vec<TypedDictMutationSite> {
-    let owner = MutationOwnerContext { line, owner_name, owner_type_name };
+    let owner = MutationOwnerContext {
+        line,
+        owner_name,
+        owner_type_name,
+        definitely_initializes_instance: false,
+    };
     match stmt {
         Stmt::Assign(assign) => assign
             .targets

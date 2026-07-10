@@ -41,6 +41,13 @@ pub(super) fn direct_member_access_diagnostics(
             }
             let owner_type_name = semantic_nominal_owner_name(&owner_type)?;
             let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
+            let before_line = instance_initializer_access_cutoff(
+                &access.owner_name,
+                access.current_owner_name.as_deref(),
+                access.current_owner_type_name.as_deref(),
+                class_decl,
+                access.line,
+            );
             let has_member = find_owned_readable_member_declaration(
                 nodes,
                 class_node,
@@ -48,11 +55,12 @@ pub(super) fn direct_member_access_diagnostics(
                 &access.member,
             )
             .is_some()
-                || has_owned_instance_assignment_member_with_context(
+                || has_owned_instance_assignment_member_before_line_with_context(
                     context,
                     class_node,
                     class_decl,
                     &access.member,
+                    before_line,
                 )
                 || !find_owned_callable_declarations(nodes, class_node, class_decl, &access.member)
                     .is_empty()
@@ -336,6 +344,13 @@ pub(super) fn direct_method_call_diagnostics(
             )
             .is_empty()
         {
+            let before_line = instance_initializer_access_cutoff(
+                &call.owner_name,
+                call.current_owner_name.as_deref(),
+                call.current_owner_type_name.as_deref(),
+                scope_class_decl,
+                call.line,
+            );
             let has_member = find_owned_readable_member_declaration(
                 nodes,
                 scope_class_node,
@@ -343,11 +358,12 @@ pub(super) fn direct_method_call_diagnostics(
                 &call.method,
             )
             .is_some()
-                || has_owned_instance_assignment_member_with_context(
+                || has_owned_instance_assignment_member_before_line_with_context(
                     context,
                     scope_class_node,
                     scope_class_decl,
                     &call.method,
+                    before_line,
                 )
                 || standard_object_member(&call.method)
                 || class_surface_is_open(
@@ -389,6 +405,53 @@ pub(super) fn direct_method_call_diagnostics(
         let candidates =
             find_owned_callable_declarations(nodes, class_node, class_decl, &call.method);
         let Some(target) = candidates.first().copied() else {
+            let before_line = instance_initializer_access_cutoff(
+                &call.owner_name,
+                call.current_owner_name.as_deref(),
+                call.current_owner_type_name.as_deref(),
+                class_decl,
+                call.line,
+            );
+            let member_type = find_owned_readable_member_declaration(
+                nodes,
+                class_node,
+                class_decl,
+                &call.method,
+            )
+            .and_then(|member| {
+                resolve_readable_member_semantic_type(node, nodes, member, &owner_type)
+            })
+            .or_else(|| {
+                owned_instance_assignment_member_semantic_type_with_context(
+                    context,
+                    class_node,
+                    class_decl,
+                    &call.method,
+                    before_line,
+                )
+            });
+            if let Some(member_type) = member_type
+                && !semantic_type_may_be_callable(context, class_node, &member_type)
+            {
+                diagnostics.push(
+                    Diagnostic::error(
+                        "TPY4001",
+                        format!(
+                            "member `{}` on type `{}` has non-callable type `{}`",
+                            call.method,
+                            class_decl.name,
+                            diagnostic_type_text(&member_type),
+                        ),
+                    )
+                    .with_span(Span::new(
+                        node.module_path.display().to_string(),
+                        call.line,
+                        1,
+                        call.line,
+                        1,
+                    )),
+                );
+            }
             continue;
         };
 
@@ -553,6 +616,92 @@ pub(super) fn direct_method_call_diagnostics(
     diagnostics
 }
 
+fn instance_initializer_access_cutoff(
+    receiver_name: &str,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    class_decl: &Declaration,
+    line: usize,
+) -> Option<usize> {
+    (receiver_name == "self"
+        && current_owner_name == Some("__init__")
+        && current_owner_type_name == Some(class_decl.name.as_str()))
+    .then_some(line)
+}
+
+fn semantic_type_may_be_callable(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    semantic_type: &SemanticType,
+) -> bool {
+    match semantic_type.strip_annotated() {
+        SemanticType::Callable { .. } => true,
+        SemanticType::Name(name) if matches!(name.as_str(), "Any" | "dynamic" | "unknown") => {
+            true
+        }
+        SemanticType::Name(name)
+            if matches!(
+                name.as_str(),
+                "None"
+                    | "bool"
+                    | "int"
+                    | "float"
+                    | "complex"
+                    | "str"
+                    | "bytes"
+                    | "bytearray"
+                    | "memoryview"
+                    | "range"
+                    | "slice"
+                    | "list"
+                    | "dict"
+                    | "tuple"
+                    | "set"
+                    | "frozenset"
+            ) =>
+        {
+            false
+        }
+        SemanticType::Generic { head, .. }
+            if matches!(
+                head.as_str(),
+                "list" | "dict" | "tuple" | "set" | "frozenset"
+            ) =>
+        {
+            false
+        }
+        SemanticType::Union(branches) => {
+            branches.iter().all(|branch| semantic_type_may_be_callable(context, node, branch))
+        }
+        SemanticType::Generic { head, .. }
+            if matches!(head.as_str(), "type" | "typing.Type") =>
+        {
+            true
+        }
+        SemanticType::Name(name) | SemanticType::Generic { head: name, .. } => {
+            let Some((class_node, class_decl)) = resolve_direct_base(context.nodes, node, name)
+            else {
+                return true;
+            };
+            !find_owned_callable_declarations(
+                context.nodes,
+                class_node,
+                class_decl,
+                "__call__",
+            )
+            .is_empty()
+                || class_surface_is_open(
+                    context.nodes,
+                    class_node,
+                    class_decl,
+                    &mut BTreeSet::new(),
+                )
+        }
+        SemanticType::Annotated { .. } => unreachable!("annotations were stripped"),
+        SemanticType::Unpack(_) => false,
+    }
+}
+
 pub(super) fn resolve_method_call_owner_type(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -570,8 +719,8 @@ pub(super) fn resolve_method_call_owner_type(
         nodes,
         None,
         None,
-        None,
-        None,
+        call.current_owner_name.as_deref(),
+        call.current_owner_type_name.as_deref(),
         call.line,
         &call.owner_name,
     )

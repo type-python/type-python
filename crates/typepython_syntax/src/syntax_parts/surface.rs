@@ -1313,6 +1313,9 @@ pub struct FrozenFieldMutationSite {
     pub value: Option<DirectExprMetadata>,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
+    /// Whether this is a direct assignment in an instance `__init__` body that
+    /// is executed on every successfully constructed instance.
+    pub definitely_initializes_instance: bool,
     pub line: usize,
 }
 

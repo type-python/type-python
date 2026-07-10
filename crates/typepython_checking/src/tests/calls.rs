@@ -1223,6 +1223,165 @@ fn check_accepts_method_calls_through_instance_attributes_initialized_in_init() 
 }
 
 #[test]
+fn check_reports_instance_attribute_assigned_only_outside_init_as_missing() {
+    let result = check_temp_typepython_source(concat!(
+        "class Task:\n",
+        "    def install(self) -> None:\n",
+        "        self.callback = lambda: None\n\n",
+        "    def run(self) -> None:\n",
+        "        self.callback()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `callback`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_conditionally_initialized_instance_attribute_as_missing() {
+    let result = check_temp_typepython_source(concat!(
+        "class Task:\n",
+        "    def __init__(self, enabled: bool) -> None:\n",
+        "        if enabled:\n",
+        "            self.callback = lambda: None\n\n",
+        "    def run(self) -> None:\n",
+        "        self.callback()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `callback`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_instance_attribute_after_conditional_init_return_as_missing() {
+    let result = check_temp_typepython_source(concat!(
+        "class Task:\n",
+        "    def __init__(self, disabled: bool) -> None:\n",
+        "        if disabled:\n",
+        "            return\n",
+        "        self.callback = lambda: None\n\n",
+        "    def run(self) -> None:\n",
+        "        self.callback()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `callback`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_call_of_non_callable_instance_attribute_from_init_rhs_type() {
+    let result = check_temp_typepython_source(concat!(
+        "class Task:\n",
+        "    def __init__(self) -> None:\n",
+        "        self.callback = 0\n\n",
+        "    def run(self) -> None:\n",
+        "        self.callback()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("member `callback`"), "{rendered}");
+    assert!(rendered.contains("non-callable type `int`"), "{rendered}");
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
+fn check_reports_call_of_non_callable_instance_attribute_from_init_parameter_type() {
+    let result = check_temp_typepython_source(concat!(
+        "class Task:\n",
+        "    def __init__(self, callback: int) -> None:\n",
+        "        self.callback = callback\n\n",
+        "    def run(self) -> None:\n",
+        "        self.callback()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("non-callable type `int`"), "{rendered}");
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
+fn check_reports_call_of_non_callable_annotated_init_assignment() {
+    let result = check_temp_typepython_source(concat!(
+        "class Task:\n",
+        "    def __init__(self) -> None:\n",
+        "        self.callback: int = 0\n\n",
+        "    def run(self) -> None:\n",
+        "        self.callback()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("non-callable type `int`"), "{rendered}");
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
+fn check_reports_call_of_declared_non_callable_attribute() {
+    let result = check_temp_typepython_source(concat!(
+        "class Task:\n",
+        "    callback: int\n\n",
+        "    def run(self) -> None:\n",
+        "        self.callback()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("non-callable type `int`"), "{rendered}");
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_callable_object_initialized_in_init() {
+    let result = check_temp_typepython_source(concat!(
+        "class Handler:\n",
+        "    def __call__(self) -> None:\n",
+        "        pass\n\n",
+        "class Task:\n",
+        "    def __init__(self) -> None:\n",
+        "        self.callback = Handler()\n\n",
+        "    def run(self) -> None:\n",
+        "        self.callback()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_reports_init_attribute_use_before_its_assignment() {
+    let result = check_temp_typepython_source(concat!(
+        "class Task:\n",
+        "    def __init__(self) -> None:\n",
+        "        self.callback()\n",
+        "        self.callback = lambda: None\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `callback`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_unconditional_init_assignment_after_non_returning_branch() {
+    let result = check_temp_typepython_source(concat!(
+        "class Task:\n",
+        "    def __init__(self, enabled: bool) -> None:\n",
+        "        if enabled:\n",
+        "            pass\n",
+        "        self.callback = lambda: None\n\n",
+        "    def run(self) -> None:\n",
+        "        self.callback()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
 fn check_reports_method_call_on_missing_interface_member() {
     let result = check_temp_typepython_source(concat!(
         "interface Closeable:\n",

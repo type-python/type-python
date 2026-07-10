@@ -1019,12 +1019,29 @@ pub(super) fn has_owned_instance_assignment_member_with_context(
     class_decl: &Declaration,
     member_name: &str,
 ) -> bool {
+    has_owned_instance_assignment_member_before_line_with_context(
+        context,
+        class_node,
+        class_decl,
+        member_name,
+        None,
+    )
+}
+
+pub(super) fn has_owned_instance_assignment_member_before_line_with_context(
+    context: &CheckerContext<'_>,
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    member_name: &str,
+    before_line: Option<usize>,
+) -> bool {
     let mut visited = BTreeSet::new();
     has_owned_instance_assignment_member_with_context_and_visited(
         context,
         class_node,
         class_decl,
         member_name,
+        before_line,
         &mut visited,
     )
 }
@@ -1034,6 +1051,7 @@ fn has_owned_instance_assignment_member_with_context_and_visited(
     class_node: &typepython_graph::ModuleNode,
     class_decl: &Declaration,
     member_name: &str,
+    before_line: Option<usize>,
     visited: &mut BTreeSet<(String, String)>,
 ) -> bool {
     let key = (class_node.module_key.clone(), class_decl.name.clone());
@@ -1043,8 +1061,10 @@ fn has_owned_instance_assignment_member_with_context_and_visited(
 
     if context.load_frozen_field_mutation_sites(class_node).iter().any(|site| {
         site.kind == typepython_syntax::FrozenFieldMutationKind::Assignment
+            && site.definitely_initializes_instance
             && site.field_name == member_name
             && site.owner_type_name.as_deref() == Some(class_decl.name.as_str())
+            && before_line.is_none_or(|line| site.line < line)
             && site.target.value_name.as_deref() == Some("self")
     }) {
         return true;
@@ -1057,9 +1077,75 @@ fn has_owned_instance_assignment_member_with_context_and_visited(
                 base_node,
                 base_decl,
                 member_name,
+                None,
                 visited,
             )
         })
+    })
+}
+
+pub(super) fn owned_instance_assignment_member_semantic_type_with_context(
+    context: &CheckerContext<'_>,
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    member_name: &str,
+    before_line: Option<usize>,
+) -> Option<SemanticType> {
+    let mut visited = BTreeSet::new();
+    owned_instance_assignment_member_semantic_type_with_context_and_visited(
+        context,
+        class_node,
+        class_decl,
+        member_name,
+        before_line,
+        &mut visited,
+    )
+}
+
+fn owned_instance_assignment_member_semantic_type_with_context_and_visited(
+    context: &CheckerContext<'_>,
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    member_name: &str,
+    before_line: Option<usize>,
+    visited: &mut BTreeSet<(String, String)>,
+) -> Option<SemanticType> {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visited.insert(key) {
+        return None;
+    }
+
+    let sites = context.load_frozen_field_mutation_sites(class_node);
+    if let Some(site) = sites.iter().rev().find(|site| {
+        site.kind == typepython_syntax::FrozenFieldMutationKind::Assignment
+            && site.definitely_initializes_instance
+            && site.field_name == member_name
+            && site.owner_type_name.as_deref() == Some(class_decl.name.as_str())
+            && before_line.is_none_or(|line| site.line < line)
+            && site.target.value_name.as_deref() == Some("self")
+    }) {
+        return resolve_direct_expression_semantic_type_from_metadata_with_options(
+            class_node,
+            context.nodes,
+            None,
+            Some("__init__"),
+            Some(class_decl.name.as_str()),
+            site.line,
+            site.value.as_ref()?,
+            context.assignability_options(),
+        );
+    }
+
+    class_decl.rendered_class_bases().iter().find_map(|base| {
+        let (base_node, base_decl) = resolve_direct_base(context.nodes, class_node, base)?;
+        owned_instance_assignment_member_semantic_type_with_context_and_visited(
+            context,
+            base_node,
+            base_decl,
+            member_name,
+            None,
+            visited,
+        )
     })
 }
 
