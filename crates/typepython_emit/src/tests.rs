@@ -1009,6 +1009,33 @@ fn plan_emits_for_sources_returns_empty_for_no_modules() {
 }
 
 #[test]
+fn plan_emits_for_sources_matches_relative_sources_under_dot_config_dir() {
+    let temp_dir = temp_dir("plan_emits_for_sources_matches_relative_sources_under_dot_config_dir");
+    fs::write(
+        temp_dir.join("typepython.toml"),
+        "[project]\nroot_dir = \"src\"\nout_dir = \"build\"\n",
+    )
+    .expect("test setup should succeed");
+    let mut config = load(&temp_dir).expect("config should load");
+    config.config_dir = PathBuf::from(".");
+    config.config_path = PathBuf::from("./typepython.toml");
+
+    let artifacts = plan_emits_for_sources(
+        &config,
+        &[PlannedModuleSource {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+        }],
+    )
+    .expect("dot-prefixed config roots should preserve the package path");
+
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(artifacts[0].runtime_path, Some(PathBuf::from("./build/app/__init__.py")));
+    assert_eq!(artifacts[0].stub_path, Some(PathBuf::from("./build/app/__init__.pyi")));
+    remove_temp_dir(&temp_dir);
+}
+
+#[test]
 fn plan_emits_for_sources_rejects_parent_directory_escape() {
     let temp_dir = temp_dir("plan_emits_for_sources_rejects_parent_directory_escape");
     fs::create_dir_all(temp_dir.join("src")).expect("test setup should succeed");

@@ -175,9 +175,12 @@ fn relative_module_path(
     config: &ConfigHandle,
     source_path: &Path,
 ) -> Result<PathBuf, EmitPlanningError> {
-    let logical_root = config.resolve_relative_path(&config.config.project.root_dir);
+    let logical_root = without_current_directory_components(
+        &config.resolve_relative_path(&config.config.project.root_dir),
+    );
+    let comparable_source_path = without_current_directory_components(source_path);
 
-    if let Ok(relative) = source_path.strip_prefix(logical_root) {
+    if let Ok(relative) = comparable_source_path.strip_prefix(&logical_root) {
         if !relative.as_os_str().is_empty()
             && relative.components().all(|component| matches!(component, Component::Normal(_)))
         {
@@ -194,4 +197,8 @@ fn relative_module_path(
         source_path: source_path.to_path_buf(),
         logical_root: config.resolve_relative_path(&config.config.project.root_dir),
     })
+}
+
+fn without_current_directory_components(path: &Path) -> PathBuf {
+    path.components().filter(|component| !matches!(component, Component::CurDir)).collect()
 }
