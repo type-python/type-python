@@ -1455,6 +1455,42 @@ fn lower_preserves_runtime_star_unpack_expressions() {
 }
 
 #[test]
+fn lower_preserves_runtime_star_unpack_in_annotated_metadata() {
+    let source = concat!(
+        "from typing import Annotated\n",
+        "values = (1, 2)\n",
+        "result: Annotated[int, (*values,)] = 1\n",
+        "assert result == 1\n",
+    );
+    let lowered = lower_with_options(
+        &parse(SourceFile {
+            path: PathBuf::from("annotated-runtime-metadata.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: source.to_owned(),
+        }),
+        &compat_options("3.10"),
+    );
+
+    assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+    let rendered = lowered.module.python_source;
+    assert!(rendered.contains("Annotated[int, (*values,)]"), "{rendered}");
+    assert!(!rendered.contains("Unpack[values]"), "{rendered}");
+    assert!(!rendered.contains("import Unpack"), "{rendered}");
+
+    let output = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(&rendered)
+        .output()
+        .expect("python3 should execute Annotated metadata regression source");
+    assert!(
+        output.status.success(),
+        "lowered source failed to execute:\n{}\nsource:\n{rendered}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+#[test]
 fn lowered_variadic_type_positions_compile_and_preserve_runtime_stars() {
     let source = concat!(
         "class Unpack:\n",

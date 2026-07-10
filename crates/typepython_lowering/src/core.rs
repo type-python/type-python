@@ -802,6 +802,29 @@ impl VariadicTypePositionCollector<'_> {
                 )
             })
     }
+
+    fn collect_annotated_type_argument(&mut self, expression: &Expr) -> bool {
+        let Expr::Subscript(subscript) = expression else {
+            return false;
+        };
+        let is_annotated = match subscript.value.as_ref() {
+            Expr::Name(name) => name.id.as_str() == "Annotated",
+            Expr::Attribute(attribute) => attribute.attr.as_str() == "Annotated",
+            _ => false,
+        };
+        if !is_annotated {
+            return false;
+        }
+
+        let type_argument = match subscript.slice.as_ref() {
+            Expr::Tuple(tuple) => tuple.elts.first(),
+            expression => Some(expression),
+        };
+        if let Some(type_argument) = type_argument {
+            self.collect_type_position(type_argument);
+        }
+        true
+    }
 }
 
 impl<'ast> Visitor<'ast> for VariadicTypePositionCollector<'_> {
@@ -839,6 +862,10 @@ impl<'ast> Visitor<'ast> for VariadicTypePositionCollector<'_> {
     }
 
     fn visit_expr(&mut self, expression: &'ast Expr) {
+        if self.in_type_position && self.collect_annotated_type_argument(expression) {
+            // PEP 593 metadata is evaluated as runtime data, not as a type expression.
+            return;
+        }
         if self.in_type_position && matches!(expression, Expr::Starred(_)) {
             let range = expression.range();
             self.ranges.push((range.start().to_usize(), range.end().to_usize()));
