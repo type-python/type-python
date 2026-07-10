@@ -332,6 +332,11 @@ issue = "https://github.com/example/project/issues/123"
 expires = "2026-12-31"
 ```
 
+Every entry must provide a non-empty `checker`, `contains`, and `reason`, plus a valid
+`expires` date in `YYYY-MM-DD` form. Verification fails before invoking external checkers when an
+entry is expired or malformed; an empty match substring is rejected because it would allow every
+diagnostic from that checker.
+
 ---
 
 ### `typepython compat`

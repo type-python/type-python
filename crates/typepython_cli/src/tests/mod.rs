@@ -25,9 +25,9 @@ pub(super) use super::verification::{
     pep561_readiness_report, publication_type_health_diagnostics, run_verify,
     runtime_annotation_compatibility_diagnostics, stub_portability_diagnostics,
     supplied_verify_artifacts, type_portability_report, type_portability_score,
-    verify_build_artifacts, verify_checker_invocations, verify_emitted_declaration_surface,
-    verify_packaged_artifacts, verify_publication_metadata, verify_runtime_public_name_parity,
-    verify_runtime_public_name_parity_for_artifact,
+    validate_checker_allowlist_entry, verify_build_artifacts, verify_checker_invocations,
+    verify_emitted_declaration_surface, verify_packaged_artifacts, verify_publication_metadata,
+    verify_runtime_public_name_parity, verify_runtime_public_name_parity_for_artifact,
 };
 pub(super) use super::{
     Cli, Command, InitArgs, OutputFormat, RunArgs, bytecode_path_for, embedded_config_template,

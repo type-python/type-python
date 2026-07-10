@@ -3620,6 +3620,57 @@ fn checker_allowlist_downgrades_matching_checker_rejection_to_warning() {
 }
 
 #[test]
+fn checker_allowlist_rejects_empty_match_substrings() {
+    let error = validate_checker_allowlist_entry(
+        &CheckerAllowlistEntry {
+            checker: String::from("pyright"),
+            contains: String::new(),
+            reason: String::from("tracked checker limitation"),
+            issue: None,
+            expires: Some(String::from("2026-12-31")),
+        },
+        0,
+    )
+    .expect_err("an empty substring would match every checker diagnostic");
+
+    assert!(error.to_string().contains("`contains` must not be empty"));
+}
+
+#[test]
+fn checker_allowlist_rejects_missing_malformed_and_expired_dates() {
+    let base = CheckerAllowlistEntry {
+        checker: String::from("pyright"),
+        contains: String::from("unsupported transform"),
+        reason: String::from("tracked checker limitation"),
+        issue: None,
+        expires: None,
+    };
+    assert!(
+        validate_checker_allowlist_entry(&base, 0)
+            .expect_err("expiration should be required")
+            .to_string()
+            .contains("`expires` is required")
+    );
+
+    let malformed =
+        CheckerAllowlistEntry { expires: Some(String::from("2026-02-30")), ..base.clone() };
+    assert!(
+        validate_checker_allowlist_entry(&malformed, 0)
+            .expect_err("invalid calendar dates should be rejected")
+            .to_string()
+            .contains("invalid expiration day")
+    );
+
+    let expired = CheckerAllowlistEntry { expires: Some(String::from("1970-01-01")), ..base };
+    assert!(
+        validate_checker_allowlist_entry(&expired, 1)
+            .expect_err("past dates should be rejected")
+            .to_string()
+            .contains("expired on `1970-01-01`")
+    );
+}
+
+#[test]
 fn type_portability_score_counts_only_blocking_checker_failures() {
     let mut diagnostics = DiagnosticReport::default();
     diagnostics.push(Diagnostic::error(

@@ -496,7 +496,82 @@ fn load_checker_allowlist(
     let allowlist: CheckerAllowlist = toml::from_str(&contents).with_context(|| {
         format!("unable to parse checker allowlist {}", resolved_path.display())
     })?;
+    let today = current_utc_day()?;
+    for (index, entry) in allowlist.disagreements.iter().enumerate() {
+        validate_checker_allowlist_entry(entry, today).with_context(|| {
+            format!("invalid checker allowlist entry {} in {}", index + 1, resolved_path.display())
+        })?;
+    }
     Ok(allowlist.disagreements)
+}
+
+fn current_utc_day() -> Result<i64> {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before the Unix epoch")?;
+    Ok(i64::try_from(elapsed.as_secs() / 86_400).unwrap_or(i64::MAX))
+}
+
+pub(crate) fn validate_checker_allowlist_entry(
+    entry: &CheckerAllowlistEntry,
+    today: i64,
+) -> Result<()> {
+    if entry.checker.trim().is_empty() {
+        anyhow::bail!("`checker` must not be empty");
+    }
+    if entry.contains.trim().is_empty() {
+        anyhow::bail!("`contains` must not be empty");
+    }
+    if entry.reason.trim().is_empty() {
+        anyhow::bail!("`reason` must not be empty");
+    }
+    let expires = entry
+        .expires
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("`expires` is required for temporary allowlist entries"))?;
+    let expiration_day = parse_iso_date_as_utc_day(expires)?;
+    if expiration_day < today {
+        anyhow::bail!("allowlist entry expired on `{expires}`");
+    }
+    Ok(())
+}
+
+fn parse_iso_date_as_utc_day(value: &str) -> Result<i64> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || !bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+    {
+        anyhow::bail!("`expires` must use the ISO date format YYYY-MM-DD");
+    }
+    let year = value[0..4].parse::<i64>().context("invalid expiration year")?;
+    let month = value[5..7].parse::<u32>().context("invalid expiration month")?;
+    let day = value[8..10].parse::<u32>().context("invalid expiration day")?;
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year % 400 == 0 || (year % 4 == 0 && year % 100 != 0) => 29,
+        2 => 28,
+        _ => anyhow::bail!("invalid expiration month `{month}`"),
+    };
+    if day == 0 || day > days_in_month {
+        anyhow::bail!("invalid expiration day `{day}` for month `{month}`");
+    }
+    Ok(days_from_civil(year, month, day))
+}
+
+fn days_from_civil(mut year: i64, month: u32, day: u32) -> i64 {
+    year -= i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month_prime = i64::from(month) + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month_prime + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 pub(crate) fn expand_checker_list(raw: &str) -> Result<Vec<String>> {
