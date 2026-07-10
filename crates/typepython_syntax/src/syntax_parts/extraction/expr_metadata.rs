@@ -418,43 +418,7 @@ pub(in super::super) fn extract_direct_expr_metadata(
     }
 
     if let Expr::BoolOp(bool_op) = expr {
-        let mut values = bool_op.values.iter();
-        let left_expr = values.next();
-        let left_guard = left_expr.and_then(|expr| extract_guard_condition(source, expr));
-        let left = left_expr.map(|expr| extract_direct_expr_metadata(source, expr));
-        let right = values.next().map(|expr| extract_direct_expr_metadata(source, expr));
-        return DirectExprMetadata {
-            value_type_expr: None,
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: left_guard,
-            value_bool_left: left.map(Box::new),
-            value_bool_right: right.map(Box::new),
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: Some(match bool_op.op {
-                ruff_python_ast::BoolOp::And => String::from("and"),
-                ruff_python_ast::BoolOp::Or => String::from("or"),
-            }),
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        };
+        return extract_bool_op_metadata(source, bool_op.op, &bool_op.values);
     }
 
     if let Expr::BinOp(bin_op) = expr {
@@ -592,6 +556,56 @@ pub(in super::super) fn extract_direct_expr_metadata(
         value_binop_right: None,
         value_binop_operator: arbitrary_member_owner
             .map(|attribute| format!("member-access:{}", attribute.attr.as_str())),
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None,
+    }
+}
+
+fn extract_bool_op_metadata(
+    source: &str,
+    operator: ruff_python_ast::BoolOp,
+    values: &[Expr],
+) -> DirectExprMetadata {
+    let Some((left_expr, remaining)) = values.split_first() else {
+        unreachable!("parsed boolean operations always contain operands");
+    };
+    let left_guard = extract_guard_condition(source, left_expr);
+    let left = extract_direct_expr_metadata(source, left_expr);
+    let right = match remaining {
+        [] => None,
+        [right] => Some(extract_direct_expr_metadata(source, right)),
+        _ => Some(extract_bool_op_metadata(source, operator, remaining)),
+    };
+
+    DirectExprMetadata {
+        value_type_expr: None,
+        is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: left_guard,
+        value_bool_left: Some(Box::new(left)),
+        value_bool_right: right.map(Box::new),
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: Some(match operator {
+            ruff_python_ast::BoolOp::And => String::from("and"),
+            ruff_python_ast::BoolOp::Or => String::from("or"),
+        }),
         value_lambda: None,
         value_list_comprehension: None,
         value_generator_comprehension: None,

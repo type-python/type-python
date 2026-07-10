@@ -5622,6 +5622,17 @@ fn check_reports_boolop_assignment_type_mismatch() {
 }
 
 #[test]
+fn check_reports_type_mismatch_in_third_boolop_operand() {
+    let result = check_temp_typepython_source("value: int = 1 and 2 and \"wrong\"\n");
+
+    let rendered = result.diagnostics.as_text();
+    assert!(result.diagnostics.has_errors(), "{rendered}");
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("str"), "{rendered}");
+    assert!(rendered.contains("expects `int`"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_binop_numeric_assignment_type_match() {
     let result = check_temp_typepython_source("value: int = 1 + 2\n");
 

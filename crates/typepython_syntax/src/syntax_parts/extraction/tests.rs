@@ -1560,6 +1560,52 @@ fn parse_extracts_annotated_assignment_direct_rhs_forms() {
 }
 
 #[test]
+fn parse_retains_every_boolop_operand() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("boolop.py"),
+        kind: SourceKind::Python,
+        logical_module: String::new(),
+        text: String::from("value: int = 1 and 2 and \"wrong\"\n"),
+    });
+
+    assert!(tree.diagnostics.is_empty());
+    let value = tree
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            SyntaxStatement::Value(value) => Some(value),
+            _ => None,
+        })
+        .expect("annotated assignment should be retained");
+    assert_eq!(
+        value
+            .value_bool_left
+            .as_deref()
+            .and_then(DirectExprMetadata::rendered_value_type)
+            .as_deref(),
+        Some("int")
+    );
+    let remaining = value.value_bool_right.as_deref().expect("remaining operands should be nested");
+    assert_eq!(remaining.value_binop_operator.as_deref(), Some("and"));
+    assert_eq!(
+        remaining
+            .value_bool_left
+            .as_deref()
+            .and_then(DirectExprMetadata::rendered_value_type)
+            .as_deref(),
+        Some("int")
+    );
+    assert_eq!(
+        remaining
+            .value_bool_right
+            .as_deref()
+            .and_then(DirectExprMetadata::rendered_value_type)
+            .as_deref(),
+        Some("str")
+    );
+}
+
+#[test]
 fn parse_extracts_function_body_annotated_assignments() {
     let tree = parse(SourceFile {
         path: PathBuf::from("module.py"),
