@@ -347,7 +347,7 @@ fn lower_rewrites_generic_interface_with_protocol_and_generic_base() {
     assert!(lowered.diagnostics.is_empty());
     assert_eq!(
         lowered.module.python_source,
-        "from typing import TypeVar\nfrom typing import Generic\nT = TypeVar(\"T\")\nfrom typing import Protocol\nclass SupportsClose(Protocol, Generic[T]):\n    def close(self, value: T) -> T: ...\n"
+        "from typing import TypeVar\nfrom typing import Generic\nfrom typing import Protocol\nT = TypeVar(\"T\")\nclass SupportsClose(Protocol, Generic[T]):\n    def close(self, value: T) -> T: ...\n"
     );
 }
 
@@ -486,7 +486,7 @@ fn lower_rewrites_generic_data_class_and_sealed_class_with_generic_base() {
     assert!(lowered.diagnostics.is_empty());
     assert_eq!(
         lowered.module.python_source,
-        "from typing import TypeVar\nfrom typing import Generic\nT = TypeVar(\"T\")\nfrom dataclasses import dataclass\n@dataclass\nclass Point(Generic[T]):\n    x: T\n\nclass Expr(Base, Generic[T]):  # tpy:sealed\n    ...\n"
+        "from typing import TypeVar\nfrom typing import Generic\nfrom dataclasses import dataclass\nT = TypeVar(\"T\")\n@dataclass\nclass Point(Generic[T]):\n    x: T\n\nclass Expr(Base, Generic[T]):  # tpy:sealed\n    ...\n"
     );
 }
 
@@ -832,7 +832,7 @@ fn lower_still_blocks_generic_typealias() {
     assert!(lowered.diagnostics.is_empty());
     assert_eq!(
         lowered.module.python_source,
-        "from typing import TypeVar\nT = TypeVar(\"T\")\nfrom typing import TypeAlias\nPair: TypeAlias = tuple[T, T]\n"
+        "from typing import TypeVar\nfrom typing import TypeAlias\nT = TypeVar(\"T\")\nPair: TypeAlias = tuple[T, T]\n"
     );
 }
 
@@ -868,7 +868,7 @@ fn lower_rewrites_type_param_constraints_and_defaults() {
     assert!(lowered.diagnostics.is_empty());
     assert_eq!(
         lowered.module.python_source,
-        "from typing_extensions import TypeVar\nT = TypeVar(\"T\", \"str\", \"bytes\", default=\"str\")\nfrom typing import TypeAlias\nPair: TypeAlias = tuple[T, T]\n"
+        "from typing_extensions import TypeVar\nfrom typing import TypeAlias\nT = TypeVar(\"T\", \"str\", \"bytes\", default=\"str\")\nPair: TypeAlias = tuple[T, T]\n"
     );
     assert_eq!(
         lowered.module.required_imports,
@@ -916,7 +916,7 @@ fn lower_still_blocks_generic_overload_def() {
     assert!(lowered.diagnostics.is_empty());
     assert_eq!(
         lowered.module.python_source,
-        "from typing import TypeVar\nT = TypeVar(\"T\")\nfrom typing import overload\n@overload\ndef parse(x: T) -> T: ...\n"
+        "from typing import TypeVar\nfrom typing import overload\nT = TypeVar(\"T\")\n@overload\ndef parse(x: T) -> T: ...\n"
     );
 }
 
@@ -1267,7 +1267,7 @@ fn lower_rewrites_typevartuple_helpers_for_target_python_310() {
     assert!(lowered.diagnostics.is_empty());
     assert_eq!(
         lowered.module.python_source,
-        "from typing_extensions import TypeVarTuple\nfrom typing_extensions import Unpack\nTs = TypeVarTuple(\"Ts\")\nfrom typing import TypeAlias\nPack: TypeAlias = tuple[Unpack[Ts]]\n"
+        "from typing_extensions import TypeVarTuple\nfrom typing_extensions import Unpack\nfrom typing import TypeAlias\nTs = TypeVarTuple(\"Ts\")\nPack: TypeAlias = tuple[Unpack[Ts]]\n"
     );
     assert_eq!(
         lowered.module.required_imports,
@@ -1314,7 +1314,7 @@ fn lower_rewrites_typevartuple_helpers_for_target_python_311() {
     assert!(lowered.diagnostics.is_empty());
     assert_eq!(
         lowered.module.python_source,
-        "from typing import TypeVarTuple\nfrom typing import Unpack\nTs = TypeVarTuple(\"Ts\")\nfrom typing import TypeAlias\nPack: TypeAlias = tuple[Unpack[Ts]]\n"
+        "from typing import TypeVarTuple\nfrom typing import Unpack\nfrom typing import TypeAlias\nTs = TypeVarTuple(\"Ts\")\nPack: TypeAlias = tuple[Unpack[Ts]]\n"
     );
     assert_eq!(
         lowered.module.required_imports,
@@ -1354,7 +1354,7 @@ fn lower_rewrites_source_authored_typevartuple_typealias() {
     assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
     assert_eq!(
         lowered.module.python_source,
-        "from typing_extensions import TypeVarTuple\nfrom typing_extensions import Unpack\nTs = TypeVarTuple(\"Ts\")\nfrom typing import TypeAlias\nPack: TypeAlias = tuple[Unpack[Ts]]\n"
+        "from typing_extensions import TypeVarTuple\nfrom typing_extensions import Unpack\nfrom typing import TypeAlias\nTs = TypeVarTuple(\"Ts\")\nPack: TypeAlias = tuple[Unpack[Ts]]\n"
     );
 }
 
@@ -1424,7 +1424,7 @@ fn lower_quotes_hoisted_type_param_bounds_for_runtime_imports() {
     assert!(lowered.diagnostics.is_empty());
     assert_eq!(
         lowered.module.python_source,
-        "from typing import TypeVar\nfrom typing import Generic\nT = TypeVar(\"T\", bound=\"Serializable\")\nfrom typing import Protocol\nclass Serializable(Protocol):\n    def to_json(self) -> str: ...\n\nclass Box(Generic[T]):\n    pass\n"
+        "from typing import TypeVar\nfrom typing import Generic\nfrom typing import Protocol\nT = TypeVar(\"T\", bound=\"Serializable\")\nclass Serializable(Protocol):\n    def to_json(self) -> str: ...\n\nclass Box(Generic[T]):\n    pass\n"
     );
 }
 
@@ -2898,6 +2898,108 @@ fn lower_expands_map_values_readonly_shape_transform_with_import() {
 }
 
 // ─── Snapshot (golden) tests ────────────────────────────────────────────
+
+#[test]
+fn snapshot_lower_module_prologue() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("module-prologue.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "#!/usr/bin/env python3\n",
+            "# coding: utf-8\n",
+            "\"\"\"prologue regression\n",
+            "continued\n",
+            "\"\"\"\n",
+            "from __future__ import annotations\n",
+            "from typing import TypeVar\n",
+            "import collections\n",
+            "\n",
+            "class Box[T]:\n",
+            "    pass\n",
+        )),
+    });
+    let lowered = lower(&tree);
+
+    assert!(lowered.diagnostics.is_empty());
+    assert_eq!(lowered.module.required_imports, vec![String::from("from typing import Generic")]);
+    assert_eq!(
+        lowered.module.source_map,
+        vec![
+            SourceMapEntry { original_line: 1, lowered_line: 1 },
+            SourceMapEntry { original_line: 2, lowered_line: 2 },
+            SourceMapEntry { original_line: 3, lowered_line: 3 },
+            SourceMapEntry { original_line: 4, lowered_line: 4 },
+            SourceMapEntry { original_line: 5, lowered_line: 5 },
+            SourceMapEntry { original_line: 6, lowered_line: 6 },
+            SourceMapEntry { original_line: 7, lowered_line: 7 },
+            SourceMapEntry { original_line: 8, lowered_line: 8 },
+            SourceMapEntry { original_line: 9, lowered_line: 11 },
+            SourceMapEntry { original_line: 10, lowered_line: 12 },
+            SourceMapEntry { original_line: 11, lowered_line: 13 },
+        ]
+    );
+    insta::assert_snapshot!(lowered.module.python_source);
+}
+
+#[test]
+fn lowered_module_prologue_compiles_and_runs_in_python() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("module-prologue-runtime.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "#!/usr/bin/env python3\n",
+            "# coding: utf-8\n",
+            "\"\"\"prologue regression\"\"\"\n",
+            "from __future__ import annotations\n",
+            "from typing import TypeVar as RuntimeTypeVar\n",
+            "import collections\n",
+            "\n",
+            "class Box[T]:\n",
+            "    value: T\n",
+            "\n",
+            "assert __doc__ == \"prologue regression\"\n",
+            "assert RuntimeTypeVar is not None\n",
+            "assert Box.__parameters__ == (T,)\n",
+            "print(\"ok\")\n",
+        )),
+    });
+    let lowered = lower(&tree);
+
+    assert!(lowered.diagnostics.is_empty());
+    assert_eq!(
+        lowered.module.required_imports,
+        vec![
+            String::from("from typing import TypeVar"),
+            String::from("from typing import Generic"),
+        ]
+    );
+    let rendered = lowered.module.python_source;
+    let generated_typevar_import = rendered
+        .find("from typing import TypeVar\n")
+        .expect("an aliased import must not suppress the runtime TypeVar binding");
+    let synthetic_typevar = rendered.find("T = TypeVar(\"T\")").expect("TypeVar declaration");
+    assert!(
+        rendered
+            .find("from __future__ import annotations")
+            .expect("future import should remain in the module prologue")
+            < generated_typevar_import
+    );
+    assert!(generated_typevar_import < synthetic_typevar);
+    let output = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(&rendered)
+        .output()
+        .expect("python3 should execute lowered regression source");
+
+    assert!(
+        output.status.success(),
+        "lowered source failed to compile or execute:\n{}\nsource:\n{rendered}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok\n");
+}
 
 #[test]
 fn snapshot_lower_typealias() {

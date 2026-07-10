@@ -84,41 +84,6 @@ pub enum BackportRequirement {
     TypingExtensionsAtLeast412,
 }
 
-struct InsertedLineTracker<'a> {
-    source_path: &'a Path,
-    emitted_path: &'a Path,
-    lowered_lines: &'a mut Vec<String>,
-    required_imports: &'a mut Vec<String>,
-    span_map: &'a mut Vec<SpanMapEntry>,
-    lowered_line_number: &'a mut usize,
-}
-
-impl<'a> InsertedLineTracker<'a> {
-    fn emit_required_import(&mut self, import_line: String) {
-        push_required_import(self.lowered_lines, self.required_imports, import_line);
-        self.record_last_line(LoweringSegmentKind::Inserted);
-    }
-
-    fn emit_synthetic_line(&mut self, line: String) {
-        self.lowered_lines.push(line);
-        self.record_last_line(LoweringSegmentKind::Synthetic);
-    }
-
-    fn record_last_line(&mut self, kind: LoweringSegmentKind) {
-        let Some(text) = self.lowered_lines.last() else {
-            return;
-        };
-        self.span_map.push(inserted_span_map_entry(
-            self.source_path,
-            self.emitted_path,
-            *self.lowered_line_number,
-            text,
-            kind,
-        ));
-        *self.lowered_line_number += 1;
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LoweringOptions {
     pub target_python: PythonTarget,
@@ -341,160 +306,148 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         compatibility_normalized_lines.iter().any(|line| line.contains("typing_extensions."))
             && !has_module_import(&tree.source.text, "typing_extensions");
 
-    let mut lowered_lines = Vec::new();
     let mut required_imports = Vec::new();
+    if has_runtime_typevars
+        && !has_typevar_import(
+            &tree.source.text,
+            if needs_typing_extensions_runtime_type_params {
+                "typing_extensions"
+            } else {
+                "typing"
+            },
+        )
+    {
+        required_imports.push(rewrite_typevar_import_line(
+            if needs_typing_extensions_runtime_type_params {
+                "typing_extensions"
+            } else {
+                "typing"
+            },
+        ));
+    }
+    if has_runtime_paramspecs
+        && !has_paramspec_import(
+            &tree.source.text,
+            if needs_typing_extensions_runtime_type_params {
+                "typing_extensions"
+            } else {
+                "typing"
+            },
+        )
+    {
+        required_imports.push(rewrite_paramspec_import_line(
+            if needs_typing_extensions_runtime_type_params {
+                "typing_extensions"
+            } else {
+                "typing"
+            },
+        ));
+    }
+    if has_runtime_typevartuples && !has_typevartuple_import(&tree.source.text, typevartuple_owner)
+    {
+        required_imports.push(rewrite_typevartuple_import_line(typevartuple_owner));
+    }
+    if needs_unpack_import && !has_unpack_import(&tree.source.text, unpack_owner) {
+        required_imports.push(rewrite_unpack_import_line(unpack_owner));
+    }
+    if generic_class_like_declarations && !has_generic_import(&tree.source.text) {
+        required_imports.push(String::from("from typing import Generic"));
+    }
+    if needs_typing_module_import {
+        required_imports.push(String::from("import typing"));
+    }
+    if needs_typing_extensions_module_import {
+        required_imports.push(String::from("import typing_extensions"));
+    }
+    if tree_uses_dynamic_intrinsic(tree) && !has_any_import(&tree.source.text) {
+        required_imports.push(String::from("from typing import Any"));
+    }
+    if type_aliases.values().any(|statement| !can_use_native_typealias(statement, options))
+        && !has_typealias_import(&tree.source.text)
+    {
+        required_imports.push(String::from("from typing import TypeAlias"));
+    }
+    let type_level_fields = type_level_shape_fields(
+        &typed_dicts_by_name,
+        &data_classes_by_name,
+        options.experimental_shape_transforms,
+    );
+    let needs_literal_import = type_aliases.values().any(|statement| {
+        reduce_restricted_type_level_alias_text_with_fields(
+            statement.value.trim(),
+            &type_level_fields,
+        )
+        .is_some_and(|reduced| reduced.trim_start().starts_with("Literal["))
+    });
+    if needs_literal_import && !has_literal_import(&tree.source.text) {
+        required_imports.push(String::from("from typing import Literal"));
+    }
+    if !interfaces.is_empty() && !has_protocol_import(&tree.source.text) {
+        required_imports.push(String::from("from typing import Protocol"));
+    }
+    if !data_classes.is_empty() && !has_dataclass_import(&tree.source.text) {
+        required_imports.push(String::from("from dataclasses import dataclass"));
+    }
+    if options.experimental_shape_transforms
+        && type_aliases.values().any(|statement| {
+            transform_targets_data_class(statement.value.trim(), &data_classes_by_name)
+        })
+        && !has_typeddict_import(&tree.source.text)
+    {
+        required_imports.push(String::from("from typing import TypedDict"));
+    }
+    if !overloads.is_empty() && !has_overload_import(&tree.source.text) {
+        required_imports.push(String::from("from typing import overload"));
+    }
+    // Check if any type alias uses a transform that generates NotRequired
+    let needs_notrequired_import = type_aliases.values().any(|stmt| {
+        let v = stmt.value.trim();
+        v == "Partial[User]"
+            || v == "Required_[UserUpdate]"
+            || v.starts_with("Partial[")
+            || v.starts_with("Required_[")
+            || transform_generates_notrequired(
+                v,
+                &typed_dicts_by_name,
+                &data_classes_by_name,
+                options.experimental_shape_transforms,
+            )
+    });
+    if needs_notrequired_import && !has_notrequired_import(&tree.source.text) {
+        required_imports.push(rewrite_notrequired_import_line(options));
+    }
+    // Check if any type alias uses a transform that generates ReadOnly
+    let needs_readonly_import = type_aliases.values().any(|stmt| {
+        let v = stmt.value.trim();
+        v == "Readonly[Config]"
+            || v == "Mutable[Config]"
+            || v.starts_with("Readonly[")
+            || v.starts_with("Mutable[")
+            || (v.starts_with("MapValues[") && v.contains("Readonly"))
+    });
+    if needs_readonly_import && !has_readonly_import(&tree.source.text) {
+        required_imports.push(format!(
+            "from {} import ReadOnly",
+            options.target_python.stdlib_owner("ReadOnly").unwrap_or("typing_extensions")
+        ));
+    }
+    let needs_optional_import = type_aliases
+        .values()
+        .any(|stmt| stmt.value.trim().starts_with("MapValues[") && stmt.value.contains("Optional"));
+    if needs_optional_import && !has_optional_import(&tree.source.text) {
+        required_imports.push(String::from("from typing import Optional"));
+    }
+
+    let synthetic_type_param_lines = compat_type_param_bindings
+        .iter()
+        .map(|binding| {
+            rewrite_typevar_line(&binding.emitted_name, &binding.source_name, &binding.type_param)
+        })
+        .collect::<Vec<_>>();
+    let mut lowered_lines = Vec::new();
     let mut lowered_line_number = 1usize;
     let mut source_map = Vec::new();
     let mut span_map = Vec::new();
-    {
-        let mut inserted_lines = InsertedLineTracker {
-            source_path: &source_path,
-            emitted_path: &emitted_path,
-            lowered_lines: &mut lowered_lines,
-            required_imports: &mut required_imports,
-            span_map: &mut span_map,
-            lowered_line_number: &mut lowered_line_number,
-        };
-        if has_runtime_typevars
-            && !has_typevar_import(
-                &tree.source.text,
-                if needs_typing_extensions_runtime_type_params {
-                    "typing_extensions"
-                } else {
-                    "typing"
-                },
-            )
-        {
-            inserted_lines.emit_required_import(rewrite_typevar_import_line(
-                if needs_typing_extensions_runtime_type_params {
-                    "typing_extensions"
-                } else {
-                    "typing"
-                },
-            ));
-        }
-        if has_runtime_paramspecs
-            && !has_paramspec_import(
-                &tree.source.text,
-                if needs_typing_extensions_runtime_type_params {
-                    "typing_extensions"
-                } else {
-                    "typing"
-                },
-            )
-        {
-            inserted_lines.emit_required_import(rewrite_paramspec_import_line(
-                if needs_typing_extensions_runtime_type_params {
-                    "typing_extensions"
-                } else {
-                    "typing"
-                },
-            ));
-        }
-        if has_runtime_typevartuples
-            && !has_typevartuple_import(&tree.source.text, typevartuple_owner)
-        {
-            inserted_lines
-                .emit_required_import(rewrite_typevartuple_import_line(typevartuple_owner));
-        }
-        if needs_unpack_import && !has_unpack_import(&tree.source.text, unpack_owner) {
-            inserted_lines.emit_required_import(rewrite_unpack_import_line(unpack_owner));
-        }
-        if generic_class_like_declarations && !has_generic_import(&tree.source.text) {
-            inserted_lines.emit_required_import(String::from("from typing import Generic"));
-        }
-        if needs_typing_module_import {
-            inserted_lines.emit_required_import(String::from("import typing"));
-        }
-        if needs_typing_extensions_module_import {
-            inserted_lines.emit_required_import(String::from("import typing_extensions"));
-        }
-        if tree_uses_dynamic_intrinsic(tree) && !has_any_import(&tree.source.text) {
-            inserted_lines.emit_required_import(String::from("from typing import Any"));
-        }
-        for binding in &compat_type_param_bindings {
-            inserted_lines.emit_synthetic_line(rewrite_typevar_line(
-                &binding.emitted_name,
-                &binding.source_name,
-                &binding.type_param,
-            ));
-        }
-        if type_aliases.values().any(|statement| !can_use_native_typealias(statement, options))
-            && !has_typealias_import(&tree.source.text)
-        {
-            inserted_lines.emit_required_import(String::from("from typing import TypeAlias"));
-        }
-        let type_level_fields = type_level_shape_fields(
-            &typed_dicts_by_name,
-            &data_classes_by_name,
-            options.experimental_shape_transforms,
-        );
-        let needs_literal_import = type_aliases.values().any(|statement| {
-            reduce_restricted_type_level_alias_text_with_fields(
-                statement.value.trim(),
-                &type_level_fields,
-            )
-            .is_some_and(|reduced| reduced.trim_start().starts_with("Literal["))
-        });
-        if needs_literal_import && !has_literal_import(&tree.source.text) {
-            inserted_lines.emit_required_import(String::from("from typing import Literal"));
-        }
-        if !interfaces.is_empty() && !has_protocol_import(&tree.source.text) {
-            inserted_lines.emit_required_import(String::from("from typing import Protocol"));
-        }
-        if !data_classes.is_empty() && !has_dataclass_import(&tree.source.text) {
-            inserted_lines.emit_required_import(String::from("from dataclasses import dataclass"));
-        }
-        if options.experimental_shape_transforms
-            && type_aliases.values().any(|statement| {
-                transform_targets_data_class(statement.value.trim(), &data_classes_by_name)
-            })
-            && !has_typeddict_import(&tree.source.text)
-        {
-            inserted_lines.emit_required_import(String::from("from typing import TypedDict"));
-        }
-        if !overloads.is_empty() && !has_overload_import(&tree.source.text) {
-            inserted_lines.emit_required_import(String::from("from typing import overload"));
-        }
-        // Check if any type alias uses a transform that generates NotRequired
-        let needs_notrequired_import = type_aliases.values().any(|stmt| {
-            let v = stmt.value.trim();
-            v == "Partial[User]"
-                || v == "Required_[UserUpdate]"
-                || v.starts_with("Partial[")
-                || v.starts_with("Required_[")
-                || transform_generates_notrequired(
-                    v,
-                    &typed_dicts_by_name,
-                    &data_classes_by_name,
-                    options.experimental_shape_transforms,
-                )
-        });
-        if needs_notrequired_import && !has_notrequired_import(&tree.source.text) {
-            inserted_lines.emit_required_import(rewrite_notrequired_import_line(options));
-        }
-        // Check if any type alias uses a transform that generates ReadOnly
-        let needs_readonly_import = type_aliases.values().any(|stmt| {
-            let v = stmt.value.trim();
-            v == "Readonly[Config]"
-                || v == "Mutable[Config]"
-                || v.starts_with("Readonly[")
-                || v.starts_with("Mutable[")
-                || (v.starts_with("MapValues[") && v.contains("Readonly"))
-        });
-        if needs_readonly_import && !has_readonly_import(&tree.source.text) {
-            inserted_lines.emit_required_import(format!(
-                "from {} import ReadOnly",
-                options.target_python.stdlib_owner("ReadOnly").unwrap_or("typing_extensions")
-            ));
-        }
-        let needs_optional_import = type_aliases.values().any(|stmt| {
-            stmt.value.trim().starts_with("MapValues[") && stmt.value.contains("Optional")
-        });
-        if needs_optional_import && !has_optional_import(&tree.source.text) {
-            inserted_lines.emit_required_import(String::from("from typing import Optional"));
-        }
-    }
 
     for (index, line) in normalized_source.lines().enumerate() {
         let line_number = index + 1;
@@ -642,6 +595,16 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         lowered_lines.extend(replacement_lines);
     }
 
+    insert_synthetic_prologue(
+        &mut lowered_lines,
+        &mut source_map,
+        &mut span_map,
+        &source_path,
+        &emitted_path,
+        &required_imports,
+        &synthetic_type_param_lines,
+    );
+
     let lowered_text = if options.experimental_sync_async_dual_emit {
         apply_dual_emit_decorator_lowering(&lowered_lines.join("\n"))
     } else {
@@ -778,13 +741,97 @@ fn default_async_dual_name(name: &str) -> String {
     if name.starts_with('a') { name.to_owned() } else { format!("a{name}") }
 }
 
-fn push_required_import(
+fn insert_synthetic_prologue(
     lowered_lines: &mut Vec<String>,
-    required_imports: &mut Vec<String>,
-    import_line: String,
+    source_map: &mut [SourceMapEntry],
+    span_map: &mut Vec<SpanMapEntry>,
+    source_path: &Path,
+    emitted_path: &Path,
+    required_imports: &[String],
+    synthetic_lines: &[String],
 ) {
-    lowered_lines.push(import_line.clone());
-    required_imports.push(import_line);
+    if required_imports.is_empty() && synthetic_lines.is_empty() {
+        return;
+    }
+
+    let insertion_index = module_prologue_insertion_index(&lowered_lines.join("\n"));
+    let inserted_line_count = required_imports.len() + synthetic_lines.len();
+
+    for entry in source_map {
+        if entry.lowered_line > insertion_index {
+            entry.lowered_line += inserted_line_count;
+        }
+    }
+    for entry in span_map.iter_mut() {
+        if entry.emitted.line > insertion_index {
+            entry.emitted.line += inserted_line_count;
+        }
+    }
+
+    let mut inserted_entries = required_imports
+        .iter()
+        .map(|line| (line.clone(), LoweringSegmentKind::Inserted))
+        .chain(synthetic_lines.iter().map(|line| (line.clone(), LoweringSegmentKind::Synthetic)))
+        .collect::<Vec<_>>();
+    span_map.extend(inserted_entries.iter().enumerate().map(|(offset, (line, kind))| {
+        inserted_span_map_entry(
+            source_path,
+            emitted_path,
+            insertion_index + offset + 1,
+            line,
+            *kind,
+        )
+    }));
+    span_map.sort_by_key(|entry| entry.emitted.line);
+
+    lowered_lines
+        .splice(insertion_index..insertion_index, inserted_entries.drain(..).map(|(line, _)| line));
+}
+
+fn module_prologue_insertion_index(source: &str) -> usize {
+    let Ok(parsed) = parse_module(source) else {
+        return source
+            .lines()
+            .take_while(|line| line.trim().is_empty() || line.trim_start().starts_with('#'))
+            .count();
+    };
+    let suite = parsed.suite();
+    let Some(first_statement) = suite.first() else {
+        return source.lines().count();
+    };
+
+    let mut statement_index = 0usize;
+    let mut insertion_index = None;
+    if is_module_docstring(first_statement) {
+        insertion_index = Some(line_count_through_offset(source, first_statement.range().end()));
+        statement_index += 1;
+    }
+    while let Some(statement) = suite.get(statement_index) {
+        if !matches!(statement, Stmt::Import(_) | Stmt::ImportFrom(_)) {
+            break;
+        }
+        insertion_index = Some(line_count_through_offset(source, statement.range().end()));
+        statement_index += 1;
+    }
+
+    insertion_index.unwrap_or_else(|| {
+        source[..first_statement.range().start().to_usize()]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count()
+    })
+}
+
+fn is_module_docstring(statement: &Stmt) -> bool {
+    matches!(
+        statement,
+        Stmt::Expr(expression)
+            if matches!(expression.value.as_ref(), Expr::StringLiteral(_))
+    )
+}
+
+fn line_count_through_offset(source: &str, offset: ruff_text_size::TextSize) -> usize {
+    source[..offset.to_usize()].bytes().filter(|byte| *byte == b'\n').count() + 1
 }
 
 fn line_span(line_number: usize, text: &str) -> SpanMapRange {
@@ -1934,38 +1981,39 @@ fn has_literal_import(source: &str) -> bool {
 }
 
 fn has_typevar_import(source: &str, module: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == format!("from {module} import TypeVar")
-            || (trimmed.starts_with(&format!("from {module} import "))
-                && trimmed.contains("TypeVar"))
-    })
+    has_unaliased_from_import(source, module, "TypeVar")
 }
 
 fn has_paramspec_import(source: &str, module: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == format!("from {module} import ParamSpec")
-            || (trimmed.starts_with(&format!("from {module} import "))
-                && trimmed.contains("ParamSpec"))
-    })
+    has_unaliased_from_import(source, module, "ParamSpec")
 }
 
 fn has_typevartuple_import(source: &str, module: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == format!("from {module} import TypeVarTuple")
-            || (trimmed.starts_with(&format!("from {module} import "))
-                && trimmed.contains("TypeVarTuple"))
-    })
+    has_unaliased_from_import(source, module, "TypeVarTuple")
 }
 
 fn has_unpack_import(source: &str, module: &str) -> bool {
+    has_unaliased_from_import(source, module, "Unpack")
+}
+
+fn has_unaliased_from_import(source: &str, module: &str, symbol: &str) -> bool {
+    let prefix = format!("from {module} import ");
     source.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == format!("from {module} import Unpack")
-            || (trimmed.starts_with(&format!("from {module} import "))
-                && trimmed.contains("Unpack"))
+        let Some(imported_names) = line.trim().strip_prefix(&prefix) else {
+            return false;
+        };
+        imported_names
+            .split('#')
+            .next()
+            .unwrap_or_default()
+            .split(',')
+            .map(|entry| entry.trim().trim_matches(['(', ')']))
+            .any(|entry| {
+                entry == symbol
+                    || entry.split_once(" as ").is_some_and(|(imported, binding)| {
+                        imported.trim() == symbol && binding.trim() == symbol
+                    })
+            })
     })
 }
 

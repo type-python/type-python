@@ -2,9 +2,9 @@
 source: crates/typepython_lowering/src/lib.rs
 expression: lowered.module.python_source
 ---
-import typing_extensions
 import typing
 import warnings
+import typing_extensions
 
 @typing_extensions.deprecated("use new_api")
 class Box:
