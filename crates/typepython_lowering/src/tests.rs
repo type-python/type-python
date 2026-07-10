@@ -1061,6 +1061,35 @@ fn lower_native_mode_preserves_pep_695_syntax() {
 }
 
 #[test]
+fn lower_native_mode_preserves_variadic_type_syntax() {
+    let source = concat!(
+        "typealias Pack[*Ts] = tuple[*Ts]\n",
+        "\n",
+        "def collect[*Us](*args: *Us) -> tuple[*Us]:\n",
+        "    return args\n",
+    );
+    let expected = concat!(
+        "type Pack[*Ts] = tuple[*Ts]\n",
+        "\n",
+        "def collect[*Us](*args: *Us) -> tuple[*Us]:\n",
+        "    return args\n",
+    );
+    let lowered = lower_with_options(
+        &parse(SourceFile {
+            path: PathBuf::from("native-variadics.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: source.to_owned(),
+        }),
+        &native_options("3.13"),
+    );
+
+    assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+    assert_eq!(lowered.module.python_source, expected);
+    assert!(lowered.module.required_imports.is_empty());
+}
+
+#[test]
 fn lower_native_mode_falls_back_for_generic_defaults_before_313() {
     let lowered = lower_with_options(
         &parse(SourceFile {
@@ -1377,6 +1406,72 @@ fn lower_preserves_runtime_star_unpack_expressions() {
 
     assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
     assert!(lowered.module.python_source.contains("return [*items]"));
+}
+
+#[test]
+fn lowered_variadic_type_positions_compile_and_preserve_runtime_stars() {
+    let source = concat!(
+        "class Unpack:\n",
+        "    @classmethod\n",
+        "    def __class_getitem__(cls, item):\n",
+        "        return object\n",
+        "\n",
+        "Ts = object()\n",
+        "\n",
+        "LABEL = \"prefix, *Ts\"\n",
+        "values = [1, 2, 3]\n",
+        "packed = *values,  # runtime *values must remain an unpack\n",
+        "# type-looking comment: tuple[*Ts]\n",
+        "\n",
+        "def collect(*args: *Ts) -> tuple[*Ts]:\n",
+        "    local: tuple[*Ts] = args\n",
+        "    return local\n",
+        "\n",
+        "assert LABEL == \"prefix, *Ts\"\n",
+        "assert packed == (1, 2, 3)\n",
+        "assert collect(4, 5) == (4, 5)\n",
+        "print(\"ok\")\n",
+    );
+    let lowered = lower(&parse(SourceFile {
+        path: PathBuf::from("variadic-runtime-regression.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: source.to_owned(),
+    }));
+
+    assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+    let rendered = lowered.module.python_source;
+    assert!(rendered.contains("def collect(*args: Unpack[Ts]) -> tuple[Unpack[Ts]]:"));
+    assert!(rendered.contains("local: tuple[Unpack[Ts]] = args"));
+    assert!(rendered.contains("packed = *values,"));
+    assert!(rendered.contains("LABEL = \"prefix, *Ts\""));
+    assert!(rendered.contains("# type-looking comment: tuple[*Ts]"));
+
+    let compile = std::process::Command::new("python3")
+        .args([
+            "-c",
+            "import sys; compile(sys.argv[1], 'variadic-runtime-regression.py', 'exec')",
+            &rendered,
+        ])
+        .output()
+        .expect("python3 should compile lowered variadic regression source");
+    assert!(
+        compile.status.success(),
+        "lowered source failed to compile:\n{}\nsource:\n{rendered}",
+        String::from_utf8_lossy(&compile.stderr),
+    );
+
+    let output = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(&rendered)
+        .output()
+        .expect("python3 should execute lowered variadic regression source");
+    assert!(
+        output.status.success(),
+        "lowered source failed to execute:\n{}\nsource:\n{rendered}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok\n");
 }
 
 #[test]
@@ -3097,6 +3192,31 @@ fn lower_expands_map_values_readonly_shape_transform_with_import() {
 }
 
 // ─── Snapshot (golden) tests ────────────────────────────────────────────
+
+#[test]
+fn snapshot_lower_variadic_type_positions_only() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("variadic-type-positions.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(concat!(
+            "typealias Pack[*Ts] = tuple[*Ts]\n",
+            "\n",
+            "LABEL = \"prefix, *Ts\"\n",
+            "values = [1, 2, 3]\n",
+            "packed = *values,  # runtime *values\n",
+            "# type-looking comment: tuple[*Ts]\n",
+            "\n",
+            "def collect(*args: *Ts) -> tuple[*Ts]:\n",
+            "    local: tuple[*Ts] = args\n",
+            "    return local\n",
+        )),
+    });
+    let lowered = lower(&tree);
+
+    assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+    insta::assert_snapshot!(lowered.module.python_source);
+}
 
 #[test]
 fn snapshot_lower_module_prologue() {

@@ -1,0 +1,18 @@
+---
+source: crates/typepython_lowering/src/tests.rs
+expression: lowered.module.python_source
+---
+from typing_extensions import TypeVarTuple
+from typing_extensions import Unpack
+from typing import TypeAlias
+Ts = TypeVarTuple("Ts")
+Pack: TypeAlias = tuple[Unpack[Ts]]
+
+LABEL = "prefix, *Ts"
+values = [1, 2, 3]
+packed = *values,  # runtime *values
+# type-looking comment: tuple[*Ts]
+
+def collect(*args: Unpack[Ts]) -> tuple[Unpack[Ts]]:
+    local: tuple[Unpack[Ts]] = args
+    return local

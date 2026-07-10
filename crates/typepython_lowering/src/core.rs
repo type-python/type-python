@@ -1,4 +1,5 @@
 use super::*;
+use ruff_python_ast::visitor::{self, Visitor};
 
 const RESTRICTED_TYPE_LEVEL_REDUCTION_BUDGET: usize = 64;
 
@@ -449,9 +450,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     let mut span_map = Vec::new();
     for (index, line) in normalized_source.lines().enumerate() {
         let line_number = index + 1;
-        let (replacement_lines, preserve_variadic_syntax) = if let Some(statement) =
-            type_aliases.get(&line_number)
-        {
+        let replacement_lines = if let Some(statement) = type_aliases.get(&line_number) {
             if let Some(expanded) = try_expand_typeddict_transform(
                 &statement.value,
                 &classes_by_name,
@@ -459,116 +458,85 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
                 options.experimental_shape_transforms,
                 line,
             ) {
-                (expanded, false)
+                expanded
             } else {
-                (
-                    vec![rewrite_typealias_line(
-                        line,
-                        statement,
-                        options,
-                        declaration_type_param_rewrites.get(&line_number),
-                        &classes_by_name,
-                        &data_classes_by_name,
-                        options.experimental_shape_transforms,
-                    )],
-                    can_use_native_typealias(statement, options),
-                )
+                vec![rewrite_typealias_line(
+                    line,
+                    statement,
+                    options,
+                    declaration_type_param_rewrites.get(&line_number),
+                    &classes_by_name,
+                    &data_classes_by_name,
+                    options.experimental_shape_transforms,
+                )]
             }
         } else if let Some(statement) = interfaces.get(&line_number) {
-            (
-                vec![rewrite_interface_line(
-                    line,
-                    statement,
-                    options,
-                    declaration_type_param_rewrites.get(&line_number),
-                )],
-                can_use_native_type_params(&statement.type_params, options),
-            )
+            vec![rewrite_interface_line(
+                line,
+                statement,
+                options,
+                declaration_type_param_rewrites.get(&line_number),
+            )]
         } else if let Some(statement) = data_classes.get(&line_number) {
-            (
-                rewrite_data_class_lines(
-                    line,
-                    statement,
-                    options,
-                    declaration_type_param_rewrites.get(&line_number),
-                )
-                .into_iter()
-                .collect(),
-                can_use_native_type_params(&statement.type_params, options),
+            rewrite_data_class_lines(
+                line,
+                statement,
+                options,
+                declaration_type_param_rewrites.get(&line_number),
             )
+            .into_iter()
+            .collect()
         } else if let Some(statement) = overloads.get(&line_number) {
-            (
-                rewrite_overload_lines(
-                    line,
-                    statement,
-                    options,
-                    declaration_type_param_rewrites.get(&line_number),
-                )
-                .into_iter()
-                .collect(),
-                can_use_native_type_params(&statement.type_params, options),
+            rewrite_overload_lines(
+                line,
+                statement,
+                options,
+                declaration_type_param_rewrites.get(&line_number),
             )
+            .into_iter()
+            .collect()
         } else if let Some(statement) = sealed_classes.get(&line_number) {
-            (
-                vec![rewrite_sealed_class_line(
-                    line,
-                    statement,
-                    options,
-                    declaration_type_param_rewrites.get(&line_number),
-                )],
-                can_use_native_type_params(&statement.type_params, options),
-            )
+            vec![rewrite_sealed_class_line(
+                line,
+                statement,
+                options,
+                declaration_type_param_rewrites.get(&line_number),
+            )]
         } else if let Some(statement) = class_defs.get(&line_number) {
-            (
-                vec![rewrite_class_def_line(
-                    line,
-                    statement,
-                    options,
-                    declaration_type_param_rewrites.get(&line_number),
-                )],
-                can_use_native_type_params(&statement.type_params, options),
-            )
+            vec![rewrite_class_def_line(
+                line,
+                statement,
+                options,
+                declaration_type_param_rewrites.get(&line_number),
+            )]
         } else if let Some(statement) = function_defs.get(&line_number) {
-            (
-                vec![rewrite_function_def_line(
-                    line,
-                    statement,
-                    options,
-                    declaration_type_param_rewrites.get(&line_number),
-                )],
-                can_use_native_type_params(&statement.type_params, options),
-            )
+            vec![rewrite_function_def_line(
+                line,
+                statement,
+                options,
+                declaration_type_param_rewrites.get(&line_number),
+            )]
         } else if let Some(member) = class_member_function_defs.get(&line_number) {
             let type_param_rewrites = merged_type_param_rewrites(
                 declaration_type_param_rewrites.get(&line_number),
                 class_member_type_param_rewrites.get(&line_number),
             );
-            (
-                vec![rewrite_class_member_function_line(
-                    line,
-                    member,
-                    options,
-                    type_param_rewrites.as_ref(),
-                )],
-                can_use_native_type_params(&member.type_params, options),
-            )
+            vec![rewrite_class_member_function_line(
+                line,
+                member,
+                options,
+                type_param_rewrites.as_ref(),
+            )]
         } else if let Some(type_param_rewrites) = class_member_type_param_rewrites.get(&line_number)
         {
-            (vec![rewrite_type_param_tokens(line, type_param_rewrites)], false)
+            vec![rewrite_type_param_tokens(line, type_param_rewrites)]
         } else if unsafe_lines.contains(&line_number) {
-            (vec![rewrite_unsafe_line(line)], false)
+            vec![rewrite_unsafe_line(line)]
         } else {
-            (vec![line.to_owned()], false)
+            vec![line.to_owned()]
         };
         let replacement_lines = replacement_lines
             .into_iter()
-            .map(|replacement| {
-                if preserve_variadic_syntax {
-                    replacement
-                } else {
-                    typepython_syntax::normalize_source_variadic_type_syntax(&replacement)
-                }
-            })
             .flat_map(|replacement| normalize_target_compatibility_line(&replacement, options))
             .collect::<Vec<_>>();
 
@@ -592,6 +560,8 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         lowered_line_number += replacement_lines.len();
         lowered_lines.extend(replacement_lines);
     }
+
+    normalize_lowered_variadic_type_positions(&mut lowered_lines, &mut span_map);
 
     insert_synthetic_prologue(
         &mut lowered_lines,
@@ -737,6 +707,145 @@ fn default_sync_dual_name(name: &str) -> String {
 
 fn default_async_dual_name(name: &str) -> String {
     if name.starts_with('a') { name.to_owned() } else { format!("a{name}") }
+}
+
+fn normalize_lowered_variadic_type_positions(
+    lowered_lines: &mut [String],
+    span_map: &mut [SpanMapEntry],
+) {
+    let lowered_source = lowered_lines.join("\n");
+    let normalized_source = normalize_variadic_type_positions(&lowered_source);
+    if normalized_source == lowered_source {
+        return;
+    }
+
+    let normalized_lines = normalized_source.split('\n').collect::<Vec<_>>();
+    if normalized_lines.len() != lowered_lines.len() {
+        return;
+    }
+
+    for (index, (line, normalized)) in lowered_lines.iter_mut().zip(normalized_lines).enumerate() {
+        if line == normalized {
+            continue;
+        }
+        *line = normalized.to_owned();
+        let emitted_line = index + 1;
+        for entry in span_map.iter_mut().filter(|entry| entry.emitted.line == emitted_line) {
+            entry.emitted = line_span(emitted_line, normalized);
+            entry.kind = LoweringSegmentKind::Rewritten;
+        }
+    }
+}
+
+fn normalize_variadic_type_positions(source: &str) -> String {
+    let mut normalized = source.to_owned();
+
+    loop {
+        let mut ranges = {
+            let Ok(parsed) = parse_module(&normalized) else {
+                return normalized;
+            };
+            let mut collector = VariadicTypePositionCollector {
+                source: &normalized,
+                in_type_position: false,
+                ranges: Vec::new(),
+            };
+            for statement in parsed.suite() {
+                collector.visit_stmt(statement);
+            }
+            collector.ranges
+        };
+        ranges.sort_unstable();
+        ranges.dedup();
+        if ranges.is_empty() {
+            return normalized;
+        }
+
+        let edits = ranges
+            .into_iter()
+            .filter_map(|(start, end)| {
+                let expression = normalized.get(start..end)?;
+                let operand = expression.strip_prefix('*')?.trim();
+                (!operand.is_empty()).then(|| (start, end, format!("Unpack[{operand}]")))
+            })
+            .collect::<Vec<_>>();
+        if edits.is_empty() {
+            return normalized;
+        }
+        for (start, end, replacement) in edits.into_iter().rev() {
+            normalized.replace_range(start..end, &replacement);
+        }
+    }
+}
+
+struct VariadicTypePositionCollector<'source> {
+    source: &'source str,
+    in_type_position: bool,
+    ranges: Vec<(usize, usize)>,
+}
+
+impl VariadicTypePositionCollector<'_> {
+    fn collect_type_position(&mut self, expression: &Expr) {
+        let was_in_type_position = self.in_type_position;
+        self.in_type_position = true;
+        self.visit_expr(expression);
+        self.in_type_position = was_in_type_position;
+    }
+
+    fn is_compat_type_alias_annotation(&self, expression: &Expr) -> bool {
+        self.source
+            .get(expression.range().start().to_usize()..expression.range().end().to_usize())
+            .is_some_and(|annotation| {
+                matches!(
+                    annotation.trim(),
+                    "TypeAlias" | "typing.TypeAlias" | "typing_extensions.TypeAlias"
+                )
+            })
+    }
+}
+
+impl<'ast> Visitor<'ast> for VariadicTypePositionCollector<'_> {
+    fn visit_stmt(&mut self, statement: &'ast Stmt) {
+        match statement {
+            // Native generic declarations support starred type syntax directly. Preserve their
+            // complete headers, but continue finding compatibility annotations in their bodies.
+            Stmt::FunctionDef(function) if function.type_params.is_some() => {
+                for statement in &function.body {
+                    self.visit_stmt(statement);
+                }
+            }
+            Stmt::ClassDef(class) if class.type_params.is_some() => {
+                for statement in &class.body {
+                    self.visit_stmt(statement);
+                }
+            }
+            // A native `type` statement likewise owns its starred syntax. Compatibility aliases
+            // are emitted as annotated assignments and handled below.
+            Stmt::TypeAlias(_) => {}
+            Stmt::AnnAssign(assignment)
+                if self.is_compat_type_alias_annotation(&assignment.annotation) =>
+            {
+                self.collect_type_position(&assignment.annotation);
+                if let Some(value) = &assignment.value {
+                    self.collect_type_position(value);
+                }
+            }
+            _ => visitor::walk_stmt(self, statement),
+        }
+    }
+
+    fn visit_annotation(&mut self, expression: &'ast Expr) {
+        self.collect_type_position(expression);
+    }
+
+    fn visit_expr(&mut self, expression: &'ast Expr) {
+        if self.in_type_position && matches!(expression, Expr::Starred(_)) {
+            let range = expression.range();
+            self.ranges.push((range.start().to_usize(), range.end().to_usize()));
+            return;
+        }
+        visitor::walk_expr(self, expression);
+    }
 }
 
 fn insert_synthetic_prologue(
