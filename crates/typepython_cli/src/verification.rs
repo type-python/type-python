@@ -8,11 +8,13 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use flate2::read::GzDecoder;
 use rayon::prelude::*;
 use regex::Regex;
 use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::parse_module;
+use sha2::{Digest, Sha256, Sha384, Sha512};
 use tar::Archive as TarArchive;
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Severity};
@@ -1556,35 +1558,16 @@ fn wheel_metadata_diagnostics(
         diagnostics.extend(wheel_diagnostics);
         identity
     });
-    if let Some(record) = entries.get(&record_path) {
-        match record_paths(record) {
-            Ok(recorded_paths) => {
-                let missing = entries
-                    .keys()
-                    .filter(|path| !recorded_paths.contains(path.as_str()))
-                    .take(6)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                if !missing.is_empty() {
-                    diagnostics.push(Diagnostic::error(
-                        "TPY5003",
-                        format!(
-                            "wheel artifact `{}` has an incomplete `{record_path}`; missing entr{} {}",
-                            artifact.path.display(),
-                            if missing.len() == 1 { "y" } else { "ies" },
-                            missing.join(", "),
-                        ),
-                    ));
-                }
-            }
-            Err(error) => diagnostics.push(Diagnostic::error(
-                "TPY5003",
-                format!(
-                    "wheel artifact `{}` contains invalid `{record_path}`: {error}",
-                    artifact.path.display(),
-                ),
-            )),
-        }
+    if let Some(record) = entries.get(&record_path)
+        && let Err(error) = validate_wheel_record(entries, &record_path, record)
+    {
+        diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "wheel artifact `{}` contains invalid `{record_path}`: {error}",
+                artifact.path.display(),
+            ),
+        ));
     }
     if let Some(metadata_identity) = metadata_identity {
         diagnostics.extend(wheel_identity_diagnostics(
@@ -2265,47 +2248,110 @@ fn distribution_stem_identity(stem: &str) -> Option<DistributionIdentity> {
     })
 }
 
-fn record_paths(bytes: &[u8]) -> std::result::Result<BTreeSet<String>, String> {
-    let rendered = std::str::from_utf8(bytes)
-        .map_err(|error| format!("RECORD is not valid UTF-8: {error}"))?;
-    let mut paths = BTreeSet::new();
-    for (index, line) in rendered.lines().enumerate() {
-        if line.is_empty() {
+fn validate_wheel_record(
+    entries: &BTreeMap<String, Vec<u8>>,
+    record_path: &str,
+    record_bytes: &[u8],
+) -> std::result::Result<(), String> {
+    let signature_paths = [format!("{record_path}.jws"), format!("{record_path}.p7s")]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let mut reader =
+        csv::ReaderBuilder::new().has_headers(false).flexible(true).from_reader(record_bytes);
+    let mut recorded_paths = BTreeSet::new();
+
+    for result in reader.records() {
+        let row = result.map_err(|error| format!("invalid CSV: {error}"))?;
+        let line = row.position().map_or(0, csv::Position::line);
+        if row.len() != 3 {
+            return Err(format!("line {line} has {} fields; expected exactly 3", row.len()));
+        }
+        let raw_path = row.get(0).unwrap_or_default();
+        if raw_path.is_empty() {
+            return Err(format!("line {line} has an empty path"));
+        }
+        let path = validate_wheel_record_path(raw_path)
+            .map_err(|error| format!("line {line} has an invalid path: {error}"))?;
+        if !recorded_paths.insert(path.clone()) {
+            return Err(format!("line {line} duplicates path `{path}`"));
+        }
+        let hash = row.get(1).unwrap_or_default();
+        let size = row.get(2).unwrap_or_default();
+        if path == record_path {
+            if !hash.is_empty() || !size.is_empty() {
+                return Err(format!(
+                    "line {line} for `{record_path}` must have empty hash and size fields"
+                ));
+            }
             continue;
         }
-        let path = record_first_field(line)
-            .ok_or_else(|| format!("line {} is not valid CSV", index + 1))?;
-        if path.is_empty() {
-            return Err(format!("line {} has an empty path", index + 1));
+
+        let contents = entries
+            .get(&path)
+            .ok_or_else(|| format!("line {line} references missing archive file `{path}`"))?;
+        validate_record_hash(&path, hash, contents, line)?;
+        if !size.is_empty() {
+            let declared_size = size
+                .parse::<u64>()
+                .map_err(|_| format!("line {line} has invalid size `{size}` for `{path}`"))?;
+            let actual_size = u64::try_from(contents.len())
+                .map_err(|_| format!("archive file `{path}` is too large to validate"))?;
+            if declared_size != actual_size {
+                return Err(format!(
+                    "line {line} declares size {declared_size} for `{path}`, but the archive contains {actual_size} bytes"
+                ));
+            }
         }
-        paths.insert(
-            validate_wheel_record_path(&path)
-                .map_err(|error| format!("line {} has an invalid path: {error}", index + 1))?,
-        );
     }
-    Ok(paths)
+
+    let missing = entries
+        .keys()
+        .filter(|path| !signature_paths.contains(path.as_str()))
+        .filter(|path| !recorded_paths.contains(path.as_str()))
+        .take(6)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(format!(
+            "missing entr{} {}",
+            if missing.len() == 1 { "y" } else { "ies" },
+            missing.join(", ")
+        ));
+    }
+    Ok(())
 }
 
-fn record_first_field(line: &str) -> Option<String> {
-    if let Some(remainder) = line.strip_prefix('"') {
-        let mut value = String::new();
-        let mut characters = remainder.chars().peekable();
-        while let Some(character) = characters.next() {
-            if character != '"' {
-                value.push(character);
-                continue;
-            }
-            if characters.peek() == Some(&'"') {
-                characters.next();
-                value.push('"');
-                continue;
-            }
-            return (characters.next() == Some(',')).then_some(value);
+fn validate_record_hash(
+    path: &str,
+    hash: &str,
+    contents: &[u8],
+    line: u64,
+) -> std::result::Result<(), String> {
+    let (algorithm, encoded) =
+        hash.split_once('=').ok_or_else(|| format!("line {line} has no hash for `{path}`"))?;
+    let expected = match algorithm {
+        "sha256" => Sha256::digest(contents).to_vec(),
+        "sha384" => Sha384::digest(contents).to_vec(),
+        "sha512" => Sha512::digest(contents).to_vec(),
+        _ => {
+            return Err(format!(
+                "line {line} uses unsupported or weak hash algorithm `{algorithm}` for `{path}`"
+            ));
         }
-        None
-    } else {
-        line.split_once(',').map(|(path, _)| path.to_owned())
+    };
+    if encoded.contains('=') {
+        return Err(format!("line {line} uses padded or malformed base64 for `{path}`"));
     }
+    let actual = URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(|error| format!("line {line} has invalid base64 digest for `{path}`: {error}"))?;
+    if URL_SAFE_NO_PAD.encode(&actual) != encoded {
+        return Err(format!("line {line} has a non-canonical base64 digest for `{path}`"));
+    }
+    if actual != expected {
+        return Err(format!("line {line} has an incorrect {algorithm} digest for `{path}`"));
+    }
+    Ok(())
 }
 
 fn verify_external_checker(
@@ -3768,6 +3814,70 @@ mod unit_tests {
         #[cfg(windows)]
         {
             ExitStatus::from_raw(code as u32)
+        }
+    }
+
+    fn record_hash(algorithm: &str, contents: &[u8]) -> String {
+        let digest = match algorithm {
+            "sha256" => Sha256::digest(contents).to_vec(),
+            "sha384" => Sha384::digest(contents).to_vec(),
+            "sha512" => Sha512::digest(contents).to_vec(),
+            _ => panic!("unsupported test hash algorithm"),
+        };
+        format!("{algorithm}={}", URL_SAFE_NO_PAD.encode(digest))
+    }
+
+    fn record_entries(record_path: &str, record: &str) -> BTreeMap<String, Vec<u8>> {
+        BTreeMap::from([
+            (String::from("app.py"), b"pass\n".to_vec()),
+            (record_path.to_owned(), record.as_bytes().to_vec()),
+            (format!("{record_path}.jws"), b"signature".to_vec()),
+        ])
+    }
+
+    #[test]
+    fn wheel_record_accepts_strong_hashes_optional_sizes_and_unlisted_signatures() {
+        let record_path = "demo-1.0.dist-info/RECORD";
+        for algorithm in ["sha256", "sha384", "sha512"] {
+            let record = format!(
+                "app.py,{},{}\n{record_path},,\n",
+                record_hash(algorithm, b"pass\n"),
+                if algorithm == "sha384" { "" } else { "5" }
+            );
+            let entries = record_entries(record_path, &record);
+            assert!(
+                validate_wheel_record(&entries, record_path, record.as_bytes()).is_ok(),
+                "{algorithm} RECORD should be valid"
+            );
+        }
+    }
+
+    #[test]
+    fn wheel_record_rejects_malformed_or_incorrect_integrity_rows() {
+        let record_path = "demo-1.0.dist-info/RECORD";
+        let correct_hash = record_hash("sha256", b"pass\n");
+        let wrong_hash = format!("sha256={}", URL_SAFE_NO_PAD.encode([0_u8; 32]));
+        let cases = [
+            (format!("app.py,,5\n{record_path},,\n"), "has no hash"),
+            (format!("app.py,md5=deadbeef,5\n{record_path},,\n"), "weak hash"),
+            (format!("app.py,{correct_hash}=,5\n{record_path},,\n"), "padded"),
+            (format!("app.py,{wrong_hash},5\n{record_path},,\n"), "incorrect sha256"),
+            (format!("app.py,{correct_hash},4\n{record_path},,\n"), "declares size 4"),
+            (format!("app.py,{correct_hash},5,extra\n{record_path},,\n"), "exactly 3"),
+            (
+                format!("app.py,{correct_hash},5\napp.py,{correct_hash},5\n{record_path},,\n"),
+                "duplicates path",
+            ),
+            (format!("missing.py,{correct_hash},5\n{record_path},,\n"), "missing archive file"),
+            (format!("{record_path},sha256=bad,1\n"), "must have empty hash"),
+            (format!("{record_path},,\n"), "missing entry app.py"),
+        ];
+
+        for (record, expected) in cases {
+            let entries = record_entries(record_path, &record);
+            let error = validate_wheel_record(&entries, record_path, record.as_bytes())
+                .expect_err("invalid RECORD should be rejected");
+            assert!(error.contains(expected), "expected `{expected}` in `{error}`");
         }
     }
 

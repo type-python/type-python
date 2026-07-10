@@ -1363,7 +1363,7 @@ fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
             .expect("test setup should succeed");
         let wheel_path = project_dir.join("dist/type_python-0.1.0-1-py2.py3-none-any.whl");
         let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
-        write_zip_archive(
+        write_wheel_archive_with_record(
             &wheel_path,
             &[
                 ("app/__init__.py", "def build_user() -> int:\n    return 1\n"),
@@ -1377,11 +1377,8 @@ fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
                     "type_python-0.1.0.dist-info/WHEEL",
                     "Wheel-Version: 1.0\nGenerator: typepython-test\nRoot-Is-Purelib: true\nTag: py2-none-any\nTag: py3-none-any\nBuild: 1\n",
                 ),
-                (
-                    "type_python-0.1.0.dist-info/RECORD",
-                    "app/__init__.py,,\napp/__init__.pyi,,\napp/py.typed,,\ntype_python-0.1.0.dist-info/METADATA,,\ntype_python-0.1.0.dist-info/WHEEL,,\ntype_python-0.1.0.dist-info/RECORD,,\n",
-                ),
             ],
+            "type_python-0.1.0.dist-info/RECORD",
         );
         write_tar_gz_archive(
             &sdist_path,
@@ -1497,7 +1494,7 @@ fn verify_packaged_artifacts_rejects_invalid_metadata_values() {
             .expect("test setup should succeed");
         let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
         let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
-        write_zip_archive(
+        write_wheel_archive_with_record(
             &wheel_path,
             &[
                 ("app/__init__.py", "pass\n"),
@@ -1511,11 +1508,8 @@ fn verify_packaged_artifacts_rejects_invalid_metadata_values() {
                     "type_python-0.1.0.dist-info/WHEEL",
                     "Wheel-Version: 1.\nRoot-Is-Purelib: perhaps\nTag: py2.py3-none-any\n",
                 ),
-                (
-                    "type_python-0.1.0.dist-info/RECORD",
-                    "app/__init__.py,,\napp/__init__.pyi,,\napp/py.typed,,\ntype_python-0.1.0.dist-info/METADATA,,\ntype_python-0.1.0.dist-info/WHEEL,,\ntype_python-0.1.0.dist-info/RECORD,,\n",
-                ),
             ],
+            "type_python-0.1.0.dist-info/RECORD",
         );
         write_tar_gz_archive(
             &sdist_path,
@@ -1569,7 +1563,7 @@ fn verify_packaged_artifacts_rejects_archive_identity_mismatches() {
             .expect("test setup should succeed");
         let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
         let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
-        write_zip_archive(
+        write_wheel_archive_with_record(
             &wheel_path,
             &[
                 ("app/__init__.py", "pass\n"),
@@ -1583,11 +1577,8 @@ fn verify_packaged_artifacts_rejects_archive_identity_mismatches() {
                     "archive_distribution-8.8.8.dist-info/WHEEL",
                     "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
                 ),
-                (
-                    "archive_distribution-8.8.8.dist-info/RECORD",
-                    "app/__init__.py,,\napp/__init__.pyi,,\napp/py.typed,,\narchive_distribution-8.8.8.dist-info/METADATA,,\narchive_distribution-8.8.8.dist-info/WHEEL,,\narchive_distribution-8.8.8.dist-info/RECORD,,\n",
-                ),
             ],
+            "archive_distribution-8.8.8.dist-info/RECORD",
         );
         write_tar_gz_archive(
             &sdist_path,
@@ -1647,7 +1638,7 @@ fn verify_packaged_artifacts_rejects_wheel_tag_and_build_mismatches() {
     let rendered = {
         let artifact = prepare_packaged_artifact_test_project(&project_dir);
         let wheel_path = project_dir.join("dist/type_python-0.1.0-2-py3-none-any.whl");
-        write_zip_archive(
+        write_wheel_archive_with_record(
             &wheel_path,
             &[
                 ("app/__init__.py", "pass\n"),
@@ -1661,11 +1652,8 @@ fn verify_packaged_artifacts_rejects_wheel_tag_and_build_mismatches() {
                     "type_python-0.1.0.dist-info/WHEEL",
                     "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nBuild: 1\nTag: cp313-cp313-manylinux_2_17_x86_64\n",
                 ),
-                (
-                    "type_python-0.1.0.dist-info/RECORD",
-                    "app/__init__.py,,\napp/__init__.pyi,,\napp/py.typed,,\ntype_python-0.1.0.dist-info/METADATA,,\ntype_python-0.1.0.dist-info/WHEEL,,\ntype_python-0.1.0.dist-info/RECORD,,\n",
-                ),
             ],
+            "type_python-0.1.0.dist-info/RECORD",
         );
         let config = load(&project_dir).expect("test setup should succeed");
         verify_packaged_artifacts(
@@ -1736,7 +1724,7 @@ fn verify_packaged_artifacts_unfolds_metadata_headers_before_validation() {
     let rendered = {
         let artifact = prepare_packaged_artifact_test_project(&project_dir);
         let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
-        write_zip_archive(
+        write_wheel_archive_with_record(
             &wheel_path,
             &[
                 ("app/__init__.py", "pass\n"),
@@ -1750,11 +1738,8 @@ fn verify_packaged_artifacts_unfolds_metadata_headers_before_validation() {
                     "type_python-0.1.0.dist-info/WHEEL",
                     "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
                 ),
-                (
-                    "type_python-0.1.0.dist-info/RECORD",
-                    "app/__init__.py,,\napp/__init__.pyi,,\napp/py.typed,,\ntype_python-0.1.0.dist-info/METADATA,,\ntype_python-0.1.0.dist-info/WHEEL,,\ntype_python-0.1.0.dist-info/RECORD,,\n",
-                ),
             ],
+            "type_python-0.1.0.dist-info/RECORD",
         );
         let config = load(&project_dir).expect("test setup should succeed");
         verify_packaged_artifacts(
@@ -1784,7 +1769,7 @@ fn verify_packaged_artifacts_rejects_project_and_cross_archive_identity_mismatch
         )
         .expect("test setup should succeed");
         let wheel_path = project_dir.join("dist/other-9.9.9-py3-none-any.whl");
-        write_zip_archive(
+        write_wheel_archive_with_record(
             &wheel_path,
             &[
                 ("app/__init__.py", "pass\n"),
@@ -1798,11 +1783,8 @@ fn verify_packaged_artifacts_rejects_project_and_cross_archive_identity_mismatch
                     "other-9.9.9.dist-info/WHEEL",
                     "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
                 ),
-                (
-                    "other-9.9.9.dist-info/RECORD",
-                    "app/__init__.py,,\napp/__init__.pyi,,\napp/py.typed,,\nother-9.9.9.dist-info/METADATA,,\nother-9.9.9.dist-info/WHEEL,,\nother-9.9.9.dist-info/RECORD,,\n",
-                ),
             ],
+            "other-9.9.9.dist-info/RECORD",
         );
         let sdist_path = project_dir.join("dist/third-8.8.8.tar.gz");
         write_tar_gz_archive(

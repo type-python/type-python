@@ -825,6 +825,21 @@ pub(super) fn write_deflated_zip_archive(path: &Path, files: &[(&str, &str)]) {
     writer.finish().expect("zip archive should finish");
 }
 
+pub(super) fn write_wheel_archive_with_record(
+    path: &Path,
+    files: &[(&str, &str)],
+    record_path: &str,
+) {
+    let mut record = files
+        .iter()
+        .map(|(relative_path, contents)| wheel_record_row(relative_path, contents.as_bytes()))
+        .collect::<String>();
+    record.push_str(&wheel_record_self_row(record_path));
+    let mut files_with_record = files.to_vec();
+    files_with_record.push((record_path, record.as_str()));
+    write_zip_archive(path, &files_with_record);
+}
+
 pub(super) fn write_valid_wheel_archive(path: &Path, files: &[(&str, &str)]) {
     const DIST_INFO: &str = "type_python-0.1.0.dist-info";
     const METADATA: &str = "Metadata-Version: 2.1\nName: type-python\nVersion: 0.1.0\n";
@@ -840,13 +855,13 @@ pub(super) fn write_valid_wheel_archive(path: &Path, files: &[(&str, &str)]) {
     let file = fs::File::create(path).expect("wheel archive should be created");
     let mut writer = ZipWriter::new(file);
     let options = FileOptions::default();
-    let mut record_paths = Vec::new();
+    let mut record_rows = Vec::new();
     for (relative_path, contents) in files {
         let relative_path = relative_path.replace('\\', "/");
         writer.start_file(&relative_path, options).expect("wheel file entry should be created");
         std::io::Write::write_all(&mut writer, contents.as_bytes())
             .expect("wheel file entry should be written");
-        record_paths.push(relative_path);
+        record_rows.push(wheel_record_row(&relative_path, contents.as_bytes()));
     }
     for (relative_path, contents) in
         [(format!("{DIST_INFO}/METADATA"), METADATA), (format!("{DIST_INFO}/WHEEL"), WHEEL)]
@@ -854,17 +869,39 @@ pub(super) fn write_valid_wheel_archive(path: &Path, files: &[(&str, &str)]) {
         writer.start_file(&relative_path, options).expect("wheel metadata entry should be created");
         std::io::Write::write_all(&mut writer, contents.as_bytes())
             .expect("wheel metadata entry should be written");
-        record_paths.push(relative_path);
+        record_rows.push(wheel_record_row(&relative_path, contents.as_bytes()));
     }
     let record_path = format!("{DIST_INFO}/RECORD");
-    record_paths.push(record_path.clone());
-    let record =
-        record_paths.into_iter().map(|path| format!("{path},,")).collect::<Vec<_>>().join("\n")
-            + "\n";
+    record_rows.push(wheel_record_self_row(&record_path));
+    let record = record_rows.concat();
     writer.start_file(record_path, options).expect("wheel RECORD entry should be created");
     std::io::Write::write_all(&mut writer, record.as_bytes())
         .expect("wheel RECORD entry should be written");
     writer.finish().expect("wheel archive should finish");
+}
+
+pub(super) fn wheel_record_row(path: &str, contents: &[u8]) -> String {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+
+    let digest = sha2::Sha256::digest(contents);
+    let hash =
+        format!("sha256={}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest));
+    csv_record_row([path, hash.as_str(), contents.len().to_string().as_str()])
+}
+
+pub(super) fn wheel_record_self_row(path: &str) -> String {
+    csv_record_row([path, "", ""])
+}
+
+fn csv_record_row(fields: [&str; 3]) -> String {
+    let mut writer = csv::WriterBuilder::new()
+        .has_headers(false)
+        .terminator(csv::Terminator::Any(b'\n'))
+        .from_writer(Vec::new());
+    writer.write_record(fields).expect("wheel RECORD row should serialize");
+    let bytes = writer.into_inner().expect("wheel RECORD writer should flush");
+    String::from_utf8(bytes).expect("wheel RECORD row should be UTF-8")
 }
 
 pub(super) fn write_tar_gz_archive(path: &Path, root: &str, files: &[(&str, &str)]) {
