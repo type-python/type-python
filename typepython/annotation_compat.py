@@ -364,7 +364,10 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
             consumer = self._decorator_consumer(decorator)
             if consumer is not None:
                 self.consumers.add(consumer)
-        self._record_annotation_findings(_callable_annotations(node))
+        self._record_annotation_findings(
+            _callable_annotations(node),
+            include_current_class_names=True,
+        )
         self._visit_definition_expressions(node)
         self._visit_scope("function", node.body, parameters=_parameter_names(node))
         self._bind_runtime_name(node.name, None)
@@ -374,7 +377,10 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
             consumer = self._decorator_consumer(decorator)
             if consumer is not None:
                 self.consumers.add(consumer)
-        self._record_annotation_findings(_callable_annotations(node))
+        self._record_annotation_findings(
+            _callable_annotations(node),
+            include_current_class_names=True,
+        )
         self._visit_definition_expressions(node)
         self._visit_scope("function", node.body, parameters=_parameter_names(node))
         self._bind_runtime_name(node.name, None)
@@ -608,7 +614,12 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
             return AnnotationConsumer.FASTAPI_ROUTE_DECORATOR
         return None
 
-    def _record_annotation_findings(self, annotations: list[ast.expr]) -> None:
+    def _record_annotation_findings(
+        self,
+        annotations: list[ast.expr],
+        *,
+        include_current_class_names: bool = False,
+    ) -> None:
         enclosing_function_names = set().union(
             *(
                 scope.runtime_names
@@ -616,6 +627,12 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                 if scope.kind == "function"
             )
         )
+        if (
+            include_current_class_names
+            and self._scopes
+            and self._scopes[-1].kind == "class"
+        ):
+            enclosing_function_names.update(self._scopes[-1].runtime_names)
         for annotation in annotations:
             names = _annotation_names(annotation)
             blocked = sorted(name for name in names if self._is_unbound_type_only_name(name))

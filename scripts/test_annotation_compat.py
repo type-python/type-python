@@ -115,6 +115,21 @@ class AnnotationCompatTests(unittest.TestCase):
         self.assertEqual({finding.code for finding in audit.findings}, {"TPY-A001"})
         self.assertIn("local scope", audit.findings[0].message)
 
+    def test_audit_source_flags_class_locals_in_direct_method_annotations(self) -> None:
+        audit = annotation_compat.audit_source(
+            "class Container:\n"
+            "    Alias = int\n"
+            "    value: 'Alias'\n"
+            "    def direct(self, value: 'Alias') -> None:\n"
+            "        def nested(item: 'Alias') -> None:\n"
+            "            return None\n"
+            "        return None\n"
+        )
+
+        findings = [finding for finding in audit.findings if finding.code == "TPY-A001"]
+        self.assertEqual(len(findings), 1, audit.findings)
+        self.assertIn("Alias", findings[0].message)
+
     def test_audit_source_ignores_eager_and_builtin_nested_annotations(self) -> None:
         audit = annotation_compat.audit_source(
             "class Box:\n"
