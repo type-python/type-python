@@ -632,6 +632,56 @@ fn diff_api_surfaces_classifies_new_any_as_likely_type_breaking() {
 }
 
 #[test]
+fn diff_api_surfaces_classifies_parameter_any_by_contravariance() {
+    let project_dir = temp_project_dir("diff_api_surfaces_parameter_any_variance");
+    let (narrowed, widened) = {
+        let any_dir = project_dir.join("any");
+        let str_dir = project_dir.join("str");
+        fs::create_dir_all(&any_dir).expect("Any surface should be created");
+        fs::create_dir_all(&str_dir).expect("str surface should be created");
+        fs::write(
+            any_dir.join("app.pyi"),
+            "from typing import Any\ndef load(value: Any) -> int: ...\n",
+        )
+        .expect("Any surface should be written");
+        fs::write(str_dir.join("app.pyi"), "def load(value: str) -> int: ...\n")
+            .expect("str surface should be written");
+
+        (
+            diff_api_surfaces(&any_dir, &str_dir).expect("parameter narrowing should compare"),
+            diff_api_surfaces(&str_dir, &any_dir).expect("parameter widening should compare"),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(narrowed.changed[0].classification, "likely type-breaking");
+    assert_eq!(widened.changed[0].classification, "likely type-compatible");
+}
+
+#[test]
+fn diff_api_surfaces_marks_mixed_any_variance_as_unknown_risk() {
+    let project_dir = temp_project_dir("diff_api_surfaces_mixed_any_variance");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            "from typing import Any\ndef load(value: Any) -> Any: ...\n",
+        )
+        .expect("old surface should be written");
+        fs::write(new_dir.join("app.pyi"), "def load(value: str) -> str: ...\n")
+            .expect("new surface should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("mixed variance should compare")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed[0].classification, "unknown risk");
+}
+
+#[test]
 fn diff_api_surfaces_recommends_patch_for_unchanged_surfaces() {
     let project_dir = temp_project_dir("diff_api_surfaces_recommends_patch_for_unchanged_surfaces");
     let report = {

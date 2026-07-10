@@ -189,15 +189,82 @@ fn classify_changed_symbol(old_symbol: &PublicSymbol, new_symbol: &PublicSymbol)
     if old_symbol.kind != new_symbol.kind {
         return String::from("unknown risk");
     }
-    let old_dynamic = signature_mentions_dynamic_type(&old_symbol.signature);
-    let new_dynamic = signature_mentions_dynamic_type(&new_symbol.signature);
-    if old_dynamic && !new_dynamic {
-        return String::from("likely type-compatible");
-    }
-    if !old_dynamic && new_dynamic {
-        return String::from("likely type-breaking");
+    if matches!(old_symbol.kind.as_str(), "function" | "method" | "property")
+        && let (Some(old), Some(new)) = (
+            callable_dynamic_positions(&old_symbol.signature),
+            callable_dynamic_positions(&new_symbol.signature),
+        )
+    {
+        let likely_breaking = (old.parameters && !new.parameters) || (!old.returns && new.returns);
+        let likely_compatible =
+            (!old.parameters && new.parameters) || (old.returns && !new.returns);
+        return match (likely_breaking, likely_compatible) {
+            (true, false) => String::from("likely type-breaking"),
+            (false, true) => String::from("likely type-compatible"),
+            _ => String::from("unknown risk"),
+        };
     }
     String::from("unknown risk")
+}
+
+#[derive(Debug, Default)]
+struct CallableDynamicPositions {
+    parameters: bool,
+    returns: bool,
+}
+
+fn callable_dynamic_positions(signature: &str) -> Option<CallableDynamicPositions> {
+    let mut positions = CallableDynamicPositions::default();
+    let mut found = false;
+    for line in signature.lines() {
+        let function = line.find("def ")?;
+        let open = line[function..].find('(')? + function;
+        let close = matching_parenthesis(line, open)?;
+        let colon = line.rfind(':')?;
+        if colon <= close {
+            return None;
+        }
+        positions.parameters |= signature_mentions_dynamic_type(&line[open + 1..close]);
+        if let Some(arrow) = line[close + 1..colon].find("->") {
+            positions.returns |=
+                signature_mentions_dynamic_type(&line[close + 1 + arrow + 2..colon]);
+        }
+        found = true;
+    }
+    found.then_some(positions)
+}
+
+fn matching_parenthesis(text: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (offset, character) in text[open..].char_indices() {
+        if let Some(active_quote) = quote {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(character, '\'' | '"') {
+            quote = Some(character);
+            continue;
+        }
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(open + offset);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn signature_mentions_dynamic_type(signature: &str) -> bool {
