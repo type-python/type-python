@@ -505,8 +505,18 @@ fn write_runtime_outputs_reports_pyi_generation_failure() {
         runtime_path: Some(temp_dir.join("build/app/__init__.py")),
         stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
     }];
+    fs::create_dir_all(temp_dir.join("build/app")).expect("existing output should be created");
+    fs::write(temp_dir.join("build/app/__init__.py"), "OLD_RUNTIME\n")
+        .expect("existing runtime should be written");
+    fs::write(temp_dir.join("build/app/__init__.pyi"), "OLD_STUB\n")
+        .expect("existing stub should be written");
 
     let result = write_runtime_outputs(&artifacts, &modules, true, false, None);
+    let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
+        .expect("existing runtime should remain readable");
+    let stub = fs::read_to_string(temp_dir.join("build/app/__init__.pyi"))
+        .expect("existing stub should remain readable");
+    let marker_exists = temp_dir.join("build/app/py.typed").exists();
     remove_temp_dir(&temp_dir);
 
     let error = result.expect_err("invalid lowered python should fail stub generation");
@@ -516,6 +526,9 @@ fn write_runtime_outputs_reports_pyi_generation_failure() {
             if source_path == &PathBuf::from("src/app/__init__.tpy")
     ));
     assert!(error.to_string().contains("TPY5001"));
+    assert_eq!(runtime, "OLD_RUNTIME\n");
+    assert_eq!(stub, "OLD_STUB\n");
+    assert!(!marker_exists, "failed output planning must not create py.typed");
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use super::*;
+use std::{ffi::OsStr, fs::OpenOptions, io::Write};
 
 #[derive(Debug)]
 pub enum RuntimeWriteError {
@@ -122,6 +123,7 @@ pub fn write_runtime_outputs(
     let mut runtime_files_written = 0usize;
     let mut stub_files_written = 0usize;
     let mut package_roots = std::collections::BTreeSet::new();
+    let mut pending_writes = Vec::new();
 
     for artifact in artifacts {
         let Some(module) = modules_by_source.get(artifact.source_path.as_path()) else {
@@ -129,16 +131,14 @@ pub fn write_runtime_outputs(
         };
 
         if let Some(runtime_path) = &artifact.runtime_path {
-            if let Some(parent) = runtime_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
             let runtime_source =
                 if runtime_validators && module.source_kind == SourceKind::TypePython {
                     inject_runtime_validators(module)?
                 } else {
                     module.python_source.clone()
                 };
-            fs::write(runtime_path, runtime_source)?;
+            pending_writes
+                .push(PlannedFileWrite { path: runtime_path.clone(), contents: runtime_source });
             if runtime_path.file_name().is_some_and(|name| name == "__init__.py")
                 && let Some(parent) = runtime_path.parent()
             {
@@ -148,9 +148,6 @@ pub fn write_runtime_outputs(
         }
 
         if let Some(stub_path) = &artifact.stub_path {
-            if let Some(parent) = stub_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
             let stub_source = if module.source_kind == SourceKind::TypePython {
                 let context = stub_contexts
                     .and_then(|contexts| contexts.get(&module.source_path))
@@ -172,7 +169,8 @@ pub fn write_runtime_outputs(
             } else {
                 module.python_source.clone()
             };
-            fs::write(stub_path, stub_source)?;
+            pending_writes
+                .push(PlannedFileWrite { path: stub_path.clone(), contents: stub_source });
             if is_package_init_path(stub_path)
                 && let Some(parent) = stub_path.parent()
             {
@@ -185,12 +183,156 @@ pub fn write_runtime_outputs(
     let mut py_typed_written = 0usize;
     if write_py_typed {
         for package_root in package_roots {
-            fs::write(package_root.join("py.typed"), "")?;
+            pending_writes.push(PlannedFileWrite {
+                path: package_root.join("py.typed"),
+                contents: String::new(),
+            });
             py_typed_written += 1;
         }
     }
 
+    write_files_transactionally(&pending_writes)?;
+
     Ok(RuntimeWriteSummary { runtime_files_written, stub_files_written, py_typed_written })
+}
+
+#[derive(Debug)]
+struct PlannedFileWrite {
+    path: PathBuf,
+    contents: String,
+}
+
+#[derive(Debug)]
+struct StagedFileWrite {
+    target: PathBuf,
+    temporary: PathBuf,
+    backup: Option<PathBuf>,
+    installed: bool,
+}
+
+fn write_files_transactionally(writes: &[PlannedFileWrite]) -> io::Result<()> {
+    let mut unique_targets = BTreeSet::new();
+    for write in writes {
+        if !unique_targets.insert(write.path.clone()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("duplicate transactional output path `{}`", write.path.display()),
+            ));
+        }
+    }
+
+    let mut staged = Vec::with_capacity(writes.len());
+    for (index, write) in writes.iter().enumerate() {
+        match stage_file_write(write, index) {
+            Ok(temporary) => staged.push(StagedFileWrite {
+                target: write.path.clone(),
+                temporary,
+                backup: None,
+                installed: false,
+            }),
+            Err(error) => {
+                rollback_staged_writes(&mut staged);
+                return Err(error);
+            }
+        }
+    }
+
+    for index in 0..staged.len() {
+        let target = staged[index].target.clone();
+        let target_exists = match target.try_exists() {
+            Ok(exists) => exists,
+            Err(error) => {
+                rollback_staged_writes(&mut staged);
+                return Err(error);
+            }
+        };
+        if target_exists {
+            let backup = match vacant_transaction_path(&target, "backup", index) {
+                Ok(backup) => backup,
+                Err(error) => {
+                    rollback_staged_writes(&mut staged);
+                    return Err(error);
+                }
+            };
+            if let Err(error) = fs::rename(&target, &backup) {
+                rollback_staged_writes(&mut staged);
+                return Err(error);
+            }
+            staged[index].backup = Some(backup);
+        }
+
+        if let Err(error) = fs::rename(&staged[index].temporary, &target) {
+            rollback_staged_writes(&mut staged);
+            return Err(error);
+        }
+        staged[index].installed = true;
+    }
+
+    let mut cleanup_error = None;
+    for write in &mut staged {
+        if let Some(backup) = write.backup.take()
+            && let Err(error) = fs::remove_file(backup)
+            && cleanup_error.is_none()
+        {
+            cleanup_error = Some(error);
+        }
+    }
+    cleanup_error.map_or(Ok(()), Err)
+}
+
+fn stage_file_write(write: &PlannedFileWrite, index: usize) -> io::Result<PathBuf> {
+    let parent = write.path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    for attempt in 0..1_000usize {
+        let temporary = transaction_path(&write.path, "staged", index, attempt);
+        match OpenOptions::new().write(true).create_new(true).open(&temporary) {
+            Ok(mut file) => {
+                if let Err(error) = file.write_all(write.contents.as_bytes()) {
+                    let _ = fs::remove_file(&temporary);
+                    return Err(error);
+                }
+                return Ok(temporary);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!("unable to allocate a staging file for `{}`", write.path.display()),
+    ))
+}
+
+fn vacant_transaction_path(target: &Path, role: &str, index: usize) -> io::Result<PathBuf> {
+    for attempt in 0..1_000usize {
+        let candidate = transaction_path(target, role, index, attempt);
+        if !candidate.try_exists()? {
+            return Ok(candidate);
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!("unable to allocate a {role} file for `{}`", target.display()),
+    ))
+}
+
+fn transaction_path(target: &Path, role: &str, index: usize, attempt: usize) -> PathBuf {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let name = target.file_name().unwrap_or_else(|| OsStr::new("output")).to_string_lossy();
+    parent.join(format!(".{name}.typepython-{role}-{}-{index}-{attempt}", std::process::id()))
+}
+
+fn rollback_staged_writes(writes: &mut [StagedFileWrite]) {
+    for write in writes.iter_mut().rev() {
+        if write.installed {
+            let _ = fs::remove_file(&write.target);
+            write.installed = false;
+        }
+        if let Some(backup) = write.backup.take() {
+            let _ = fs::rename(backup, &write.target);
+        }
+        let _ = fs::remove_file(&write.temporary);
+    }
 }
 
 fn is_package_init_path(path: &Path) -> bool {
