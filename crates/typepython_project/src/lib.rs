@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     num::Wrapping,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::Command as ProcessCommand,
     sync::OnceLock,
     time::UNIX_EPOCH,
@@ -213,7 +213,13 @@ pub fn compile_patterns(
 }
 
 pub fn source_roots(config: &ConfigHandle) -> Vec<PathBuf> {
-    config.config.project.src.iter().map(|root| config.resolve_relative_path(root)).collect()
+    config
+        .config
+        .project
+        .src
+        .iter()
+        .map(|root| normalize_lexical_path(&config.resolve_relative_path(root)))
+        .collect()
 }
 
 pub fn collect_project_sources(
@@ -223,8 +229,16 @@ pub fn collect_project_sources(
     exclude_patterns: &[Pattern],
 ) -> Result<Vec<DiscoveredSource>> {
     let mut sources = Vec::new();
+    let mut state = ProjectWalkState::new(config, source_roots);
     for root in source_roots {
-        walk_directory(config, root, include_patterns, exclude_patterns, &mut sources)?;
+        walk_directory_with_state(
+            config,
+            root,
+            include_patterns,
+            exclude_patterns,
+            &mut sources,
+            &mut state,
+        )?;
     }
     Ok(sources)
 }
@@ -261,6 +275,9 @@ pub fn discover_project_source_for_path(
     let Some(kind) = SourceKind::from_path(path) else {
         return Ok(None);
     };
+    if project_generated_roots(config, source_roots).iter().any(|root| root.contains(path)) {
+        return Ok(None);
+    }
     if !is_selected_source_path(config, path, include_patterns, exclude_patterns)? {
         return Ok(None);
     }
@@ -286,18 +303,125 @@ pub fn walk_directory(
     exclude_patterns: &[Pattern],
     sources: &mut Vec<DiscoveredSource>,
 ) -> Result<()> {
+    let source_root = directory.to_path_buf();
+    let mut state = ProjectWalkState::new(config, std::slice::from_ref(&source_root));
+    walk_directory_with_state(
+        config,
+        directory,
+        include_patterns,
+        exclude_patterns,
+        sources,
+        &mut state,
+    )
+}
+
+#[derive(Debug)]
+struct ProjectWalkState {
+    generated_roots: Vec<ComparablePath>,
+    visited_directories: BTreeSet<PathBuf>,
+    visited_files: BTreeSet<PathBuf>,
+}
+
+impl ProjectWalkState {
+    fn new(config: &ConfigHandle, source_roots: &[PathBuf]) -> Self {
+        Self {
+            generated_roots: project_generated_roots(config, source_roots),
+            visited_directories: BTreeSet::new(),
+            visited_files: BTreeSet::new(),
+        }
+    }
+
+    fn directory_is_generated(&self, path: &Path) -> bool {
+        self.generated_roots.iter().any(|root| root.contains(path))
+    }
+
+    fn visit_directory(&mut self, path: &Path) -> Result<bool> {
+        let identity = fs::canonicalize(path)
+            .with_context(|| format!("unable to resolve directory {}", path.display()))?;
+        Ok(self.visited_directories.insert(identity))
+    }
+
+    fn visit_file(&mut self, path: &Path) -> Result<bool> {
+        let identity = fs::canonicalize(path)
+            .with_context(|| format!("unable to resolve source file {}", path.display()))?;
+        Ok(self.visited_files.insert(identity))
+    }
+}
+
+#[derive(Debug)]
+struct ComparablePath {
+    lexical: PathBuf,
+    resolved: PathBuf,
+}
+
+impl ComparablePath {
+    fn new(path: &Path) -> Self {
+        Self { lexical: normalize_lexical_path(path), resolved: resolve_existing_prefix(path) }
+    }
+
+    fn contains(&self, candidate: &Path) -> bool {
+        let lexical_candidate = normalize_lexical_path(candidate);
+        lexical_candidate.starts_with(&self.lexical)
+            || resolve_existing_prefix(&lexical_candidate).starts_with(&self.resolved)
+    }
+
+    fn is_within(&self, ancestor: &Self) -> bool {
+        self.lexical.starts_with(&ancestor.lexical) || self.resolved.starts_with(&ancestor.resolved)
+    }
+}
+
+fn project_generated_roots(config: &ConfigHandle, source_roots: &[PathBuf]) -> Vec<ComparablePath> {
+    let source_roots =
+        source_roots.iter().map(|root| ComparablePath::new(root)).collect::<Vec<_>>();
+    [&config.config.project.out_dir, &config.config.project.cache_dir]
+        .into_iter()
+        .map(|path| ComparablePath::new(&config.resolve_relative_path(path)))
+        .filter(|generated_root| {
+            source_roots.iter().any(|source_root| generated_root.is_within(source_root))
+        })
+        .collect()
+}
+
+fn walk_directory_with_state(
+    config: &ConfigHandle,
+    directory: &Path,
+    include_patterns: &[Pattern],
+    exclude_patterns: &[Pattern],
+    sources: &mut Vec<DiscoveredSource>,
+    state: &mut ProjectWalkState,
+) -> Result<()> {
     if !directory.exists() {
         return Ok(());
     }
-
-    for entry in fs::read_dir(directory)
-        .with_context(|| format!("unable to read directory {}", directory.display()))?
+    if state.directory_is_generated(directory)
+        || is_excluded_source_directory(config, directory, exclude_patterns)?
+        || !state.visit_directory(directory)?
     {
-        let entry = entry?;
+        return Ok(());
+    }
+
+    let mut entries = fs::read_dir(directory)
+        .with_context(|| format!("unable to read directory {}", directory.display()))?
+        .map(|entry| {
+            let entry = entry?;
+            let is_symlink = entry.file_type()?.is_symlink();
+            Ok((is_symlink, entry.path(), entry))
+        })
+        .collect::<std::io::Result<Vec<_>>>()?;
+    entries.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+
+    for (_, _, entry) in entries {
         let path = entry.path();
 
         if path.is_dir() {
-            walk_directory(config, &path, include_patterns, exclude_patterns, sources)?;
+            walk_directory_with_state(
+                config,
+                &path,
+                include_patterns,
+                exclude_patterns,
+                sources,
+                state,
+            )?;
             continue;
         }
 
@@ -315,6 +439,9 @@ pub fn walk_directory(
         let Some(logical_module) = logical_module_path(&root, &path) else {
             continue;
         };
+        if !state.visit_file(&path)? {
+            continue;
+        }
 
         sources.push(DiscoveredSource {
             path,
@@ -328,19 +455,95 @@ pub fn walk_directory(
     Ok(())
 }
 
+fn is_excluded_source_directory(
+    config: &ConfigHandle,
+    directory: &Path,
+    exclude_patterns: &[Pattern],
+) -> Result<bool> {
+    let config_dir = normalize_lexical_path(&config.config_dir);
+    let directory = normalize_lexical_path(directory);
+    let relative = directory.strip_prefix(&config_dir).with_context(|| {
+        format!("unable to relativize {} to {}", directory.display(), config_dir.display())
+    })?;
+    let relative = normalize_glob_path(relative);
+
+    Ok(exclude_patterns.iter().any(|pattern| {
+        let text = pattern.as_str();
+        if text == "**" {
+            return true;
+        }
+        let directory_pattern = text.strip_suffix("/**/*").or_else(|| text.strip_suffix("/**"));
+        directory_pattern.is_some_and(|directory_pattern| {
+            Pattern::new(directory_pattern)
+                .is_ok_and(|directory_pattern| directory_pattern.matches(&relative))
+        })
+    }))
+}
+
 pub fn is_selected_source_path(
     config: &ConfigHandle,
     path: &Path,
     include_patterns: &[Pattern],
     exclude_patterns: &[Pattern],
 ) -> Result<bool> {
-    let relative = path.strip_prefix(&config.config_dir).with_context(|| {
-        format!("unable to relativize {} to {}", path.display(), config.config_dir.display())
+    let config_dir = normalize_lexical_path(&config.config_dir);
+    let path = normalize_lexical_path(path);
+    let relative = path.strip_prefix(&config_dir).with_context(|| {
+        format!("unable to relativize {} to {}", path.display(), config_dir.display())
     })?;
     let relative = normalize_glob_path(relative);
 
     Ok(include_patterns.iter().any(|pattern| pattern.matches(&relative))
         && !exclude_patterns.iter().any(|pattern| pattern.matches(&relative)))
+}
+
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    let mut has_root = false;
+
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => {
+                normalized.push(component.as_os_str());
+                has_root = true;
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if normalized.file_name().is_some_and(|name| name != "..") {
+                    normalized.pop();
+                } else if !has_root {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+
+    normalized
+}
+
+fn resolve_existing_prefix(path: &Path) -> PathBuf {
+    let mut existing_prefix = normalize_lexical_path(path);
+    let mut remainder = Vec::new();
+
+    while !existing_prefix.exists() {
+        let Some(component) = existing_prefix.file_name() else {
+            return normalize_lexical_path(path);
+        };
+        remainder.push(component.to_os_string());
+        if !existing_prefix.pop() {
+            return normalize_lexical_path(path);
+        }
+    }
+
+    let Ok(mut resolved) = fs::canonicalize(&existing_prefix) else {
+        return normalize_lexical_path(path);
+    };
+    for component in remainder.into_iter().rev() {
+        resolved.push(component);
+    }
+    normalize_lexical_path(&resolved)
 }
 
 pub fn source_root_for_path(config: &ConfigHandle, path: &Path) -> Option<PathBuf> {
@@ -2078,6 +2281,203 @@ mod tests {
             String::from("app.models")
         );
         assert!(excluded.is_none());
+    }
+
+    #[test]
+    fn project_source_discovery_prunes_custom_generated_trees() {
+        let project_dir = temp_project_dir("project_source_discovery_prunes_generated_trees");
+        let result = {
+            let absolute_cache = project_dir.join("src/cache-output");
+            let cache_setting = serde_json::to_string(&absolute_cache.to_string_lossy())
+                .expect("cache path should serialize");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    concat!(
+                        "[project]\n",
+                        "src = [\"src\"]\n",
+                        "include = [\"src/**/*.tpy\", \"src/**/*.py\", \"src/**/*.pyi\"]\n",
+                        "exclude = []\n",
+                        "out_dir = \"src/artifacts/../generated/build\"\n",
+                        "cache_dir = {}\n"
+                    ),
+                    cache_setting,
+                ),
+            )
+            .expect("config should be written");
+
+            let kept = project_dir.join("src/pkg/kept.tpy");
+            let generated = project_dir.join("src/generated/build/pkg/generated.py");
+            let cached = absolute_cache.join("shadow-stubs/pkg/cached.pyi");
+            for source in [&kept, &generated, &cached] {
+                fs::create_dir_all(source.parent().expect("source should have a parent"))
+                    .expect("source parent should be created");
+                fs::write(source, "pass\n").expect("source should be written");
+            }
+
+            let config = typepython_config::load(&project_dir).expect("config should load");
+            let include_patterns =
+                compile_patterns(&config, &config.config.project.include, "project.include")
+                    .expect("include patterns should compile");
+            let exclude_patterns =
+                compile_patterns(&config, &config.config.project.exclude, "project.exclude")
+                    .expect("exclude patterns should compile");
+            let roots = source_roots(&config);
+            let sources =
+                collect_project_sources(&config, &roots, &include_patterns, &exclude_patterns)
+                    .expect("project sources should be discovered");
+            let generated_direct = discover_project_source_for_path(
+                &config,
+                &roots,
+                &include_patterns,
+                &exclude_patterns,
+                &generated,
+            )
+            .expect("generated source should be evaluated");
+            let cached_direct = discover_project_source_for_path(
+                &config,
+                &roots,
+                &include_patterns,
+                &exclude_patterns,
+                &cached,
+            )
+            .expect("cached source should be evaluated");
+
+            (sources, generated_direct, cached_direct)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        let (sources, generated_direct, cached_direct) = result;
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].logical_module, "pkg.kept");
+        assert!(generated_direct.is_none());
+        assert!(cached_direct.is_none());
+    }
+
+    #[test]
+    fn excluded_subtree_patterns_are_pruned_at_the_directory_boundary() {
+        let project_dir = temp_project_dir("excluded_subtree_directory_boundary");
+        let result = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                concat!(
+                    "[project]\n",
+                    "src = [\"src\"]\n",
+                    "exclude = [\"src/*/excluded/**\", \"src/generated/**/*\"]\n"
+                ),
+            )
+            .expect("config should be written");
+            let config = typepython_config::load(&project_dir).expect("config should load");
+            let patterns =
+                compile_patterns(&config, &config.config.project.exclude, "project.exclude")
+                    .expect("exclude patterns should compile");
+
+            (
+                is_excluded_source_directory(
+                    &config,
+                    &project_dir.join("src/pkg/excluded"),
+                    &patterns,
+                )
+                .expect("excluded directory should be evaluated"),
+                is_excluded_source_directory(
+                    &config,
+                    &project_dir.join("src/generated"),
+                    &patterns,
+                )
+                .expect("generated directory should be evaluated"),
+                is_excluded_source_directory(&config, &project_dir.join("src/pkg"), &patterns)
+                    .expect("kept directory should be evaluated"),
+            )
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(result, (true, true, false));
+    }
+
+    #[test]
+    fn project_source_discovery_visits_normalized_duplicate_roots_once() {
+        let project_dir = temp_project_dir("project_source_discovery_duplicate_roots");
+        let result = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                concat!(
+                    "[project]\n",
+                    "src = [\"src\", \"./src\", \"nested/../src\"]\n",
+                    "include = [\"src/**/*.tpy\"]\n"
+                ),
+            )
+            .expect("config should be written");
+            fs::create_dir_all(project_dir.join("src/pkg"))
+                .expect("source directory should be created");
+            fs::write(project_dir.join("src/pkg/value.tpy"), "pass\n")
+                .expect("source should be written");
+
+            let config = typepython_config::load(&project_dir).expect("config should load");
+            let include_patterns =
+                compile_patterns(&config, &config.config.project.include, "project.include")
+                    .expect("include patterns should compile");
+            let exclude_patterns =
+                compile_patterns(&config, &config.config.project.exclude, "project.exclude")
+                    .expect("exclude patterns should compile");
+            collect_project_sources(
+                &config,
+                &source_roots(&config),
+                &include_patterns,
+                &exclude_patterns,
+            )
+            .expect("project sources should be discovered")
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].logical_module, "pkg.value");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_source_discovery_handles_symlink_cycles_and_aliases_once() {
+        let project_dir = temp_project_dir("project_source_discovery_symlink_cycle");
+        let result = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                concat!(
+                    "[project]\n",
+                    "src = [\"src\"]\n",
+                    "include = [\"src/**/*.tpy\"]\n",
+                    "exclude = []\n"
+                ),
+            )
+            .expect("config should be written");
+            let package = project_dir.join("src/pkg");
+            let source = package.join("value.tpy");
+            fs::create_dir_all(&package).expect("source directory should be created");
+            fs::write(&source, "pass\n").expect("source should be written");
+            std::os::unix::fs::symlink(&package, project_dir.join("src/alias"))
+                .expect("directory alias should be created");
+            std::os::unix::fs::symlink(project_dir.join("src"), package.join("loop"))
+                .expect("directory cycle should be created");
+            std::os::unix::fs::symlink(&source, package.join("value_alias.tpy"))
+                .expect("file alias should be created");
+
+            let config = typepython_config::load(&project_dir).expect("config should load");
+            let include_patterns =
+                compile_patterns(&config, &config.config.project.include, "project.include")
+                    .expect("include patterns should compile");
+            let exclude_patterns =
+                compile_patterns(&config, &config.config.project.exclude, "project.exclude")
+                    .expect("exclude patterns should compile");
+            collect_project_sources(
+                &config,
+                &source_roots(&config),
+                &include_patterns,
+                &exclude_patterns,
+            )
+            .expect("project sources should be discovered")
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].logical_module, "pkg.value");
     }
 
     #[test]
