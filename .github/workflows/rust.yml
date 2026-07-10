@@ -50,6 +50,7 @@ jobs:
           scripts/test_quickstart_smoke.py
           scripts/test_native_target_smoke.py
           scripts/test_annotation_compat.py
+          scripts/test_coverage_gate.py
           scripts/test_repo_contracts.py
           scripts/test_downstream_checker_matrix.py
           scripts/test_research_roadmap_demo_smoke.py
@@ -133,11 +134,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install Rust 1.94.0
+      - name: Install nightly Rust with coverage tools
         run: |
-          rustup toolchain install 1.94.0 --profile minimal \
+          rustup toolchain install nightly --profile minimal \
             --component llvm-tools-preview
-          rustup default 1.94.0
+          rustup default nightly
 
       - name: Install cargo llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov

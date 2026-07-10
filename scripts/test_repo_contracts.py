@@ -432,6 +432,22 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("peak RSS", beta)
         self.assertIn("p95/p99", beta)
 
+    def test_coverage_gate_enforces_lines_regions_functions_and_branches(self) -> None:
+        makefile = read_text("Makefile")
+        workflow = read_text(".github/workflows/rust.yml")
+        contributing = read_text("docs/contributing.md")
+
+        self.assertIn("COVERAGE_MIN_LINES ?= 65", makefile)
+        self.assertIn("COVERAGE_MIN_REGIONS ?= 60", makefile)
+        self.assertIn("COVERAGE_MIN_FUNCTIONS ?= 60", makefile)
+        self.assertIn("COVERAGE_MIN_BRANCHES ?= 50", makefile)
+        self.assertIn("llvm-cov --branch", makefile)
+        self.assertIn("scripts/check_coverage.py", makefile)
+        self.assertIn("--min-branches $(COVERAGE_MIN_BRANCHES)", makefile)
+        self.assertIn("Install nightly Rust with coverage tools", workflow)
+        self.assertIn("scripts/test_coverage_gate.py", workflow)
+        self.assertIn("branch instrumentation", contributing)
+
     def test_dx_and_lsp_stability_boundary_is_documented(self) -> None:
         dx = read_text("docs/dx-stability.md")
         beta = read_text("docs/beta-readiness.md")

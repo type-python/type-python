@@ -5,7 +5,11 @@ RUSTDOCFLAGS ?= -D warnings
 FUZZ_TARGETS ?= parser type_expr lowering_stub
 FUZZ_SMOKE_SECONDS ?= 30
 FUZZ_LONG_SECONDS ?= 300
-COVERAGE_MIN_LINES ?= 20
+COVERAGE_TOOLCHAIN ?= nightly
+COVERAGE_MIN_LINES ?= 65
+COVERAGE_MIN_REGIONS ?= 60
+COVERAGE_MIN_FUNCTIONS ?= 60
+COVERAGE_MIN_BRANCHES ?= 50
 COVERAGE_TEST_THREADS ?= 1
 
 .PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers flagship-smoke examples-smoke roadmap-demo-smoke security-audit coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check diagnostic-coverage-check repo-contracts bench bench-check bench-baseline bench-compare perf-smoke package-check quickstart-smoke beta-release-gate snapshot-review docs ci bump-version
@@ -55,11 +59,12 @@ security-audit:
 
 coverage:
 	mkdir -p coverage
-	$(CARGO) llvm-cov clean --workspace
-	$(CARGO) llvm-cov --workspace --all-features --no-report -- --test-threads=$(COVERAGE_TEST_THREADS)
-	$(CARGO) llvm-cov report --lcov --output-path coverage/lcov.info
-	$(CARGO) llvm-cov report --text --output-path coverage/coverage.txt --fail-under-lines $(COVERAGE_MIN_LINES)
-	$(CARGO) llvm-cov report --html
+	$(CARGO) +$(COVERAGE_TOOLCHAIN) llvm-cov clean --workspace
+	$(CARGO) +$(COVERAGE_TOOLCHAIN) llvm-cov --branch --workspace --all-features --no-report -- --test-threads=$(COVERAGE_TEST_THREADS)
+	$(CARGO) +$(COVERAGE_TOOLCHAIN) llvm-cov report --branch --lcov --output-path coverage/lcov.info
+	$(CARGO) +$(COVERAGE_TOOLCHAIN) llvm-cov report --branch --text --output-path coverage/coverage.txt --fail-under-lines $(COVERAGE_MIN_LINES) --fail-under-regions $(COVERAGE_MIN_REGIONS) --fail-under-functions $(COVERAGE_MIN_FUNCTIONS)
+	$(PYTHON) scripts/check_coverage.py coverage/lcov.info --min-branches $(COVERAGE_MIN_BRANCHES)
+	$(CARGO) +$(COVERAGE_TOOLCHAIN) llvm-cov report --branch --html
 
 fuzz-smoke:
 	for target in $(FUZZ_TARGETS); do $(CARGO) +nightly fuzz run $$target -- -max_total_time=$(FUZZ_SMOKE_SECONDS); done
@@ -77,7 +82,7 @@ diagnostic-coverage-check:
 	$(PYTHON) scripts/diagnostic_test_coverage.py --check
 
 repo-contracts:
-	$(PYTHON) -m unittest scripts/test_repo_contracts.py scripts/test_downstream_checker_matrix.py scripts/test_flagship_core_smoke.py scripts/test_examples_smoke.py scripts/test_research_roadmap_demo_smoke.py scripts/test_industrial_perf_smoke.py scripts/test_editor_integrations.py scripts/test_packaging_contracts.py
+	$(PYTHON) -m unittest scripts/test_repo_contracts.py scripts/test_coverage_gate.py scripts/test_downstream_checker_matrix.py scripts/test_flagship_core_smoke.py scripts/test_examples_smoke.py scripts/test_research_roadmap_demo_smoke.py scripts/test_industrial_perf_smoke.py scripts/test_editor_integrations.py scripts/test_packaging_contracts.py
 
 bench:
 	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker
