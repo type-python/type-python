@@ -2131,20 +2131,25 @@ fn has_literal_import(source: &str) -> bool {
     has_unaliased_from_import(source, "typing", "Literal")
 }
 
-fn has_typevar_import(source: &str, _module: &str) -> bool {
-    has_unaliased_typing_import(source, "TypeVar")
+fn has_typevar_import(source: &str, module: &str) -> bool {
+    has_compatible_typing_import(source, module, "TypeVar")
 }
 
-fn has_paramspec_import(source: &str, _module: &str) -> bool {
-    has_unaliased_typing_import(source, "ParamSpec")
+fn has_paramspec_import(source: &str, module: &str) -> bool {
+    has_compatible_typing_import(source, module, "ParamSpec")
 }
 
-fn has_typevartuple_import(source: &str, _module: &str) -> bool {
-    has_unaliased_typing_import(source, "TypeVarTuple")
+fn has_typevartuple_import(source: &str, module: &str) -> bool {
+    has_compatible_typing_import(source, module, "TypeVarTuple")
 }
 
-fn has_unpack_import(source: &str, _module: &str) -> bool {
-    has_unaliased_typing_import(source, "Unpack")
+fn has_unpack_import(source: &str, module: &str) -> bool {
+    has_compatible_typing_import(source, module, "Unpack")
+}
+
+pub(super) fn has_compatible_typing_import(source: &str, module: &str, symbol: &str) -> bool {
+    has_unaliased_from_import(source, module, symbol)
+        || (module == "typing" && has_unaliased_from_import(source, "typing_extensions", symbol))
 }
 
 pub(super) fn has_unaliased_from_import(source: &str, module: &str, symbol: &str) -> bool {

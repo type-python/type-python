@@ -888,6 +888,52 @@ fn lower_rewrites_type_param_constraints_and_defaults() {
 }
 
 #[test]
+fn lower_does_not_reuse_stdlib_typevar_for_backported_generic_defaults() {
+    let lowered = lower_with_options(
+        &parse(SourceFile {
+            path: PathBuf::from("generic-default-existing-stdlib-import.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "from typing import TypeVar\n\ntypealias Pair[T = int] = tuple[T, T]\n",
+            ),
+        }),
+        &compat_options("3.10"),
+    );
+
+    assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+    let source = &lowered.module.python_source;
+    let stdlib_import =
+        source.find("from typing import TypeVar").expect("original stdlib import should remain");
+    let backport_import = source
+        .find("from typing_extensions import TypeVar")
+        .expect("backport import should be inserted");
+    let binding = source
+        .find("T = TypeVar(\"T\", default=\"int\")")
+        .expect("runtime type parameter should be emitted");
+    assert!(stdlib_import < backport_import);
+    assert!(backport_import < binding, "the backport must be the active TypeVar binding");
+    assert!(
+        lowered
+            .module
+            .required_imports
+            .contains(&String::from("from typing_extensions import TypeVar"))
+    );
+}
+
+#[test]
+fn backport_typing_imports_are_not_satisfied_by_stdlib_imports() {
+    let stdlib = concat!(
+        "from typing import TypeVar, ParamSpec\n",
+        "from typing import TypeVarTuple, Unpack\n",
+    );
+
+    for symbol in ["TypeVar", "ParamSpec", "TypeVarTuple", "Unpack"] {
+        assert!(!super::core::has_compatible_typing_import(stdlib, "typing_extensions", symbol,));
+    }
+}
+
+#[test]
 fn lower_still_blocks_generic_overload_def() {
     let lowered = lower(&SyntaxTree {
         source: SourceFile {
