@@ -709,7 +709,6 @@ fn public_symbols(
 
     let parsed = parse_module(source).context("invalid Python syntax")?;
     let explicit_exports = static_all_names(parsed.suite());
-    let overload_decorators = overload_decorator_names(parsed.suite());
     let mut extractor = PythonSurfaceExtractor {
         source,
         tokens: parsed.tokens(),
@@ -717,7 +716,7 @@ fn public_symbols(
         source_kind,
         symbols: BTreeMap::new(),
         overloads: BTreeSet::new(),
-        overload_decorators,
+        overload_bindings: OverloadBindings::default(),
         grouped_signatures: BTreeMap::new(),
     };
     extractor.extract_module(parsed.suite());
@@ -741,7 +740,7 @@ struct PythonSurfaceExtractor<'a> {
     source_kind: SurfaceSourceKind,
     symbols: BTreeMap<String, PublicSymbol>,
     overloads: BTreeSet<String>,
-    overload_decorators: BTreeSet<String>,
+    overload_bindings: OverloadBindings,
     grouped_signatures: BTreeMap<String, Vec<String>>,
 }
 
@@ -752,7 +751,7 @@ impl PythonSurfaceExtractor<'_> {
                 Stmt::FunctionDef(function)
                     if self.top_level_name_is_exported(function.name.as_str()) =>
                 {
-                    self.insert_function(function.name.as_str(), function, "function");
+                    self.insert_function(function.name.as_str(), function, "function", None);
                 }
                 Stmt::ClassDef(class_def)
                     if self.top_level_name_is_exported(class_def.name.as_str()) =>
@@ -811,6 +810,7 @@ impl PythonSurfaceExtractor<'_> {
                 Stmt::ImportFrom(import) => self.insert_from_imports(import),
                 _ => {}
             }
+            self.overload_bindings.record_statement(statement, None);
         }
     }
 
@@ -824,12 +824,18 @@ impl PythonSurfaceExtractor<'_> {
         self.symbols
             .insert(key.to_owned(), PublicSymbol { kind: String::from("class"), signature });
 
+        let mut class_overload_bindings = OverloadBindings::default();
         for statement in &class_def.body {
             match statement {
                 Stmt::FunctionDef(function) if public_member_name(function.name.as_str()) => {
                     let member_key = format!("{key}.{}", function.name.as_str());
                     let kind = if is_property(function) { "property" } else { "method" };
-                    self.insert_function(&member_key, function, kind);
+                    self.insert_function(
+                        &member_key,
+                        function,
+                        kind,
+                        Some(&class_overload_bindings),
+                    );
                     self.insert_instance_attributes(key, function);
                 }
                 Stmt::ClassDef(nested) if public_member_name(nested.name.as_str()) => {
@@ -883,6 +889,7 @@ impl PythonSurfaceExtractor<'_> {
                 }
                 _ => {}
             }
+            class_overload_bindings.record_statement(statement, Some(&self.overload_bindings));
         }
     }
 
@@ -891,6 +898,7 @@ impl PythonSurfaceExtractor<'_> {
         key: &str,
         function: &ruff_python_ast::StmtFunctionDef,
         kind: &str,
+        local_overload_bindings: Option<&OverloadBindings>,
     ) {
         let signature = decorated_header_signature(
             self.source,
@@ -899,7 +907,16 @@ impl PythonSurfaceExtractor<'_> {
             self.tokens.in_range(function.range),
         );
         let is_overload = function.decorator_list.iter().any(|decorator| {
-            is_overload_decorator(&decorator.expression, &self.overload_decorators)
+            local_overload_bindings.map_or_else(
+                || is_overload_decorator(&decorator.expression, &self.overload_bindings, None),
+                |local| {
+                    is_overload_decorator(
+                        &decorator.expression,
+                        local,
+                        Some(&self.overload_bindings),
+                    )
+                },
+            )
         });
         let is_grouped_property = is_property(function);
 
@@ -1038,40 +1055,156 @@ impl<'a> Visitor<'a> for InstanceAttributeCollector<'a> {
     }
 }
 
-fn overload_decorator_names(suite: &[Stmt]) -> BTreeSet<String> {
-    let mut names = BTreeSet::from([String::from("overload")]);
-    for statement in suite {
-        let Stmt::ImportFrom(import) = statement else {
-            continue;
-        };
-        if import.level != 0
-            || !import
-                .module
-                .as_ref()
-                .is_some_and(|module| matches!(module.as_str(), "typing" | "typing_extensions"))
-        {
-            continue;
-        }
-        for alias in &import.names {
-            if alias.name.as_str() == "overload" {
-                names.insert(
-                    alias
-                        .asname
-                        .as_ref()
-                        .map_or("overload", ruff_python_ast::Identifier::as_str)
-                        .to_owned(),
-                );
-            }
-        }
-    }
-    names
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum OverloadBinding {
+    Decorator,
+    TypingModule,
+    Other,
 }
 
-fn is_overload_decorator(decorator: &Expr, known_names: &BTreeSet<String>) -> bool {
+#[derive(Debug, Default)]
+struct OverloadBindings {
+    names: BTreeMap<String, OverloadBinding>,
+}
+
+impl OverloadBindings {
+    fn resolve(&self, name: &str, fallback: Option<&OverloadBindings>) -> Option<OverloadBinding> {
+        self.names
+            .get(name)
+            .copied()
+            .or_else(|| fallback.and_then(|bindings| bindings.names.get(name).copied()))
+    }
+
+    fn expression_binding(
+        &self,
+        expression: &Expr,
+        fallback: Option<&OverloadBindings>,
+    ) -> OverloadBinding {
+        match expression {
+            Expr::Name(name) => {
+                self.resolve(name.id.as_str(), fallback).unwrap_or(OverloadBinding::Other)
+            }
+            Expr::Attribute(attribute)
+                if attribute.attr.as_str() == "overload"
+                    && matches!(
+                        attribute.value.as_ref(),
+                        Expr::Name(name)
+                            if self.resolve(name.id.as_str(), fallback)
+                                == Some(OverloadBinding::TypingModule)
+                    ) =>
+            {
+                OverloadBinding::Decorator
+            }
+            _ => OverloadBinding::Other,
+        }
+    }
+
+    fn record_statement(&mut self, statement: &Stmt, fallback: Option<&OverloadBindings>) {
+        match statement {
+            Stmt::Import(import) => {
+                for alias in &import.names {
+                    let source_name = alias.name.as_str();
+                    let local_name = alias.asname.as_ref().map_or_else(
+                        || source_name.split('.').next().unwrap_or(source_name),
+                        ruff_python_ast::Identifier::as_str,
+                    );
+                    let binding = if matches!(source_name, "typing" | "typing_extensions") {
+                        OverloadBinding::TypingModule
+                    } else {
+                        OverloadBinding::Other
+                    };
+                    self.names.insert(local_name.to_owned(), binding);
+                }
+            }
+            Stmt::ImportFrom(import) => {
+                let imports_typing = import.level == 0
+                    && import.module.as_ref().is_some_and(|module| {
+                        matches!(module.as_str(), "typing" | "typing_extensions")
+                    });
+                for alias in &import.names {
+                    let source_name = alias.name.as_str();
+                    if source_name == "*" {
+                        continue;
+                    }
+                    let local_name = alias
+                        .asname
+                        .as_ref()
+                        .map_or(source_name, ruff_python_ast::Identifier::as_str);
+                    let binding = if imports_typing && source_name == "overload" {
+                        OverloadBinding::Decorator
+                    } else {
+                        OverloadBinding::Other
+                    };
+                    self.names.insert(local_name.to_owned(), binding);
+                }
+            }
+            Stmt::FunctionDef(function) => {
+                self.names.insert(function.name.as_str().to_owned(), OverloadBinding::Other);
+            }
+            Stmt::ClassDef(class_def) => {
+                self.names.insert(class_def.name.as_str().to_owned(), OverloadBinding::Other);
+            }
+            Stmt::Assign(assign) => {
+                let binding = self.expression_binding(assign.value.as_ref(), fallback);
+                for target in &assign.targets {
+                    if let Expr::Name(name) = target {
+                        self.names.insert(name.id.as_str().to_owned(), binding);
+                    } else {
+                        for name in simple_target_names(target) {
+                            self.names.insert(name.to_owned(), OverloadBinding::Other);
+                        }
+                    }
+                }
+            }
+            Stmt::AnnAssign(assign) => {
+                if let Expr::Name(name) = assign.target.as_ref() {
+                    let binding = assign.value.as_ref().map_or(OverloadBinding::Other, |value| {
+                        self.expression_binding(value, fallback)
+                    });
+                    self.names.insert(name.id.as_str().to_owned(), binding);
+                }
+            }
+            Stmt::AugAssign(assign) => {
+                if let Expr::Name(name) = assign.target.as_ref() {
+                    self.names.insert(name.id.as_str().to_owned(), OverloadBinding::Other);
+                }
+            }
+            Stmt::TypeAlias(type_alias) => {
+                if let Expr::Name(name) = type_alias.name.as_ref() {
+                    self.names.insert(name.id.as_str().to_owned(), OverloadBinding::Other);
+                }
+            }
+            Stmt::Delete(delete) => {
+                for target in &delete.targets {
+                    for name in simple_target_names(target) {
+                        self.names.remove(name);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn is_overload_decorator(
+    decorator: &Expr,
+    bindings: &OverloadBindings,
+    fallback: Option<&OverloadBindings>,
+) -> bool {
     match decorator {
-        Expr::Name(name) => known_names.contains(name.id.as_str()),
-        Expr::Attribute(attribute) => attribute.attr.as_str() == "overload",
-        Expr::Call(call) => is_overload_decorator(call.func.as_ref(), known_names),
+        Expr::Name(name) => {
+            bindings.resolve(name.id.as_str(), fallback) == Some(OverloadBinding::Decorator)
+        }
+        Expr::Attribute(attribute) => {
+            attribute.attr.as_str() == "overload"
+                && matches!(
+                    attribute.value.as_ref(),
+                    Expr::Name(name)
+                        if bindings.resolve(name.id.as_str(), fallback)
+                            == Some(OverloadBinding::TypingModule)
+                )
+        }
+        Expr::Call(call) => is_overload_decorator(call.func.as_ref(), bindings, fallback),
         _ => false,
     }
 }

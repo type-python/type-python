@@ -471,6 +471,142 @@ fn diff_api_surfaces_compares_every_overload_variant() {
 }
 
 #[test]
+fn diff_api_surfaces_ignores_unresolved_and_unrelated_overload_decorators() {
+    let project_dir = temp_project_dir("diff_api_surfaces_ignores_unrelated_overload_decorators");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "@overload\n",
+                "def parse(value: str) -> int: ...\n",
+                "def parse(value: bytes) -> int: ...\n",
+                "@_decorators.overload\n",
+                "def render(value: str) -> int: ...\n",
+                "def render(value: bytes) -> int: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "@replacement\n",
+                "def parse(value: str) -> str: ...\n",
+                "def parse(value: bytes) -> int: ...\n",
+                "@_decorators.replacement\n",
+                "def render(value: str) -> str: ...\n",
+                "def render(value: bytes) -> int: ...\n",
+            ),
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should ignore unrelated overload spellings")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+}
+
+#[test]
+fn diff_api_surfaces_recognizes_imported_typing_module_overloads() {
+    let project_dir = temp_project_dir("diff_api_surfaces_recognizes_module_overloads");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "import typing as _typing\n",
+                "@_typing.overload\n",
+                "def parse(value: str) -> int: ...\n",
+                "@_typing.overload\n",
+                "def parse(value: bytes) -> int: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "import typing as _typing\n",
+                "@_typing.overload\n",
+                "def parse(value: str) -> int: ...\n",
+                "@_typing.overload\n",
+                "def parse(value: bytes) -> str: ...\n",
+            ),
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should resolve module-qualified overloads")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].symbol, "parse");
+}
+
+#[test]
+fn diff_api_surfaces_respects_overload_name_shadowing() {
+    let project_dir = temp_project_dir("diff_api_surfaces_respects_overload_name_shadowing");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload as _top_overload\n",
+                "from typing_extensions import overload as _method_overload\n",
+                "_top_overload = _custom\n",
+                "@_top_overload\n",
+                "def parse(value: str) -> int: ...\n",
+                "def parse(value: bytes) -> int: ...\n",
+                "class Client:\n",
+                "    _method_overload = _custom\n",
+                "    @_method_overload\n",
+                "    def render(self, value: str) -> int: ...\n",
+                "    def render(self, value: bytes) -> int: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload as _top_overload\n",
+                "from typing_extensions import overload as _method_overload\n",
+                "_top_overload = _custom\n",
+                "@_top_overload\n",
+                "def parse(value: str) -> str: ...\n",
+                "def parse(value: bytes) -> int: ...\n",
+                "class Client:\n",
+                "    _method_overload = _custom\n",
+                "    @_method_overload\n",
+                "    def render(self, value: str) -> str: ...\n",
+                "    def render(self, value: bytes) -> int: ...\n",
+            ),
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should respect rebound overload names")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+}
+
+#[test]
 fn diff_api_surfaces_reports_class_method_property_and_attribute_changes() {
     let project_dir =
         temp_project_dir("diff_api_surfaces_reports_class_method_property_and_attribute_changes");
