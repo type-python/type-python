@@ -1208,11 +1208,20 @@ fn validate_formatter_config(config_path: &Path, format: &FormatConfig) -> Resul
 
 fn resolve_python_executable(config_dir: &Path, python_executable: &str) -> PathBuf {
     let executable = Path::new(python_executable);
-    if executable.is_absolute() || !python_executable.contains(std::path::MAIN_SEPARATOR) {
+    if executable.is_absolute() || !command_value_is_path_like(python_executable) {
         return executable.to_path_buf();
     }
 
     config_dir.join(executable)
+}
+
+/// Returns whether a command value explicitly names a filesystem path on either major platform.
+///
+/// Configuration files commonly move between Unix and Windows, so both separator styles must be
+/// recognized independently of the host that is currently parsing the file.
+#[must_use]
+pub fn command_value_is_path_like(value: &str) -> bool {
+    value.contains('/') || value.contains('\\')
 }
 
 fn format_stderr_suffix(stderr: &str) -> String {
@@ -1228,6 +1237,13 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
     use typepython_target::{EmitStyle, PythonTarget};
+
+    #[test]
+    fn command_paths_recognize_unix_and_windows_separators() {
+        assert!(super::command_value_is_path_like("bin/python"));
+        assert!(super::command_value_is_path_like(r"Scripts\python.exe"));
+        assert!(!super::command_value_is_path_like("python3"));
+    }
 
     #[cfg(unix)]
     use std::os::unix::fs::{PermissionsExt, symlink};

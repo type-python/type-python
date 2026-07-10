@@ -990,6 +990,25 @@ fn formatting_reports_missing_explicit_formatter() {
 }
 
 #[test]
+fn formatter_paths_with_forward_slashes_resolve_from_workspace_portably() {
+    let config = temp_workspace_with_config(
+        "formatter_paths_with_forward_slashes_resolve_from_workspace_portably",
+        "[project]\nsrc = [\"src\"]\n",
+        &[("src/app/__init__.tpy", "pass\n")],
+    );
+
+    assert_eq!(
+        resolve_formatter_program(&config, "bin/formatter.exe"),
+        config.config_dir.join("bin/formatter.exe")
+    );
+    assert_eq!(
+        expand_formatter_argument(&config, "config/style.toml", "module.py", "workspace"),
+        config.config_dir.join("config/style.toml").to_string_lossy()
+    );
+    fs::remove_dir_all(&config.config_dir).expect("workspace should be removed");
+}
+
+#[test]
 fn import_binding_definition_and_hover_resolve_to_original_declaration() {
     let config = temp_workspace(
         "import_binding_definition_and_hover_resolve_to_original_declaration",

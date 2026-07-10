@@ -95,7 +95,7 @@ pub(super) fn expand_formatter_argument(
     }
     let path = Path::new(&expanded);
     if path.is_absolute()
-        || !expanded.contains(std::path::MAIN_SEPARATOR)
+        || !typepython_config::command_value_is_path_like(&expanded)
         || expanded == file
         || expanded == workspace_root
     {
@@ -106,7 +106,7 @@ pub(super) fn expand_formatter_argument(
 
 pub(super) fn resolve_formatter_program(config: &ConfigHandle, program: &str) -> PathBuf {
     let path = Path::new(program);
-    if path.is_absolute() || !program.contains(std::path::MAIN_SEPARATOR) {
+    if path.is_absolute() || !typepython_config::command_value_is_path_like(program) {
         return path.to_path_buf();
     }
     config.config_dir.join(path)

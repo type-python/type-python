@@ -10,7 +10,7 @@ use std::{
 use anyhow::{Context, Result};
 use glob::Pattern;
 use serde::{Deserialize, Serialize};
-use typepython_config::ConfigHandle;
+use typepython_config::{ConfigHandle, command_value_is_path_like};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{InferredStubMode, generate_inferred_stub_source};
 use typepython_syntax::SourceKind;
@@ -183,7 +183,7 @@ pub fn resolve_python_executable(config: &ConfigHandle) -> PathBuf {
     match config.config.resolution.python_executable.as_deref() {
         Some(executable) => {
             let path = Path::new(executable);
-            if path.is_absolute() || !executable.contains(std::path::MAIN_SEPARATOR) {
+            if path.is_absolute() || !command_value_is_path_like(executable) {
                 path.to_path_buf()
             } else {
                 config.config_dir.join(path)
@@ -1376,6 +1376,22 @@ mod tests {
     use super::*;
     use std::{env, fs, time::SystemTime};
     use typepython_syntax::{ParseOptions, SourceFile, SyntaxTree, parse_with_options};
+
+    #[test]
+    fn resolves_forward_slash_interpreter_paths_relative_to_project() {
+        let project_dir =
+            temp_project_dir("resolves_forward_slash_interpreter_paths_relative_to_project");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[resolution]\npython_executable = \"bin/python.exe\"\n",
+        )
+        .expect("config should be written");
+        let config = typepython_config::load_without_python_executable_validation(&project_dir)
+            .expect("config should load without probing the interpreter");
+
+        assert_eq!(resolve_python_executable(&config), project_dir.join("bin/python.exe"));
+        remove_temp_project_dir(&project_dir);
+    }
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
