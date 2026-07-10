@@ -43,7 +43,7 @@ typepython = "typepython.__main__:main"
 packages = ["typepython"]
 
 [tool.setuptools.package-data]
-typepython = ["bin/*"]
+typepython = ["bin/*", "py.typed"]
 
 [tool.cibuildwheel]
 build = "cp312-*"

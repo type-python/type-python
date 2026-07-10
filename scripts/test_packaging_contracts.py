@@ -56,6 +56,8 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn("prebuilt type-python wheel", setup)
         self.assertIn("_copy_bundled_stdlib", setup)
         self.assertIn("typepython/stdlib/", packaging)
+        self.assertIn('"py.typed"', pyproject)
+        self.assertTrue((REPO_ROOT / "typepython" / "py.typed").is_file())
 
         for text in (packaging, getting_started, beta, readme, pypi_readme):
             normalized = " ".join(text.split())
