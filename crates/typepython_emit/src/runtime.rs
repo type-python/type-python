@@ -220,6 +220,9 @@ fn write_files_transactionally(writes: &[PlannedFileWrite]) -> io::Result<()> {
             ));
         }
     }
+    for write in writes {
+        existing_regular_file(&write.path)?;
+    }
 
     let mut staged = Vec::with_capacity(writes.len());
     for (index, write) in writes.iter().enumerate() {
@@ -239,7 +242,7 @@ fn write_files_transactionally(writes: &[PlannedFileWrite]) -> io::Result<()> {
 
     for index in 0..staged.len() {
         let target = staged[index].target.clone();
-        let target_exists = match target.try_exists() {
+        let target_exists = match existing_regular_file(&target) {
             Ok(exists) => exists,
             Err(error) => {
                 rollback_staged_writes(&mut staged);
@@ -278,6 +281,21 @@ fn write_files_transactionally(writes: &[PlannedFileWrite]) -> io::Result<()> {
         }
     }
     cleanup_error.map_or(Ok(()), Err)
+}
+
+fn existing_regular_file(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() => Ok(true),
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "transactional output path `{}` exists and is not a regular file",
+                path.display()
+            ),
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 fn stage_file_write(write: &PlannedFileWrite, index: usize) -> io::Result<PathBuf> {

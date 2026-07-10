@@ -532,6 +532,53 @@ fn write_runtime_outputs_reports_pyi_generation_failure() {
 }
 
 #[test]
+fn write_runtime_outputs_rejects_directory_target_without_modifying_any_output() {
+    let temp_dir =
+        temp_dir("write_runtime_outputs_rejects_directory_target_without_modifying_any_output");
+    let modules = vec![LoweredModule {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from("def build() -> int:\n    return 1\n"),
+        source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    }];
+    let runtime_path = temp_dir.join("build/app/__init__.py");
+    let stub_path = temp_dir.join("build/app/__init__.pyi");
+    let sentinel_path = stub_path.join("keep.txt");
+    let artifacts = vec![EmitArtifact {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        runtime_path: Some(runtime_path.clone()),
+        stub_path: Some(stub_path.clone()),
+    }];
+    fs::create_dir_all(&stub_path).expect("directory output conflict should be created");
+    fs::write(&runtime_path, "OLD_RUNTIME\n").expect("existing runtime should be written");
+    fs::write(&sentinel_path, "KEEP\n").expect("directory sentinel should be written");
+
+    let result = write_runtime_outputs(&artifacts, &modules, false, false, None);
+    let runtime =
+        fs::read_to_string(&runtime_path).expect("existing runtime should remain readable");
+    let sentinel =
+        fs::read_to_string(&sentinel_path).expect("directory sentinel should remain readable");
+    let transaction_debris = fs::read_dir(temp_dir.join("build/app"))
+        .expect("output directory should remain readable")
+        .filter_map(Result::ok)
+        .any(|entry| entry.file_name().to_string_lossy().contains(".typepython-"));
+
+    let error = result.expect_err("directory output target should be rejected");
+    assert!(matches!(
+        error,
+        RuntimeWriteError::Io(ref error) if error.kind() == std::io::ErrorKind::InvalidInput
+    ));
+    assert!(stub_path.is_dir(), "conflicting directory must remain in place");
+    assert_eq!(runtime, "OLD_RUNTIME\n");
+    assert_eq!(sentinel, "KEEP\n");
+    assert!(!transaction_debris, "failed preflight must not leave transaction files");
+    remove_temp_dir(&temp_dir);
+}
+
+#[test]
 fn write_runtime_outputs_writes_py_typed_for_stub_only_package() {
     let temp_dir = temp_dir("write_runtime_outputs_writes_py_typed_for_stub_only_package");
     let modules = vec![LoweredModule {
