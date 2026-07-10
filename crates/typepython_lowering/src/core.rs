@@ -296,12 +296,14 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     let typevartuple_owner =
         options.target_python.stdlib_owner("TypeVarTuple").unwrap_or("typing_extensions");
     let unpack_owner = options.target_python.stdlib_owner("Unpack").unwrap_or("typing_extensions");
-    let needs_typing_module_import =
-        compatibility_normalized_lines.iter().any(|line| line.contains("typing."))
-            && !has_module_import(&tree.source.text, "typing");
-    let needs_typing_extensions_module_import =
-        compatibility_normalized_lines.iter().any(|line| line.contains("typing_extensions."))
-            && !has_module_import(&tree.source.text, "typing_extensions");
+    let needs_typing_module_import = compatibility_normalized_lines
+        .iter()
+        .any(|line| has_qualified_module_reference(line, "typing"))
+        && !has_module_import(&tree.source.text, "typing");
+    let needs_typing_extensions_module_import = compatibility_normalized_lines
+        .iter()
+        .any(|line| has_qualified_module_reference(line, "typing_extensions"))
+        && !has_module_import(&tree.source.text, "typing_extensions");
 
     let mut required_imports = Vec::new();
     if has_runtime_typevars
@@ -913,32 +915,86 @@ fn normalize_import_from_line(
 }
 
 fn normalize_target_compatibility_text(text: &str, options: &LoweringOptions) -> String {
-    let mut normalized = text.to_owned();
-    for symbol in [
-        "Self",
-        "Required",
-        "NotRequired",
-        "dataclass_transform",
-        "override",
-        "TypeVarTuple",
-        "Unpack",
-        "ReadOnly",
-        "TypeIs",
-        "NoDefault",
-        "deprecated",
-    ] {
-        if let Some(owner) = options.target_python.stdlib_owner(symbol) {
-            for source_module in ["typing", "typing_extensions", "warnings"] {
-                if source_module == owner {
-                    continue;
-                }
-                normalized = normalized
-                    .replace(&format!("{source_module}.{symbol}"), &format!("{owner}.{symbol}"));
-            }
+    let parsed = ruff_python_parser::parse_unchecked(
+        text,
+        ruff_python_parser::ParseOptions::from(ruff_python_parser::Mode::Module),
+    );
+    let tokens = parsed.tokens();
+    let mut replacements = Vec::new();
+
+    for (index, window) in tokens.windows(3).enumerate() {
+        if window[0].kind() != ruff_python_ast::token::TokenKind::Name
+            || window[1].kind() != ruff_python_ast::token::TokenKind::Dot
+            || window[2].kind() != ruff_python_ast::token::TokenKind::Name
+            || index
+                .checked_sub(1)
+                .and_then(|previous| tokens.get(previous))
+                .is_some_and(|token| token.kind() == ruff_python_ast::token::TokenKind::Dot)
+        {
+            continue;
+        }
+
+        let Some(source_module) = slice_range(text, window[0].range()) else {
+            continue;
+        };
+        if !matches!(source_module, "typing" | "typing_extensions" | "warnings") {
+            continue;
+        }
+
+        let Some(symbol) = slice_range(text, window[2].range()) else {
+            continue;
+        };
+        if !is_target_compatibility_symbol(symbol) {
+            continue;
+        }
+        let Some(owner) = options.target_python.stdlib_owner(symbol) else {
+            continue;
+        };
+        if owner != source_module {
+            replacements.push((window[0].range(), owner));
         }
     }
 
+    replacements.sort_by(|(left, _), (right, _)| right.start().cmp(&left.start()));
+    let mut normalized = text.to_owned();
+    for (range, owner) in replacements {
+        normalized.replace_range(range.start().to_usize()..range.end().to_usize(), owner);
+    }
     normalized
+}
+
+fn is_target_compatibility_symbol(symbol: &str) -> bool {
+    matches!(
+        symbol,
+        "Self"
+            | "Required"
+            | "NotRequired"
+            | "dataclass_transform"
+            | "override"
+            | "TypeVarTuple"
+            | "Unpack"
+            | "ReadOnly"
+            | "TypeIs"
+            | "NoDefault"
+            | "deprecated"
+    )
+}
+
+fn has_qualified_module_reference(text: &str, module: &str) -> bool {
+    let parsed = ruff_python_parser::parse_unchecked(
+        text,
+        ruff_python_parser::ParseOptions::from(ruff_python_parser::Mode::Module),
+    );
+    let tokens = parsed.tokens();
+    tokens.windows(2).enumerate().any(|(index, window)| {
+        window[0].kind() == ruff_python_ast::token::TokenKind::Name
+            && window[1].kind() == ruff_python_ast::token::TokenKind::Dot
+            && slice_range(text, window[0].range()) == Some(module)
+            && index
+                .checked_sub(1)
+                .and_then(|previous| tokens.get(previous))
+                .is_none_or(|token| token.kind() != ruff_python_ast::token::TokenKind::Dot)
+    })
 }
 
 fn normalize_runtime_intrinsic_types(source: &str) -> String {

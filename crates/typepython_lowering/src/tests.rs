@@ -1636,7 +1636,7 @@ fn lower_rewrites_compat_qualified_names_for_target_python_310() {
             kind: SourceKind::TypePython,
             logical_module: String::new(),
             text: String::from(
-                "import typing\nimport warnings\n\n@warnings.deprecated(\"use new_api\")\nclass Box:\n    @typing.override\n    def clone(self) -> typing.Self:\n        ...\n\nclass Config(typing.TypedDict):\n    flag: typing.ReadOnly[bool]\n\ndef accepts(value: object) -> typing.TypeIs[int]:\n    ...\n",
+                "import typing\nimport warnings\n\nLABEL = \"typing.Self and warnings.deprecated\"\n# typing.ReadOnly and warnings.deprecated stay documentation\ntyping_Self = \"unchanged\"\n\n@warnings.deprecated(\"use new_api\")\nclass Box:\n    @typing.override\n    def clone(self) -> typing.Self:\n        ...\n\nclass Config(typing.TypedDict):\n    flag: typing.ReadOnly[bool]\n\ndef accepts(value: object) -> typing.TypeIs[int]:\n    ...\n",
             ),
         }),
         &compat_options("3.10"),
@@ -1652,12 +1652,41 @@ fn lower_rewrites_compat_qualified_names_for_target_python_310() {
     assert!(lowered.module.python_source.contains("typing_extensions.ReadOnly[bool]"));
     assert!(lowered.module.python_source.contains("-> typing_extensions.TypeIs[int]"));
     assert!(
+        lowered.module.python_source.contains("LABEL = \"typing.Self and warnings.deprecated\"")
+    );
+    assert!(
+        lowered
+            .module
+            .python_source
+            .contains("# typing.ReadOnly and warnings.deprecated stay documentation")
+    );
+    assert!(lowered.module.python_source.contains("typing_Self = \"unchanged\""));
+    assert!(
         lowered
             .module
             .metadata
             .required_backports
             .contains(&super::BackportRequirement::TypingExtensionsAtLeast412)
     );
+}
+
+#[test]
+fn compatibility_decoys_do_not_add_module_imports() {
+    let lowered = lower_with_options(
+        &parse(SourceFile {
+            path: PathBuf::from("compat-decoys.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "LABEL = \"typing_extensions.Self\"\n# typing_extensions.ReadOnly\ntyping_extensions_Self = 1\n",
+            ),
+        }),
+        &compat_options("3.10"),
+    );
+
+    assert!(lowered.diagnostics.is_empty());
+    assert!(!lowered.module.python_source.contains("import typing_extensions\n"));
+    assert!(lowered.module.required_imports.is_empty());
 }
 
 #[test]
