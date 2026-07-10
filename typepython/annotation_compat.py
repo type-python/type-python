@@ -209,7 +209,10 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         self._visit_scope("module", node.body)
 
     def visit_If(self, node: ast.If) -> None:
-        if self._canonical_name(node.test) == "typing.TYPE_CHECKING":
+        if self._canonical_name(node.test) in {
+            "typing.TYPE_CHECKING",
+            "typing_extensions.TYPE_CHECKING",
+        }:
             for statement in node.orelse:
                 self.visit(statement)
             return
@@ -476,15 +479,16 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                     visible_resolved_names[name] = scope.resolved_names.get(name)
         runtime_names, type_checking_only_names = _scope_names(
             statements,
-            typing_module_names={
+            type_checking_module_names={
                 name
                 for name, canonical in visible_resolved_names.items()
-                if canonical == "typing"
+                if canonical in {"typing", "typing_extensions"}
             },
             type_checking_guard_names={
                 name
                 for name, canonical in visible_resolved_names.items()
-                if canonical == "typing.TYPE_CHECKING"
+                if canonical
+                in {"typing.TYPE_CHECKING", "typing_extensions.TYPE_CHECKING"}
             },
             shadowed_names=parameters,
         )
@@ -739,12 +743,12 @@ def _uses_future_annotations(tree: ast.Module) -> bool:
 def _scope_names(
     statements: list[ast.stmt],
     *,
-    typing_module_names: set[str] | None = None,
+    type_checking_module_names: set[str] | None = None,
     type_checking_guard_names: set[str] | None = None,
     shadowed_names: set[str] | None = None,
 ) -> tuple[set[str], set[str]]:
     collector = _ScopeNameCollector(
-        typing_module_names=typing_module_names,
+        type_checking_module_names=type_checking_module_names,
         type_checking_guard_names=type_checking_guard_names,
         shadowed_names=shadowed_names,
     )
@@ -762,14 +766,14 @@ class _ScopeNameCollector(ast.NodeVisitor):
     def __init__(
         self,
         *,
-        typing_module_names: set[str] | None = None,
+        type_checking_module_names: set[str] | None = None,
         type_checking_guard_names: set[str] | None = None,
         shadowed_names: set[str] | None = None,
     ) -> None:
         self.runtime_names: set[str] = set()
         self.type_checking_only_names: set[str] = set()
         self.global_or_nonlocal_names: set[str] = set()
-        self.typing_module_names = set(typing_module_names or ())
+        self.type_checking_module_names = set(type_checking_module_names or ())
         self.type_checking_guard_names = set(type_checking_guard_names or ())
         for name in shadowed_names or ():
             self._shadow_typing_binding(name)
@@ -780,7 +784,7 @@ class _ScopeNameCollector(ast.NodeVisitor):
         if dotted is not None and "." in dotted:
             owner, name = dotted.rsplit(".", 1)
             is_type_checking_guard = (
-                owner in self.typing_module_names and name == "TYPE_CHECKING"
+                owner in self.type_checking_module_names and name == "TYPE_CHECKING"
             )
         if is_type_checking_guard:
             type_only = _TypeCheckingImportCollector()
@@ -824,8 +828,8 @@ class _ScopeNameCollector(ast.NodeVisitor):
             local_name = alias.asname or alias.name.split(".", 1)[0]
             self.runtime_names.add(local_name)
             self._shadow_typing_binding(local_name)
-            if alias.name == "typing":
-                self.typing_module_names.add(local_name)
+            if alias.name in {"typing", "typing_extensions"}:
+                self.type_checking_module_names.add(local_name)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         for alias in node.names:
@@ -834,7 +838,11 @@ class _ScopeNameCollector(ast.NodeVisitor):
             local_name = alias.asname or alias.name
             self.runtime_names.add(local_name)
             self._shadow_typing_binding(local_name)
-            if node.level == 0 and node.module == "typing" and alias.name == "TYPE_CHECKING":
+            if (
+                node.level == 0
+                and node.module in {"typing", "typing_extensions"}
+                and alias.name == "TYPE_CHECKING"
+            ):
                 self.type_checking_guard_names.add(local_name)
 
     def visit_Name(self, node: ast.Name) -> None:
@@ -854,7 +862,7 @@ class _ScopeNameCollector(ast.NodeVisitor):
         self.global_or_nonlocal_names.update(node.names)
 
     def _shadow_typing_binding(self, name: str) -> None:
-        self.typing_module_names.discard(name)
+        self.type_checking_module_names.discard(name)
         self.type_checking_guard_names.discard(name)
 
     def visit_MatchAs(self, node: ast.AST) -> None:
