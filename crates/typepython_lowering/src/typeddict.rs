@@ -639,7 +639,8 @@ fn typed_dict_transform_key_suggestion(
     let source = std::fs::read_to_string(path).ok()?;
     let line_text = source.lines().nth(line.saturating_sub(1))?;
     let trimmed_key = raw_key_arg.trim();
-    let start = line_text.find(trimmed_key)? + 1;
+    let start_byte = line_text.find(trimmed_key)?;
+    let start = line_text[..start_byte].chars().count() + 1;
     let replacement = if trimmed_key.starts_with('"') && trimmed_key.ends_with('"') {
         format!("\"{candidate}\"")
     } else if trimmed_key.starts_with('\'') && trimmed_key.ends_with('\'') {
@@ -648,7 +649,13 @@ fn typed_dict_transform_key_suggestion(
         candidate.to_owned()
     };
     Some((
-        Span::new(path.display().to_string(), line, start, line, start + trimmed_key.len()),
+        Span::new(
+            path.display().to_string(),
+            line,
+            start,
+            line,
+            start + trimmed_key.chars().count(),
+        ),
         replacement,
     ))
 }

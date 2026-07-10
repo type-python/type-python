@@ -2722,19 +2722,16 @@ fn lower_reports_unknown_pick_key_as_tpy4017() {
     ));
     std::fs::create_dir_all(&root).expect("temp lowering test directory should be created");
     let source_path = root.join("pick-invalid-key.tpy");
-    std::fs::write(
-        &source_path,
-        "class User(TypedDict):\n    id: int\n\ntypealias UserPublic = Pick[User, \"name\"]\n",
-    )
-    .expect("temp lowering source should be written");
+    let source_text = String::from(
+        "class User(TypedDict):\n    id: int\n\ntypealias Café = Pick[User, \"name\"]\n",
+    );
+    std::fs::write(&source_path, &source_text).expect("temp lowering source should be written");
     let lowered = lower(&SyntaxTree {
         source: SourceFile {
             path: source_path.clone(),
             kind: SourceKind::TypePython,
             logical_module: String::new(),
-            text: String::from(
-                "class User(TypedDict):\n    id: int\n\ntypealias UserPublic = Pick[User, \"name\"]\n",
-            ),
+            text: source_text.clone(),
         },
         statements: vec![
             SyntaxStatement::ClassDef(NamedBlockStatement {
@@ -2770,7 +2767,7 @@ fn lower_reports_unknown_pick_key_as_tpy4017() {
                 line: 1,
             }),
             SyntaxStatement::TypeAlias(TypeAliasStatement {
-                name: String::from("UserPublic"),
+                name: String::from("Café"),
                 type_params: Vec::new(),
                 value: String::from("Pick[User, \"name\"]"),
                 value_expr: None,
@@ -2794,6 +2791,11 @@ fn lower_reports_unknown_pick_key_as_tpy4017() {
     assert_eq!(diagnostic.suggestions.len(), 1);
     assert!(diagnostic.suggestions[0].message.contains("Replace `name` with `id`"));
     assert_eq!(diagnostic.suggestions[0].replacement, "\"id\"");
+    let alias_line = source_text.lines().nth(3).expect("alias line should exist");
+    let key_byte = alias_line.find("\"name\"").expect("unknown key should exist");
+    let expected_column = alias_line[..key_byte].chars().count() + 1;
+    assert_eq!(diagnostic.suggestions[0].span.column, expected_column);
+    assert_eq!(diagnostic.suggestions[0].span.end_column, expected_column + 6);
 }
 
 #[test]

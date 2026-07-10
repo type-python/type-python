@@ -1058,11 +1058,16 @@ pub(super) fn single_line_return_annotation_span(
     let line_text = source.lines().nth(line.saturating_sub(1))?;
     let arrow = line_text.find("->")?;
     let colon = line_text[arrow + 2..].find(':')? + arrow + 2;
-    let start_column = arrow
-        + 3
-        + line_text[arrow + 2..].chars().take_while(|character| character.is_whitespace()).count();
-    let end_trimmed = line_text[..colon].trim_end();
-    Some(Span::new(String::new(), line, start_column, line, end_trimmed.chars().count() + 1))
+    let annotation = &line_text[arrow + 2..colon];
+    let start_byte = arrow + 2 + annotation.len().saturating_sub(annotation.trim_start().len());
+    let end_byte = line_text[..colon].trim_end().len();
+    Some(Span::new(
+        String::new(),
+        line,
+        line_text[..start_byte].chars().count() + 1,
+        line,
+        line_text[..end_byte].chars().count() + 1,
+    ))
 }
 
 pub(super) fn override_insertion_span(

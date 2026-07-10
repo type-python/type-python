@@ -2520,17 +2520,13 @@ fn check_match_case_suggestion_uses_source_overrides_without_backing_file() {
 
 #[test]
 fn check_missing_none_return_suggestion_uses_source_overrides_without_backing_file() {
-    let result = check_virtual_source_with_overrides(
-        concat!(
-            "def maybe(flag: bool) -> int:\n",
-            "    if flag:\n",
-            "        return 1\n",
-            "    return None\n",
-        ),
-        ParseOptions::default(),
-        false,
-        false,
+    let source = concat!(
+        "def maybe(label: str = \"é\", flag: bool = False) -> int:\n",
+        "    if flag:\n",
+        "        return 1\n",
+        "    return None\n",
     );
+    let result = check_virtual_source_with_overrides(source, ParseOptions::default(), false, false);
 
     let diagnostic = result
         .diagnostics
@@ -2540,6 +2536,11 @@ fn check_missing_none_return_suggestion_uses_source_overrides_without_backing_fi
         .expect("return type diagnostic should be present");
     assert_eq!(diagnostic.suggestions.len(), 1);
     assert_eq!(diagnostic.suggestions[0].replacement, "int | None");
+    let header = source.lines().next().expect("function header should exist");
+    let return_byte = header.find("int:").expect("return annotation should exist");
+    let expected_column = header[..return_byte].chars().count() + 1;
+    assert_eq!(diagnostic.suggestions[0].span.column, expected_column);
+    assert_eq!(diagnostic.suggestions[0].span.end_column, expected_column + 3);
 }
 
 #[test]
