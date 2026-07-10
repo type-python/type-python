@@ -1908,6 +1908,8 @@ dependencies = [
  "anyhow",
  "criterion",
  "glob",
+ "littrs-ruff-python-ast",
+ "littrs-ruff-python-parser",
  "serde",
  "serde_json",
  "thiserror",

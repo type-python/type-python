@@ -12,6 +12,14 @@ fn single_error_response(responses: &[Value]) -> &Value {
     responses[0].get("error").expect("response should contain an error payload")
 }
 
+fn result_response_for_id(responses: &[Value], id: u64) -> &Value {
+    responses
+        .iter()
+        .find(|response| response["id"] == json!(id))
+        .and_then(|response| response.get("result"))
+        .expect("JSON-RPC response should contain the requested result")
+}
+
 fn published_diagnostics_for_uri<'a>(responses: &'a [Value], uri: &str) -> &'a Vec<Value> {
     responses
         .iter()
@@ -173,6 +181,113 @@ fn hover_definition_references_and_rename_work() {
         }))
         .expect("rename should succeed");
     assert!(rename["changes"].is_object());
+}
+
+#[test]
+fn json_rpc_references_and_rename_only_edit_semantic_identifier_tokens() {
+    let source = "def target(value: int) -> int:\n    return value\n";
+    let consumer = "from app.a import target\n\nTARGET_TEXT = \"target\"\n# target is mentioned in this comment\ndef use() -> int:\n    message = f\"target literal {target(1)}\"\n    return target(2)\n";
+    let config = temp_workspace(
+        "json_rpc_references_and_rename_only_edit_semantic_identifier_tokens",
+        &[("src/app/a.tpy", source), ("src/app/b.tpy", consumer)],
+    );
+    let mut server = Server::new(config.clone());
+    let source_uri = path_to_uri(&config.config_dir.join("src/app/a.tpy"));
+    let consumer_uri = path_to_uri(&config.config_dir.join("src/app/b.tpy"));
+
+    let with_declaration = server
+        .handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "textDocument/references",
+            "params": {
+                "textDocument": {"uri": source_uri},
+                "position": {"line": 0, "character": 5},
+                "context": {"includeDeclaration": true}
+            }
+        }))
+        .expect("JSON-RPC references request should succeed");
+    let references = result_response_for_id(&with_declaration, 41)
+        .as_array()
+        .expect("references result should be an array");
+    assert_eq!(references.len(), 4, "declaration and three real references should be returned");
+    let unique_reference_locations = references
+        .iter()
+        .map(|reference| {
+            (
+                reference["uri"].as_str().expect("reference URI should be text"),
+                reference["range"]["start"]["line"]
+                    .as_u64()
+                    .expect("reference line should be numeric"),
+                reference["range"]["start"]["character"]
+                    .as_u64()
+                    .expect("reference character should be numeric"),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(unique_reference_locations.len(), references.len(), "locations must be unique");
+    assert!(unique_reference_locations.contains(&(source_uri.as_str(), 0, 4)));
+    assert!(unique_reference_locations.contains(&(consumer_uri.as_str(), 0, 18)));
+    assert!(unique_reference_locations.contains(&(consumer_uri.as_str(), 5, 32)));
+    assert!(unique_reference_locations.contains(&(consumer_uri.as_str(), 6, 11)));
+    assert!(!references.iter().any(|reference| {
+        reference["uri"] == json!(consumer_uri)
+            && matches!(reference["range"]["start"]["line"].as_u64(), Some(2 | 3))
+    }));
+
+    let without_declaration = server
+        .handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "textDocument/references",
+            "params": {
+                "textDocument": {"uri": source_uri},
+                "position": {"line": 0, "character": 5},
+                "context": {"includeDeclaration": false}
+            }
+        }))
+        .expect("JSON-RPC references request should succeed");
+    let references = result_response_for_id(&without_declaration, 42)
+        .as_array()
+        .expect("references result should be an array");
+    assert_eq!(references.len(), 3, "only real non-declaration references should remain");
+    assert!(!references.iter().any(|reference| reference["uri"] == json!(source_uri)));
+
+    let rename = server
+        .handle_message(json!({
+            "jsonrpc": "2.0",
+            "id": 43,
+            "method": "textDocument/rename",
+            "params": {
+                "textDocument": {"uri": consumer_uri},
+                "position": {"line": 6, "character": 12},
+                "newName": "renamed"
+            }
+        }))
+        .expect("JSON-RPC rename request should succeed");
+    let changes = result_response_for_id(&rename, 43)["changes"]
+        .as_object()
+        .expect("rename should return workspace changes");
+    let source_edits = changes
+        .get(&source_uri)
+        .and_then(Value::as_array)
+        .expect("source declaration should be renamed");
+    let consumer_edits = changes
+        .get(&consumer_uri)
+        .and_then(Value::as_array)
+        .expect("consumer references should be renamed");
+    assert_eq!(source_edits.len(), 1, "the declaration must not receive duplicate edits");
+    assert_eq!(consumer_edits.len(), 3, "only import and call references should be edited");
+    assert!(
+        !consumer_edits
+            .iter()
+            .any(|edit| { matches!(edit["range"]["start"]["line"].as_u64(), Some(2 | 3)) })
+    );
+    assert_eq!(
+        consumer_edits.iter().filter(|edit| edit["range"]["start"]["line"] == json!(5)).count(),
+        1,
+        "the f-string expression should be edited without touching its literal text"
+    );
 }
 
 #[test]

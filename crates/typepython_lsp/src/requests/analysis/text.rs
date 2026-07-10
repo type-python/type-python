@@ -106,18 +106,27 @@ pub(crate) fn collect_local_value_types(
 }
 
 pub(crate) fn dedupe_occurrences(occurrences: &mut Vec<SymbolOccurrence>) {
-    let mut seen = BTreeSet::new();
-    occurrences.retain(|occurrence| {
-        seen.insert((
+    let mut indexes_by_location = BTreeMap::<_, usize>::new();
+    let mut deduped = Vec::<SymbolOccurrence>::with_capacity(occurrences.len());
+    for occurrence in occurrences.drain(..) {
+        let location = (
             occurrence.canonical.clone(),
             occurrence.uri.clone(),
             occurrence.range.start.line,
             occurrence.range.start.character,
             occurrence.range.end.line,
             occurrence.range.end.character,
-            occurrence.declaration,
-        ))
-    });
+        );
+        if let Some(index) = indexes_by_location.get(&location).copied() {
+            if occurrence.declaration && !deduped[index].declaration {
+                deduped[index] = occurrence;
+            }
+            continue;
+        }
+        indexes_by_location.insert(location, deduped.len());
+        deduped.push(occurrence);
+    }
+    *occurrences = deduped;
 }
 
 #[derive(Debug)]
@@ -128,39 +137,47 @@ pub(crate) struct TokenOccurrence {
 }
 
 pub(crate) fn tokenize_identifiers(text: &str) -> Vec<TokenOccurrence> {
+    use ruff_python_ast::token::TokenKind;
+    use ruff_python_parser::{Mode, ParseOptions as RuffParseOptions, parse_unchecked};
+
+    let parsed = parse_unchecked(text, RuffParseOptions::from(Mode::Module));
     let mut tokens = Vec::new();
-    for (line_index, line) in text.lines().enumerate() {
-        let chars = line.chars().collect::<Vec<_>>();
-        let mut index = 0usize;
-        while index < chars.len() {
-            if chars[index].is_ascii_alphabetic() || chars[index] == '_' {
-                let start = index;
-                index += 1;
-                while index < chars.len()
-                    && (chars[index].is_ascii_alphanumeric() || chars[index] == '_')
-                {
-                    index += 1;
-                }
-                let name = chars[start..index].iter().collect::<String>();
-                let preceded_by_dot = chars[..start]
-                    .iter()
-                    .rev()
-                    .find(|ch| !ch.is_whitespace())
-                    .is_some_and(|ch| *ch == '.');
-                tokens.push(TokenOccurrence {
-                    name,
-                    range: LspRange {
-                        start: LspPosition { line: line_index as u32, character: start as u32 },
-                        end: LspPosition { line: line_index as u32, character: index as u32 },
-                    },
-                    preceded_by_dot,
-                });
-            } else {
-                index += 1;
-            }
+    let mut previous_significant_kind = None;
+    for token in parsed.tokens().iter() {
+        let (kind, range) = token.as_tuple();
+        let preceded_by_dot = previous_significant_kind == Some(TokenKind::Dot);
+        if !kind.is_trivia() {
+            previous_significant_kind = Some(kind);
         }
+        if kind != TokenKind::Name {
+            continue;
+        }
+
+        let start_offset = usize::from(range.start());
+        let end_offset = usize::from(range.end());
+        let (Some(name), Some(start), Some(end)) = (
+            text.get(start_offset..end_offset),
+            position_at_byte_offset(text, start_offset),
+            position_at_byte_offset(text, end_offset),
+        ) else {
+            continue;
+        };
+        tokens.push(TokenOccurrence {
+            name: name.to_owned(),
+            range: LspRange { start, end },
+            preceded_by_dot,
+        });
     }
     tokens
+}
+
+fn position_at_byte_offset(text: &str, offset: usize) -> Option<LspPosition> {
+    let prefix = text.get(..offset)?;
+    let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
+    Some(LspPosition {
+        line: prefix.bytes().filter(|byte| *byte == b'\n').count() as u32,
+        character: text.get(line_start..offset)?.chars().count() as u32,
+    })
 }
 
 pub(crate) fn find_name_range(text: &str, line: usize, name: &str) -> Option<LspRange> {
