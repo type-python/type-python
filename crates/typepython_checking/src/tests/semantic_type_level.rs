@@ -7,7 +7,10 @@ fn check_accepts_supported_restricted_type_level_shape_aliases() {
         "    id: int\n",
         "    name: str\n\n",
         "typealias Names = RequiredKeys[User]\n",
-        "typealias PublicUser = Pick[User, Literal[\"id\"]]\n",
+        "typealias PublicUser = Pick[User, \"id\"]\n",
+        "typealias PublicProfile = Pick[User, \"id\", \"name\"]\n",
+        "typealias AnonymousUser = Omit[User, \"id\", \"name\"]\n",
+        "typealias LiteralCompat = Pick[User, Literal[\"id\"]]\n",
     ));
 
     let rendered = result.diagnostics.as_text();
@@ -33,7 +36,7 @@ fn check_uses_projected_shape_alias_for_typed_dict_literals() {
         "class User(TypedDict):\n",
         "    id: int\n",
         "    name: str\n\n",
-        "typealias PublicUser = Pick[User, Literal[\"id\"]]\n\n",
+        "typealias PublicUser = Pick[User, \"id\"]\n\n",
         "good: PublicUser = {\"id\": 1}\n",
     ));
 
@@ -46,7 +49,7 @@ fn check_reports_projected_shape_alias_literal_mismatch() {
         "class User(TypedDict):\n",
         "    id: int\n",
         "    name: str\n\n",
-        "typealias PublicUser = Pick[User, Literal[\"id\"]]\n\n",
+        "typealias PublicUser = Pick[User, \"id\"]\n\n",
         "bad: PublicUser = {\"name\": \"Ada\"}\n",
     ));
 

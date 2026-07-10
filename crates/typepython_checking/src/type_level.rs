@@ -134,7 +134,7 @@ impl<'a> TypeLevelEvaluator<'a> {
         args: &[SemanticType],
         pick: bool,
     ) -> Result<TypeLevelValue, TypeLevelEvalError> {
-        if args.len() != 2 {
+        if args.len() < 2 {
             return Err(TypeLevelEvalError::InvalidArity {
                 form: if pick { String::from("Pick") } else { String::from("Omit") },
                 expected: 2,
@@ -152,7 +152,10 @@ impl<'a> TypeLevelEvaluator<'a> {
         else {
             return Err(TypeLevelEvalError::UnknownShape(owner));
         };
-        let keys = key_literals(&args[1])?;
+        let keys = args[1..].iter().try_fold(Vec::new(), |mut keys, argument| {
+            keys.extend(key_literals(argument)?);
+            Ok::<_, TypeLevelEvalError>(keys)
+        })?;
         let key_refs = keys.iter().map(String::as_str).collect::<Vec<_>>();
         let projected = if pick { shape.pick(&key_refs) } else { shape.omit(&key_refs) };
         Ok(TypeLevelValue::KeySet(
@@ -263,10 +266,14 @@ fn key_literals(ty: &SemanticType) -> Result<Vec<String>, TypeLevelEvalError> {
                 Ok(keys)
             })
         }
-        other => Err(TypeLevelEvalError::UnsupportedForm(format!(
-            "key set `{}`",
-            render_semantic_type(other)
-        ))),
+        other => {
+            let rendered = render_semantic_type(other);
+            rendered
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+                .map(|key| vec![key.to_owned()])
+                .ok_or_else(|| TypeLevelEvalError::UnsupportedForm(format!("key set `{rendered}`")))
+        }
     }
 }
 
