@@ -444,6 +444,7 @@ fn method_overload_selection_honors_strict_nulls_option() {
         None,
         None,
         &crate::SemanticType::Name(String::from("Base")),
+        None,
         &overloads,
         crate::AssignabilityOptions {
             strict_nulls: false,
@@ -552,6 +553,7 @@ fn method_overload_selection_resolves_arguments_in_caller_scope() {
         Some("forward"),
         None,
         &crate::SemanticType::Name(String::from("Base")),
+        None,
         &overloads,
         crate::AssignabilityOptions::default(),
     );

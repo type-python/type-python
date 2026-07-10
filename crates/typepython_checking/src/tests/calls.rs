@@ -1597,6 +1597,269 @@ fn check_resolves_method_result_stored_in_bare_local_assignment() {
 }
 
 #[test]
+fn check_resolves_imported_bound_method_result_in_bare_local_assignment() {
+    let result = check_temp_project_sources(&[
+        (
+            "services.tpy",
+            "services",
+            SourceKind::TypePython,
+            concat!(
+                "interface Serializable:\n",
+                "    def to_json(self) -> str: ...\n\n",
+                "class Repository[T: Serializable]:\n",
+                "    def save(self, data: str) -> bool:\n",
+                "        return True\n",
+            ),
+        ),
+        (
+            "app.tpy",
+            "app",
+            SourceKind::TypePython,
+            concat!(
+                "from services import Serializable, Repository\n\n",
+                "def save_item[T: Serializable](repo: Repository[T], item: T) -> bool:\n",
+                "    data = item.to_json()\n",
+                "    return repo.save(data)\n",
+            ),
+        ),
+    ]);
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_resolves_member_on_class_scoped_bounded_type_parameter() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Named:\n",
+        "    name: str\n\n",
+        "class Labeler[T: Named]:\n",
+        "    def label(self, item: T) -> str:\n",
+        "        return item.name\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_reports_argument_mismatch_on_bounded_type_parameter_method() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Writer:\n",
+        "    def write(self, value: str) -> None: ...\n\n",
+        "def write_item[T: Writer](item: T) -> None:\n",
+        "    item.write(1)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(result.diagnostics.has_errors(), "{rendered}");
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("expects `str`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_missing_method_on_bounded_type_parameter() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Serializable:\n",
+        "    def to_json(self) -> str: ...\n\n",
+        "def serialize[T: Serializable](item: T) -> str:\n",
+        "    return item.missing()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(result.diagnostics.has_errors(), "{rendered}");
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("has no member `missing`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_return_mismatch_from_bounded_type_parameter_method() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Serializable:\n",
+        "    def to_json(self) -> str: ...\n\n",
+        "def serialize[T: Serializable](item: T) -> int:\n",
+        "    return item.to_json()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(result.diagnostics.has_errors(), "{rendered}");
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("returns `str`"), "{rendered}");
+}
+
+#[test]
+fn check_preserves_self_return_for_bounded_type_parameter_method() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Cloneable:\n",
+        "    def clone(self) -> Self: ...\n\n",
+        "def clone_item[T: Cloneable](item: T) -> T:\n",
+        "    return item.clone()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_preserves_self_parameter_for_bounded_type_parameter_method() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Mergeable:\n",
+        "    def merge(self, other: Self) -> Self: ...\n\n",
+        "def merge_items[T: Mergeable](left: T, right: T) -> T:\n",
+        "    return left.merge(right)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_preserves_self_member_for_bounded_type_parameter() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Linked:\n",
+        "    next: Self\n\n",
+        "def next_item[T: Linked](item: T) -> T:\n",
+        "    return item.next\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_preserves_self_when_bound_reuses_caller_type_parameter_name() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Wrapper[T]:\n",
+        "    next: Self\n",
+        "    def clone(self) -> Self: ...\n",
+        "    def replace(self, value: T) -> Self: ...\n\n",
+        "def clone_item[T: Wrapper[int]](item: T) -> T:\n",
+        "    return item.clone()\n\n",
+        "def replace_item[T: Wrapper[int]](item: T) -> T:\n",
+        "    return item.replace(1)\n\n",
+        "def next_item[T: Wrapper[int]](item: T) -> T:\n",
+        "    return item.next\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_validates_attribute_assignment_on_bounded_type_parameter() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Named:\n",
+        "    name: str\n\n",
+        "def rename[T: Named](item: T) -> None:\n",
+        "    item.name = 1\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(result.diagnostics.has_errors(), "{rendered}");
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("member `name` expects `str`"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_attribute_assignment_on_bounded_type_parameter() {
+    let result = check_temp_typepython_source(concat!(
+        "interface Named:\n",
+        "    name: str\n\n",
+        "def rename[T: Named](item: T) -> None:\n",
+        "    item.name = \"updated\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_keeps_bounded_type_parameter_provenance_through_local_flows() {
+    let result = check_temp_typepython_source(concat!(
+        "interface HasOk:\n",
+        "    def ok(self, value: str) -> None: ...\n",
+        "    def clone(self) -> Self: ...\n\n",
+        "def inspect[T: HasOk](item: T, items: list[T]) -> None:\n",
+        "    alias: T = item\n",
+        "    alias.ok(\"alias\")\n",
+        "    copy = item.clone()\n",
+        "    copy.ok(\"copy\")\n",
+        "    for entry in items:\n",
+        "        entry.ok(\"entry\")\n",
+        "    selected = items[0]\n",
+        "    selected.ok(\"item\")\n",
+        "    conditional = item if True else item\n",
+        "    conditional.ok(\"conditional\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_validates_bounded_type_parameter_methods_through_local_flows() {
+    let result = check_temp_typepython_source(concat!(
+        "interface HasOk:\n",
+        "    def ok(self, value: str) -> None: ...\n",
+        "    def clone(self) -> Self: ...\n\n",
+        "def inspect[T: HasOk](item: T, items: list[T]) -> None:\n",
+        "    alias: T = item\n",
+        "    alias.ok(1)\n",
+        "    copy = item.clone()\n",
+        "    copy.ok(1)\n",
+        "    for entry in items:\n",
+        "        entry.ok(1)\n",
+        "    selected = items[0]\n",
+        "    selected.ok(1)\n",
+        "    conditional = item if True else item\n",
+        "    conditional.ok(1)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 5, "{rendered}");
+}
+
+#[test]
+fn check_does_not_confuse_same_named_class_with_scoped_type_parameter() {
+    let result = check_temp_typepython_source(concat!(
+        "class T:\n",
+        "    pass\n\n",
+        "def make() -> T:\n",
+        "    return T()\n\n",
+        "interface HasOk:\n",
+        "    def ok(self) -> None: ...\n\n",
+        "def inspect[T: HasOk]() -> None:\n",
+        "    make().ok()\n",
+        "    alias = make()\n",
+        "    alias.ok()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(result.diagnostics.has_errors(), "{rendered}");
+    assert_eq!(rendered.matches("error[TPY4002]").count(), 2, "{rendered}");
+    assert!(rendered.contains("type `T`") && rendered.contains("has no member `ok`"), "{rendered}");
+}
+
+#[test]
+fn check_does_not_propagate_type_parameter_through_non_self_method_return() {
+    let result = check_temp_typepython_source(concat!(
+        "class T:\n",
+        "    pass\n\n",
+        "interface Builder:\n",
+        "    def make(self) -> T: ...\n",
+        "    def ok(self) -> None: ...\n\n",
+        "def inspect[T: Builder](builder: T) -> None:\n",
+        "    result = builder.make()\n",
+        "    result.ok()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(result.diagnostics.has_errors(), "{rendered}");
+    assert!(rendered.contains("TPY4002"), "{rendered}");
+    assert!(rendered.contains("type `T`") && rendered.contains("has no member `ok`"), "{rendered}");
+}
+
+#[test]
 fn check_resolves_method_argument_expansions_in_function_scope() {
     let result = check_temp_typepython_source(concat!(
         "from typing import TypedDict\n\n",

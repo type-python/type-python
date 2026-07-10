@@ -423,23 +423,30 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
     current_owner_name: Option<&str>,
     current_owner_type_name: Option<&str>,
     owner_type: &SemanticType,
+    lookup_owner_type: Option<&SemanticType>,
     callable: Option<&SemanticCallableDeclaration>,
     options: AssignabilityOptions,
 ) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
-    let owner_type_name = semantic_nominal_owner_name(owner_type).ok_or_else(|| {
+    let has_distinct_lookup_owner = lookup_owner_type.is_some();
+    let lookup_owner_type = lookup_owner_type.unwrap_or(owner_type);
+    let owner_type_name = semantic_nominal_owner_name(lookup_owner_type).ok_or_else(|| {
         DirectCallResolutionFailure::SignatureInstantiationFailed {
             declaration_name: declaration.name.clone(),
             unresolved: Vec::new(),
         }
     })?;
+    let nominal_self_type = SemanticType::Name(owner_type_name.clone());
+    let self_type = if has_distinct_lookup_owner { owner_type } else { &nominal_self_type };
     let (_, owner_class_decl) = resolve_direct_base(nodes, node, &owner_type_name).ok_or_else(|| {
         DirectCallResolutionFailure::SignatureInstantiationFailed {
             declaration_name: declaration.name.clone(),
             unresolved: Vec::new(),
         }
     })?;
-    let owner_substitutions =
-        without_shadowed_generic_params(owner_generic_substitutions(owner_type, owner_class_decl), declaration);
+    let owner_substitutions = without_shadowed_generic_params(
+        owner_generic_substitutions(lookup_owner_type, owner_class_decl),
+        declaration,
+    );
     let callable = match callable {
         Some(callable) => callable.clone(),
         None => declaration_callable_semantics(declaration).ok_or_else(|| {
@@ -450,6 +457,15 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
         })?,
     };
     let provider_node = declaration_provider_node(node, nodes, declaration);
+    let method_params = method_semantic_params_without_self_from_semantics(declaration, &callable);
+    let method_params = substitute_semantic_callable_params(&method_params, &owner_substitutions);
+    let method_params =
+        substitute_self_semantic_params_with_type(&method_params, Some(self_type));
+    let return_type = callable
+        .return_type
+        .as_ref()
+        .map(|return_type| substitute_semantic_type_params(return_type, &owner_substitutions))
+        .map(|return_type| substitute_self_semantic_type_with_type(&return_type, Some(self_type)));
     resolve_callable_candidate_from_semantics(
         None,
         provider_node,
@@ -459,16 +475,9 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
         call,
         current_owner_name,
         current_owner_type_name,
-        method_signature_sites_from_semantics(declaration, &callable, &owner_type_name)
-            .into_iter()
-            .map(|param| instantiate_direct_function_param(param, &owner_substitutions))
-            .collect(),
-        substitute_semantic_callable_params(
-            &method_semantic_params_from_semantics(declaration, &callable, &owner_type_name),
-            &owner_substitutions,
-        ),
-        callable_return_semantic_type_with_self_from_semantics(&callable, &owner_type_name)
-            .map(|return_type| substitute_semantic_type_params(&return_type, &owner_substitutions)),
+        signature_sites_from_semantic_params(&method_params),
+        method_params,
+        return_type,
         options,
     )
 }
@@ -481,6 +490,7 @@ pub(super) fn resolve_method_overload_selection<'a>(
     current_owner_name: Option<&str>,
     current_owner_type_name: Option<&str>,
     owner_type: &SemanticType,
+    lookup_owner_type: Option<&SemanticType>,
     overloads: &[(&'a Declaration, Option<SemanticCallableDeclaration>)],
     options: AssignabilityOptions,
 ) -> ResolvedOverloadSelection<'a> {
@@ -497,6 +507,7 @@ pub(super) fn resolve_method_overload_selection<'a>(
                     current_owner_name,
                     current_owner_type_name,
                     owner_type,
+                    lookup_owner_type,
                     callable.as_ref(),
                     options,
                 ),

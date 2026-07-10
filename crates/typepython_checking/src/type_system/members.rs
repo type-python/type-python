@@ -1,3 +1,427 @@
+fn scoped_nominal_type_param_bound_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    owner_type: &SemanticType,
+) -> Option<SemanticType> {
+    let SemanticType::Name(type_param_name) = owner_type.strip_annotated() else {
+        return None;
+    };
+    let callable_type_param = resolve_scope_owner_declaration(
+        node,
+        current_owner_name,
+        current_owner_type_name,
+    )
+    .and_then(|declaration| {
+        declaration
+            .type_params
+            .iter()
+            .find(|type_param| type_param.name == *type_param_name)
+    });
+    let class_type_param = current_owner_type_name.and_then(|owner_type_name| {
+        node.declarations
+            .iter()
+            .find(|declaration| {
+                declaration.kind == DeclarationKind::Class
+                    && declaration.owner.is_none()
+                    && declaration.name == owner_type_name
+            })
+            .and_then(|declaration| {
+                declaration
+                    .type_params
+                    .iter()
+                    .find(|type_param| type_param.name == *type_param_name)
+            })
+    });
+    let type_param = callable_type_param.or(class_type_param)?;
+    if type_param.kind != typepython_binding::GenericTypeParamKind::TypeVar {
+        return None;
+    }
+    type_param
+        .bound_expr
+        .as_ref()
+        .map(|bound| lower_type_expr(bound.expr.clone()))
+        .filter(|bound| semantic_nominal_owner_name(bound).is_some())
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "bound lookup needs graph, lexical scope, source receiver, and resolved type"
+)]
+pub(super) fn scoped_type_param_bound_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    receiver_name: &str,
+    through_instance: bool,
+    owner_type: &SemanticType,
+) -> Option<SemanticType> {
+    let SemanticType::Name(type_param_name) = owner_type.strip_annotated() else {
+        return None;
+    };
+    let bound = scoped_nominal_type_param_bound_semantic_type(
+        node,
+        current_owner_name,
+        current_owner_type_name,
+        owner_type,
+    )?;
+    let has_scoped_provenance = if through_instance {
+        scoped_callable_returns_type_param(
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            receiver_name,
+            type_param_name,
+        )
+    } else {
+        scoped_value_has_type_param_provenance(
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            receiver_name,
+            type_param_name,
+            &mut BTreeSet::new(),
+        )
+    };
+    if !has_scoped_provenance {
+        return None;
+    }
+    Some(bound)
+}
+
+pub(super) fn scoped_expression_type_param_bound_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    owner_type: &SemanticType,
+) -> Option<SemanticType> {
+    let SemanticType::Name(type_param_name) = owner_type.strip_annotated() else {
+        return None;
+    };
+    let bound = scoped_nominal_type_param_bound_semantic_type(
+        node,
+        current_owner_name,
+        current_owner_type_name,
+        owner_type,
+    )?;
+    scoped_metadata_has_type_param_provenance(
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        metadata,
+        type_param_name,
+        &mut BTreeSet::new(),
+    )
+    .then_some(bound)
+}
+
+fn scoped_callable_returns_type_param(
+    node: &typepython_graph::ModuleNode,
+    _nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    callable_name: &str,
+    type_param_name: &str,
+) -> bool {
+    resolve_scope_param_semantic_type(
+        node,
+        current_owner_name,
+        current_owner_type_name,
+        callable_name,
+    )
+    .and_then(|callable| callable.callable_parts().map(|(_, returns)| returns.clone()))
+    .is_some_and(|returns| {
+        matches!(returns.strip_annotated(), SemanticType::Name(name) if name == type_param_name)
+    })
+}
+
+fn semantic_type_mentions_name(ty: &SemanticType, expected_name: &str) -> bool {
+    match ty.strip_annotated() {
+        SemanticType::Name(name) => name == expected_name,
+        SemanticType::Generic { args, .. } | SemanticType::Union(args) => {
+            args.iter().any(|arg| semantic_type_mentions_name(arg, expected_name))
+        }
+        SemanticType::Callable { params, return_type } => {
+            let params_mention = match params {
+                SemanticCallableParams::Ellipsis => false,
+                SemanticCallableParams::ParamList(types)
+                | SemanticCallableParams::Concatenate(types) => types
+                    .iter()
+                    .any(|ty| semantic_type_mentions_name(ty, expected_name)),
+                SemanticCallableParams::Single(ty) => {
+                    semantic_type_mentions_name(ty, expected_name)
+                }
+            };
+            params_mention || semantic_type_mentions_name(return_type, expected_name)
+        }
+        SemanticType::Unpack(inner) => semantic_type_mentions_name(inner, expected_name),
+        SemanticType::Annotated { .. } => unreachable!("annotations were stripped"),
+    }
+}
+
+fn scoped_bound_method_returns_self(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    type_param_name: &str,
+    method_name: &str,
+) -> bool {
+    let owner_type = SemanticType::Name(type_param_name.to_owned());
+    let Some(bound_type) = scoped_nominal_type_param_bound_semantic_type(
+        node,
+        current_owner_name,
+        current_owner_type_name,
+        &owner_type,
+    ) else {
+        return false;
+    };
+    let Some(bound_name) = semantic_nominal_owner_name(&bound_type) else {
+        return false;
+    };
+    let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &bound_name) else {
+        return false;
+    };
+    let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
+    !methods.is_empty()
+        && methods.iter().all(|method| {
+            declaration_signature_return_semantic_type(method).is_some_and(|return_type| {
+                matches!(return_type.strip_annotated(), SemanticType::Name(name) if name == "Self")
+            })
+        })
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "expression provenance needs graph, lexical scope, source position, and cycle state"
+)]
+fn scoped_metadata_has_type_param_provenance(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    type_param_name: &str,
+    visiting: &mut BTreeSet<String>,
+) -> bool {
+    if metadata.value_type_expr.as_ref().is_some_and(|value_type| {
+        semantic_type_mentions_name(&lower_type_expr(value_type.clone()), type_param_name)
+    }) {
+        return true;
+    }
+    if let Some(value_name) = metadata.value_name.as_deref() {
+        return scoped_value_has_type_param_provenance(
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            value_name,
+            type_param_name,
+            visiting,
+        );
+    }
+    if let Some(callee) = metadata.value_callee.as_deref() {
+        return scoped_callable_returns_type_param(
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            callee,
+            type_param_name,
+        );
+    }
+    if let (Some(receiver_name), Some(method_name)) = (
+        metadata.value_method_owner_name.as_deref(),
+        metadata.value_method_name.as_deref(),
+    ) {
+        let receiver_has_provenance = if metadata.value_method_through_instance {
+            scoped_callable_returns_type_param(
+                node,
+                nodes,
+                current_owner_name,
+                current_owner_type_name,
+                receiver_name,
+                type_param_name,
+            )
+        } else {
+            scoped_value_has_type_param_provenance(
+                node,
+                nodes,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                receiver_name,
+                type_param_name,
+                visiting,
+            )
+        };
+        return receiver_has_provenance
+            && scoped_bound_method_returns_self(
+                node,
+                nodes,
+                current_owner_name,
+                current_owner_type_name,
+                type_param_name,
+                method_name,
+            );
+    }
+    if let Some(target) = metadata.value_subscript_target.as_deref()
+        && let Some(target_name) = target.value_name.as_deref()
+    {
+        return resolve_scope_param_semantic_type(
+            node,
+            current_owner_name,
+            current_owner_type_name,
+            target_name,
+        )
+        .is_some_and(|target_type| semantic_type_mentions_name(&target_type, type_param_name));
+    }
+    if let (Some(true_value), Some(false_value)) =
+        (metadata.value_if_true.as_deref(), metadata.value_if_false.as_deref())
+    {
+        return scoped_metadata_has_type_param_provenance(
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            true_value,
+            type_param_name,
+            &mut visiting.clone(),
+        ) && scoped_metadata_has_type_param_provenance(
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            false_value,
+            type_param_name,
+            &mut visiting.clone(),
+        );
+    }
+    false
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "value provenance needs graph, lexical scope, source position, and cycle state"
+)]
+fn scoped_value_has_type_param_provenance(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+    type_param_name: &str,
+    visiting: &mut BTreeSet<String>,
+) -> bool {
+    if !visiting.insert(value_name.to_owned()) {
+        return false;
+    }
+    if resolve_scope_param_semantic_type(
+        node,
+        current_owner_name,
+        current_owner_type_name,
+        value_name,
+    )
+    .is_some_and(|value_type| {
+        matches!(value_type.strip_annotated(), SemanticType::Name(name) if name == type_param_name)
+    }) {
+        return true;
+    }
+    if let Some(for_site) = node.for_loops.iter().rev().find(|site| {
+        (site.target_name == value_name
+            || site.target_names.iter().any(|target| target == value_name))
+            && site.owner_name.as_deref() == current_owner_name
+            && site.owner_type_name.as_deref() == current_owner_type_name
+            && site.line < current_line
+    }) && for_site.iter_name.as_deref().is_some_and(|iter_name| {
+        resolve_scope_param_semantic_type(
+            node,
+            current_owner_name,
+            current_owner_type_name,
+            iter_name,
+        )
+        .is_some_and(|iter_type| semantic_type_mentions_name(&iter_type, type_param_name))
+    }) {
+        return true;
+    }
+    if let Some(with_site) = node.with_statements.iter().rev().find(|site| {
+        site.target_name.as_deref() == Some(value_name)
+            && site.owner_name.as_deref() == current_owner_name
+            && site.owner_type_name.as_deref() == current_owner_type_name
+            && site.line < current_line
+    }) && with_site.context_name.as_deref().is_some_and(|context_name| {
+        resolve_scope_param_semantic_type(
+            node,
+            current_owner_name,
+            current_owner_type_name,
+            context_name,
+        )
+        .is_some_and(|context_type| semantic_type_mentions_name(&context_type, type_param_name))
+    }) {
+        return true;
+    }
+    let Some(owner_name) = current_owner_name else {
+        return false;
+    };
+    let Some(assignment) = node.assignments.iter().rev().find(|assignment| {
+        assignment.name == value_name
+            && assignment.owner_name.as_deref() == Some(owner_name)
+            && assignment.owner_type_name.as_deref() == current_owner_type_name
+            && assignment.line < current_line
+    }) else {
+        return false;
+    };
+    if assignment.annotation_expr.as_ref().is_some_and(|annotation| {
+        matches!(
+            lower_type_expr(annotation.expr.clone()).strip_annotated(),
+            SemanticType::Name(name) if name == type_param_name
+        )
+    }) {
+        return true;
+    }
+    let Some(metadata) = assignment.value_metadata() else {
+        return false;
+    };
+    if assignment.destructuring_index.is_some()
+        && metadata.value_name.as_deref().is_some_and(|source_name| {
+            resolve_scope_param_semantic_type(
+                node,
+                current_owner_name,
+                current_owner_type_name,
+                source_name,
+            )
+            .is_some_and(|source_type| semantic_type_mentions_name(&source_type, type_param_name))
+        })
+    {
+        return true;
+    }
+    scoped_metadata_has_type_param_provenance(
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        assignment.line,
+        &metadata,
+        type_param_name,
+        visiting,
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "member reference resolution needs source metadata and scope context"
@@ -75,13 +499,53 @@ pub(super) fn resolve_direct_member_reference_semantic_type_with_options(
         .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     }?;
 
-    resolve_member_semantic_type_on_owner_type(node, nodes, &owner_type, member_name, options)
+    let bound_owner_type = scoped_type_param_bound_semantic_type(
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        owner_name,
+        through_instance,
+        &owner_type,
+    );
+    match bound_owner_type {
+        Some(bound_owner_type) => resolve_member_semantic_type_on_owner_type_with_self_type(
+            node,
+            nodes,
+            &bound_owner_type,
+            Some(&owner_type),
+            member_name,
+            options,
+        ),
+        None => {
+            resolve_member_semantic_type_on_owner_type(node, nodes, &owner_type, member_name, options)
+        }
+    }
 }
 
 pub(super) fn resolve_member_semantic_type_on_owner_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     owner_type: &SemanticType,
+    member_name: &str,
+    options: AssignabilityOptions,
+) -> Option<SemanticType> {
+    resolve_member_semantic_type_on_owner_type_with_self_type(
+        node,
+        nodes,
+        owner_type,
+        None,
+        member_name,
+        options,
+    )
+}
+
+pub(super) fn resolve_member_semantic_type_on_owner_type_with_self_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    owner_type: &SemanticType,
+    self_type: Option<&SemanticType>,
     member_name: &str,
     options: AssignabilityOptions,
 ) -> Option<SemanticType> {
@@ -115,16 +579,21 @@ pub(super) fn resolve_member_semantic_type_on_owner_type(
     if is_enum_like_class(nodes, class_node, class_decl) {
         return Some(lower_type_text_or_name(&format!("Literal[{}.{}]", class_decl.name, member_name)));
     }
-    resolve_readable_member_semantic_type(node, nodes, member, owner_type)
+    resolve_readable_member_semantic_type_with_self_type(
+        node, nodes, member, owner_type, self_type,
+    )
 }
 
-pub(super) fn resolve_method_return_semantic_type_on_owner_type(
+pub(super) fn resolve_method_return_semantic_type_on_owner_type_with_self_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     owner_type: &SemanticType,
+    self_type: Option<&SemanticType>,
     method_name: &str,
 ) -> Option<SemanticType> {
     let owner_type_name = semantic_nominal_owner_name(owner_type)?;
+    let nominal_self_type = SemanticType::Name(owner_type_name.clone());
+    let self_type = self_type.unwrap_or(&nominal_self_type);
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let owner_substitutions = owner_generic_substitutions(owner_type, class_decl);
     let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
@@ -136,9 +605,12 @@ pub(super) fn resolve_method_return_semantic_type_on_owner_type(
     }
     Some(rewrite_imported_typing_semantic_type(
         node,
-        &substitute_semantic_type_params(
-            &declaration_signature_return_semantic_type_with_self(method, &owner_type_name)?,
-            &owner_substitutions,
+        &substitute_self_semantic_type_with_type(
+            &substitute_semantic_type_params(
+                &declaration_signature_return_semantic_type(method)?,
+                &owner_substitutions,
+            ),
+            Some(self_type),
         ),
     ))
 }
@@ -211,7 +683,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
         return Some(return_type);
     }
 
-    let owner_type = if through_instance {
+    let receiver_type = if through_instance {
         resolve_direct_callable_return_semantic_type(node, nodes, owner_name)
             .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     } else {
@@ -228,9 +700,22 @@ pub(super) fn resolve_direct_method_return_semantic_type(
         .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     }?;
 
-    let owner_type_name = semantic_nominal_owner_name(&owner_type)?;
+    let bound_owner_type = scoped_type_param_bound_semantic_type(
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        owner_name,
+        through_instance,
+        &receiver_type,
+    );
+    let owner_type = bound_owner_type.as_ref().unwrap_or(&receiver_type);
+    let owner_type_name = semantic_nominal_owner_name(owner_type)?;
+    let nominal_self_type = SemanticType::Name(owner_type_name.clone());
+    let self_type = bound_owner_type.as_ref().map_or(&nominal_self_type, |_| &receiver_type);
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let owner_substitutions = owner_generic_substitutions(&owner_type, class_decl);
+    let owner_substitutions = owner_generic_substitutions(owner_type, class_decl);
     let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
     if methods.is_empty() {
         return None;
@@ -264,7 +749,8 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             &call,
             current_owner_name,
             current_owner_type_name,
-            &owner_type,
+            &receiver_type,
+            bound_owner_type.as_ref(),
             &overloads,
             options,
         ) {
@@ -296,7 +782,8 @@ pub(super) fn resolve_direct_method_return_semantic_type(
                 &call,
                 current_owner_name,
                 current_owner_type_name,
-                &owner_type,
+                &receiver_type,
+                bound_owner_type.as_ref(),
                 declaration_callable_semantics(method).as_ref(),
                 options,
             )
@@ -309,9 +796,12 @@ pub(super) fn resolve_direct_method_return_semantic_type(
 
         Some(rewrite_imported_typing_semantic_type(
             node,
-            &substitute_semantic_type_params(
-                &declaration_signature_return_semantic_type_with_self(method, &owner_type_name)?,
-                &owner_substitutions,
+            &substitute_self_semantic_type_with_type(
+                &substitute_semantic_type_params(
+                    &declaration_signature_return_semantic_type(method)?,
+                    &owner_substitutions,
+                ),
+                Some(self_type),
             ),
         ))
     }

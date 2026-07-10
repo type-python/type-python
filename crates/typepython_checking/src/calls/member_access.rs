@@ -28,6 +28,17 @@ pub(super) fn direct_member_access_diagnostics(
             }
 
             let owner_type = resolve_member_access_owner_semantic_type(node, nodes, access)?;
+            let owner_type = scoped_type_param_bound_semantic_type(
+                node,
+                nodes,
+                access.current_owner_name.as_deref(),
+                access.current_owner_type_name.as_deref(),
+                access.line,
+                &access.owner_name,
+                access.through_instance,
+                &owner_type,
+            )
+            .unwrap_or(owner_type);
             if semantic_union_branches(&owner_type).is_some() {
                 return union_owner_member_diagnostic(
                     context,
@@ -314,7 +325,21 @@ pub(super) fn direct_method_call_diagnostics(
         }
 
         let scope_owner_type =
-            resolve_method_call_owner_scope_semantic_type(context, node, nodes, call);
+            resolve_method_call_owner_scope_semantic_type(context, node, nodes, call).map(
+                |owner_type| {
+                    scoped_type_param_bound_semantic_type(
+                        node,
+                        nodes,
+                        call.current_owner_name.as_deref(),
+                        call.current_owner_type_name.as_deref(),
+                        call.line,
+                        &call.owner_name,
+                        call.through_instance,
+                        &owner_type,
+                    )
+                    .unwrap_or(owner_type)
+                },
+            );
         if let Some(scope_owner_type) = &scope_owner_type
             && semantic_union_branches(scope_owner_type).is_some()
         {
@@ -392,10 +417,21 @@ pub(super) fn direct_method_call_diagnostics(
                 continue;
             }
         }
-        let Some(owner_type) = resolve_method_call_owner_type(context, node, nodes, call) else {
+        let Some(receiver_type) = resolve_method_call_owner_type(context, node, nodes, call) else {
             continue;
         };
-        let Some(owner_type_name) = semantic_nominal_owner_name(&owner_type) else {
+        let bound_owner_type = scoped_type_param_bound_semantic_type(
+            node,
+            nodes,
+            call.current_owner_name.as_deref(),
+            call.current_owner_type_name.as_deref(),
+            call.line,
+            &call.owner_name,
+            call.through_instance,
+            &receiver_type,
+        );
+        let owner_type = bound_owner_type.as_ref().unwrap_or(&receiver_type);
+        let Some(owner_type_name) = semantic_nominal_owner_name(owner_type) else {
             continue;
         };
         let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &owner_type_name)
@@ -419,7 +455,13 @@ pub(super) fn direct_method_call_diagnostics(
                 &call.method,
             )
             .and_then(|member| {
-                resolve_readable_member_semantic_type(node, nodes, member, &owner_type)
+                resolve_readable_member_semantic_type_with_self_type(
+                    node,
+                    nodes,
+                    member,
+                    owner_type,
+                    bound_owner_type.as_ref().map(|_| &receiver_type),
+                )
             })
             .or_else(|| {
                 owned_instance_assignment_member_semantic_type_with_context(
@@ -478,7 +520,8 @@ pub(super) fn direct_method_call_diagnostics(
                 &direct_call,
                 call.current_owner_name.as_deref(),
                 call.current_owner_type_name.as_deref(),
-                &owner_type,
+                &receiver_type,
+                bound_owner_type.as_ref(),
                 &overloads,
                 context.assignability_options(),
             ) {
@@ -556,7 +599,8 @@ pub(super) fn direct_method_call_diagnostics(
             &direct_call,
             call.current_owner_name.as_deref(),
             call.current_owner_type_name.as_deref(),
-            &owner_type,
+            &receiver_type,
+            bound_owner_type.as_ref(),
             target_callable.as_ref(),
             context.assignability_options(),
         ) {
@@ -611,7 +655,22 @@ pub(super) fn direct_method_call_diagnostics(
 
         let fallback_signature = target_callable
             .as_ref()
-            .map(|callable| method_signature_sites_from_semantics(target, callable, &class_decl.name))
+            .map(|callable| {
+                let owner_substitutions = without_shadowed_generic_params(
+                    owner_generic_substitutions(owner_type, class_decl),
+                    target,
+                );
+                let params =
+                    method_semantic_params_without_self_from_semantics(target, callable);
+                let params =
+                    substitute_semantic_callable_params(&params, &owner_substitutions);
+                let nominal_self_type = SemanticType::Name(class_decl.name.clone());
+                let self_type =
+                    bound_owner_type.as_ref().map_or(&nominal_self_type, |_| &receiver_type);
+                let params =
+                    substitute_self_semantic_params_with_type(&params, Some(self_type));
+                signature_sites_from_semantic_params(&params)
+            })
             .unwrap_or_default();
         if let Some(diagnostic) =
             direct_source_function_arity_diagnostic_in_scope_with_context(

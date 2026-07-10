@@ -984,6 +984,7 @@ fn resolve_method_call_candidate_instantiates_owner_generic_arguments() {
         None,
         None,
         &crate::lower_type_text_or_name("Box[int]"),
+        None,
         super::declaration_callable_semantics(method).as_ref(),
         crate::AssignabilityOptions::default(),
     )

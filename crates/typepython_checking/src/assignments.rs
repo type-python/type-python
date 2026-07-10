@@ -1807,6 +1807,23 @@ pub(super) fn subscript_assignment_type_diagnostics(
         .collect()
 }
 
+fn scoped_mutation_target_bound_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    site: &typepython_syntax::FrozenFieldMutationSite,
+    receiver_type: &SemanticType,
+) -> Option<SemanticType> {
+    scoped_expression_type_param_bound_semantic_type(
+        node,
+        nodes,
+        site.owner_name.as_deref(),
+        site.owner_type_name.as_deref(),
+        site.line,
+        &site.target,
+        receiver_type,
+    )
+}
+
 pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -1816,7 +1833,7 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
         .load_frozen_field_mutation_sites(node)
         .into_iter()
         .filter_map(|site| {
-            let target_type = resolve_assignment_expression_semantic_type(
+            let receiver_type = resolve_assignment_expression_semantic_type(
                 context,
                 node,
                 nodes,
@@ -1826,7 +1843,10 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
                 site.line,
                 &site.target,
             )?;
-            let target_type_rendered = diagnostic_type_text(&target_type);
+            let bound_target_type =
+                scoped_mutation_target_bound_semantic_type(node, nodes, &site, &receiver_type);
+            let target_type = bound_target_type.as_ref().unwrap_or(&receiver_type);
+            let target_type_rendered = diagnostic_type_text(target_type);
             let shape = resolve_known_dataclass_transform_shape_from_type_with_context(
                 context,
                 node,
@@ -1993,23 +2013,33 @@ pub(super) fn find_owned_writable_member_target<'a>(
     Some(WritableAttributeTarget::NonWritable)
 }
 
-pub(super) fn resolve_writable_member_semantic_type(
+pub(super) fn resolve_writable_member_semantic_type_with_self_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     declaration: &Declaration,
     owner_type: &SemanticType,
+    self_type: Option<&SemanticType>,
 ) -> Option<SemanticType> {
     match declaration.kind {
-        DeclarationKind::Value => {
-            resolve_readable_member_semantic_type(node, nodes, declaration, owner_type)
-        }
+        DeclarationKind::Value => resolve_readable_member_semantic_type_with_self_type(
+            node,
+            nodes,
+            declaration,
+            owner_type,
+            self_type,
+        ),
         DeclarationKind::Function
             if declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter) =>
         {
-            let owner_type_name = diagnostic_type_text(owner_type);
-            let params =
-                declaration_semantic_signature_params_with_self(declaration, &owner_type_name)?;
-            let params = params.into_iter().skip(1).collect::<Vec<_>>();
+            let owner_type_name = semantic_nominal_owner_name(owner_type)?;
+            let (_, owner_class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
+            let owner_substitutions = owner_generic_substitutions(owner_type, owner_class_decl);
+            let callable = declaration_callable_semantics(declaration)?;
+            let params = method_semantic_params_without_self_from_semantics(declaration, &callable);
+            let params = substitute_semantic_callable_params(&params, &owner_substitutions);
+            let nominal_self_type = SemanticType::Name(owner_type_name);
+            let self_type = self_type.unwrap_or(&nominal_self_type);
+            let params = substitute_self_semantic_params_with_type(&params, Some(self_type));
             (params.len() == 1).then(|| {
                 rewrite_imported_typing_semantic_type(node, &params[0].annotation_or_dynamic())
             })
@@ -2081,7 +2111,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                 return None;
             }
 
-            let target_type = resolve_assignment_expression_semantic_type(
+            let receiver_type = resolve_assignment_expression_semantic_type(
                 context,
                 node,
                 nodes,
@@ -2091,7 +2121,10 @@ pub(super) fn attribute_assignment_type_diagnostics(
                 site.line,
                 &site.target,
             )?;
-            let target_type_rendered = diagnostic_type_text(&target_type);
+            let bound_target_type =
+                scoped_mutation_target_bound_semantic_type(node, nodes, &site, &receiver_type);
+            let target_type = bound_target_type.as_ref().unwrap_or(&receiver_type);
+            let target_type_rendered = diagnostic_type_text(target_type);
 
             if should_defer_attribute_assignment_to_frozen_checks(
                 context,
@@ -2114,8 +2147,13 @@ pub(super) fn attribute_assignment_type_diagnostics(
                             &site.field_name,
                         ));
                     }
-                    let expected =
-                resolve_writable_member_semantic_type(node, nodes, declaration, &target_type)?;
+                    let expected = resolve_writable_member_semantic_type_with_self_type(
+                        node,
+                        nodes,
+                        declaration,
+                        target_type,
+                        bound_target_type.as_ref().map(|_| &receiver_type),
+                    )?;
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::FrozenFieldMutationKind::Assignment => {
@@ -2225,8 +2263,13 @@ pub(super) fn attribute_assignment_type_diagnostics(
                     }
                 }
                 Some(WritableAttributeTarget::PropertySetter(declaration)) => {
-                    let expected =
-                resolve_writable_member_semantic_type(node, nodes, declaration, &target_type)?;
+                    let expected = resolve_writable_member_semantic_type_with_self_type(
+                        node,
+                        nodes,
+                        declaration,
+                        target_type,
+                        bound_target_type.as_ref().map(|_| &receiver_type),
+                    )?;
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::FrozenFieldMutationKind::Assignment => {
@@ -2324,8 +2367,13 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                     )),
                                 );
                             };
-                            let readable_type =
-                                resolve_readable_member_semantic_type(node, nodes, readable, &target_type)?;
+                            let readable_type = resolve_readable_member_semantic_type_with_self_type(
+                                node,
+                                nodes,
+                                readable,
+                                target_type,
+                                bound_target_type.as_ref().map(|_| &receiver_type),
+                            )?;
                             let actual = resolve_augmented_assignment_result_semantic_type(
                                 context,
                                 node,

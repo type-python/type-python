@@ -93,20 +93,16 @@ fn signature_site_from_semantic_param(
     }
 }
 
+pub(crate) fn signature_sites_from_semantic_params(
+    params: &[SemanticCallableParam],
+) -> Vec<typepython_syntax::DirectFunctionParamSite> {
+    params.iter().map(signature_site_from_semantic_param).collect()
+}
+
 pub(crate) fn callable_signature_sites_from_semantics(
     callable: &SemanticCallableDeclaration,
 ) -> Vec<typepython_syntax::DirectFunctionParamSite> {
     callable.semantic_params.iter().map(signature_site_from_semantic_param).collect()
-}
-
-pub(crate) fn callable_signature_sites_with_self_from_semantics(
-    callable: &SemanticCallableDeclaration,
-    owner_type_name: &str,
-) -> Vec<typepython_syntax::DirectFunctionParamSite> {
-    callable_semantic_params_with_self_from_semantics(callable, owner_type_name)
-        .iter()
-        .map(signature_site_from_semantic_param)
-        .collect()
 }
 
 pub(crate) fn callable_semantic_params_from_semantics(
@@ -145,12 +141,11 @@ pub(crate) fn callable_semantic_params_with_self_from_semantics(
         .collect()
 }
 
-pub(crate) fn method_semantic_params_from_semantics(
+pub(crate) fn method_semantic_params_without_self_from_semantics(
     declaration: &Declaration,
     callable: &SemanticCallableDeclaration,
-    owner_type_name: &str,
 ) -> Vec<SemanticCallableParam> {
-    let params = callable_semantic_params_with_self_from_semantics(callable, owner_type_name);
+    let params = callable_semantic_params_from_semantics(callable);
     match declaration.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
         typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => params,
         typepython_syntax::MethodKind::Instance
@@ -163,54 +158,80 @@ pub(crate) fn substitute_self_semantic_type(
     ty: &SemanticType,
     owner_type_name: Option<&str>,
 ) -> SemanticType {
+    let self_type = owner_type_name.map(lower_type_text_or_name);
+    substitute_self_semantic_type_with_type(ty, self_type.as_ref())
+}
+
+pub(crate) fn substitute_self_semantic_type_with_type(
+    ty: &SemanticType,
+    self_type: Option<&SemanticType>,
+) -> SemanticType {
     match ty {
-        SemanticType::Name(name) if name == "Self" => owner_type_name
-            .map(lower_type_text_or_name)
-            .unwrap_or_else(|| SemanticType::Name(name.clone())),
+        SemanticType::Name(name) if name == "Self" => {
+            self_type.cloned().unwrap_or_else(|| SemanticType::Name(name.clone()))
+        }
         SemanticType::Name(name) => SemanticType::Name(name.clone()),
         SemanticType::Generic { head, args } => SemanticType::Generic {
             head: head.clone(),
             args: args
                 .iter()
-                .map(|arg| substitute_self_semantic_type(arg, owner_type_name))
+                .map(|arg| substitute_self_semantic_type_with_type(arg, self_type))
                 .collect(),
         },
         SemanticType::Callable { params, return_type } => SemanticType::Callable {
-            params: substitute_self_semantic_callable_params(params, owner_type_name),
-            return_type: Box::new(substitute_self_semantic_type(return_type, owner_type_name)),
+            params: substitute_self_semantic_callable_params_with_type(params, self_type),
+            return_type: Box::new(substitute_self_semantic_type_with_type(return_type, self_type)),
         },
         SemanticType::Union(branches) => SemanticType::Union(
             branches
                 .iter()
-                .map(|branch| substitute_self_semantic_type(branch, owner_type_name))
+                .map(|branch| substitute_self_semantic_type_with_type(branch, self_type))
                 .collect(),
         ),
         SemanticType::Annotated { value, metadata } => SemanticType::Annotated {
-            value: Box::new(substitute_self_semantic_type(value, owner_type_name)),
+            value: Box::new(substitute_self_semantic_type_with_type(value, self_type)),
             metadata: metadata.clone(),
         },
-        SemanticType::Unpack(inner) => {
-            SemanticType::Unpack(Box::new(substitute_self_semantic_type(inner, owner_type_name)))
-        }
+        SemanticType::Unpack(inner) => SemanticType::Unpack(Box::new(
+            substitute_self_semantic_type_with_type(inner, self_type),
+        )),
     }
 }
 
-pub(crate) fn substitute_self_semantic_callable_params(
+pub(crate) fn substitute_self_semantic_callable_params_with_type(
     params: &SemanticCallableParams,
-    owner_type_name: Option<&str>,
+    self_type: Option<&SemanticType>,
 ) -> SemanticCallableParams {
     match params {
         SemanticCallableParams::Ellipsis => SemanticCallableParams::Ellipsis,
         SemanticCallableParams::ParamList(types) => SemanticCallableParams::ParamList(
-            types.iter().map(|ty| substitute_self_semantic_type(ty, owner_type_name)).collect(),
+            types.iter().map(|ty| substitute_self_semantic_type_with_type(ty, self_type)).collect(),
         ),
         SemanticCallableParams::Concatenate(types) => SemanticCallableParams::Concatenate(
-            types.iter().map(|ty| substitute_self_semantic_type(ty, owner_type_name)).collect(),
+            types.iter().map(|ty| substitute_self_semantic_type_with_type(ty, self_type)).collect(),
         ),
         SemanticCallableParams::Single(expr) => SemanticCallableParams::Single(Box::new(
-            substitute_self_semantic_type(expr, owner_type_name),
+            substitute_self_semantic_type_with_type(expr, self_type),
         )),
     }
+}
+
+pub(crate) fn substitute_self_semantic_params_with_type(
+    params: &[SemanticCallableParam],
+    self_type: Option<&SemanticType>,
+) -> Vec<SemanticCallableParam> {
+    params
+        .iter()
+        .cloned()
+        .map(|mut param| {
+            param.annotation = param
+                .annotation
+                .as_ref()
+                .map(|annotation| substitute_self_semantic_type_with_type(annotation, self_type));
+            param.annotation_text = param.annotation.as_ref().map(render_semantic_type);
+            param
+        })
+        .collect()
 }
 
 pub(crate) fn callable_return_semantic_type_with_self_from_semantics(
@@ -218,20 +239,6 @@ pub(crate) fn callable_return_semantic_type_with_self_from_semantics(
     owner_type_name: &str,
 ) -> Option<SemanticType> {
     callable.return_type.as_ref().map(|ty| substitute_self_semantic_type(ty, Some(owner_type_name)))
-}
-
-pub(crate) fn method_signature_sites_from_semantics(
-    declaration: &Declaration,
-    callable: &SemanticCallableDeclaration,
-    owner_type_name: &str,
-) -> Vec<typepython_syntax::DirectFunctionParamSite> {
-    let params = callable_signature_sites_with_self_from_semantics(callable, owner_type_name);
-    match declaration.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
-        typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => params,
-        typepython_syntax::MethodKind::Instance
-        | typepython_syntax::MethodKind::Class
-        | typepython_syntax::MethodKind::PropertySetter => params.into_iter().skip(1).collect(),
-    }
 }
 
 pub(crate) fn owner_generic_substitutions(

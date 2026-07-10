@@ -730,6 +730,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
             if member_operation.is_none() && operator != DIRECT_CALL_OPERATOR {
                 return None;
             }
+            let owner_metadata = value_binop_left?;
             let owner_type = resolve_direct_expression_semantic_type_from_metadata_with_options(
                 node,
                 nodes,
@@ -737,24 +738,46 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                 current_owner_name,
                 current_owner_type_name,
                 current_line,
-                value_binop_left?,
+                owner_metadata,
                 options,
             )?;
             match member_operation {
                 Some((DirectExprMemberOperation::MemberAccess, member_name)) => {
-                    resolve_member_semantic_type_on_owner_type(
+                    let bound_owner_type = scoped_expression_type_param_bound_semantic_type(
                         node,
                         nodes,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        owner_metadata,
                         &owner_type,
+                    );
+                    let lookup_owner_type = bound_owner_type.as_ref().unwrap_or(&owner_type);
+                    resolve_member_semantic_type_on_owner_type_with_self_type(
+                        node,
+                        nodes,
+                        lookup_owner_type,
+                        bound_owner_type.as_ref().map(|_| &owner_type),
                         member_name,
                         options,
                     )
                 }
                 Some((DirectExprMemberOperation::MethodCall, method_name)) => {
-                    resolve_method_return_semantic_type_on_owner_type(
+                    let bound_owner_type = scoped_expression_type_param_bound_semantic_type(
                         node,
                         nodes,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        owner_metadata,
                         &owner_type,
+                    );
+                    let lookup_owner_type = bound_owner_type.as_ref().unwrap_or(&owner_type);
+                    resolve_method_return_semantic_type_on_owner_type_with_self_type(
+                        node,
+                        nodes,
+                        lookup_owner_type,
+                        bound_owner_type.as_ref().map(|_| &owner_type),
                         method_name,
                     )
                 }
@@ -1186,13 +1209,16 @@ pub(super) fn framework_generated_member_semantic_type_with_context(
     }
 }
 
-pub(super) fn resolve_readable_member_semantic_type(
+pub(super) fn resolve_readable_member_semantic_type_with_self_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     declaration: &Declaration,
     owner_type: &SemanticType,
+    self_type: Option<&SemanticType>,
 ) -> Option<SemanticType> {
     let owner_type_name = semantic_nominal_owner_name(owner_type)?;
+    let nominal_self_type = SemanticType::Name(owner_type_name.clone());
+    let self_type = self_type.unwrap_or(&nominal_self_type);
     let (_, owner_class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let owner_substitutions = owner_generic_substitutions(owner_type, owner_class_decl);
     match declaration.kind {
@@ -1202,37 +1228,33 @@ pub(super) fn resolve_readable_member_semantic_type(
             {
                 return Some(rewrite_imported_typing_semantic_type(node, &descriptor_return));
             }
-            declaration_value_annotation_text(declaration)
-                .map(|annotation| {
-                    rewrite_imported_typing_aliases(
-                        node,
-                        &substitute_self_annotation(&annotation, Some(&owner_type_name)),
-                    )
+            declaration_value_annotation_semantic_type(declaration)
+                .or_else(|| {
+                    declaration_value_annotation_text(declaration)
+                        .as_deref()
+                        .and_then(normalized_direct_return_annotation)
+                        .map(lower_type_text_or_name)
                 })
-                .as_deref()
-                .and_then(normalized_direct_return_annotation)
-                .map(lower_type_text_or_name)
                 .or_else(|| {
                     declaration.inferred_value_type_semantic_text().as_deref().map(|value| {
-                        lower_type_text_or_name(&rewrite_imported_typing_aliases(
-                            node,
-                            &substitute_self_annotation(value, Some(&owner_type_name)),
-                        ))
+                        lower_type_text_or_name(&rewrite_imported_typing_aliases(node, value))
                     })
                 })
                 .map(|ty| substitute_semantic_type_params(&ty, &owner_substitutions))
+                .map(|ty| substitute_self_semantic_type_with_type(&ty, Some(self_type)))
+                .map(|ty| rewrite_imported_typing_semantic_type(node, &ty))
         }
         DeclarationKind::Function
             if declaration.method_kind == Some(typepython_syntax::MethodKind::Property) =>
         {
             Some(rewrite_imported_typing_semantic_type(
                 node,
-                &substitute_semantic_type_params(
-                    &declaration_signature_return_semantic_type_with_self(
-                        declaration,
-                        &owner_type_name,
-                    )?,
-                    &owner_substitutions,
+                &substitute_self_semantic_type_with_type(
+                    &substitute_semantic_type_params(
+                        &declaration_signature_return_semantic_type(declaration)?,
+                        &owner_substitutions,
+                    ),
+                    Some(self_type),
                 ),
             ))
         }
