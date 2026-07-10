@@ -66,6 +66,8 @@ class _AuditScope:
     resolved_names: dict[str, str]
     definitely_bound_names: set[str]
     resolution_overrides: set[str]
+    final_type_checking_module_names: frozenset[str]
+    final_type_checking_guard_names: frozenset[str]
 
 
 def supported_formats() -> AnnotationSupport:
@@ -322,6 +324,8 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                 resolved_names={},
                 definitely_bound_names=set(parameters),
                 resolution_overrides=set(),
+                final_type_checking_module_names=frozenset(),
+                final_type_checking_guard_names=frozenset(),
             )
         )
         self.visit(node.body)
@@ -358,6 +362,8 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                 resolved_names={},
                 definitely_bound_names=set(),
                 resolution_overrides=set(),
+                final_type_checking_module_names=frozenset(),
+                final_type_checking_guard_names=frozenset(),
             )
         )
         for index, generator in enumerate(node.generators):
@@ -513,8 +519,19 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                 continue
             for name in scope.runtime_names | scope.resolution_overrides:
                 if name not in visible_resolved_names:
-                    visible_resolved_names[name] = scope.resolved_names.get(name)
-        runtime_names, type_checking_only_names = _scope_names(
+                    canonical = scope.resolved_names.get(name)
+                    if kind == "function" and scope.kind == "module":
+                        if name in scope.final_type_checking_module_names:
+                            canonical = "typing"
+                        elif name in scope.final_type_checking_guard_names:
+                            canonical = "typing.TYPE_CHECKING"
+                    visible_resolved_names[name] = canonical
+        (
+            runtime_names,
+            type_checking_only_names,
+            final_type_checking_module_names,
+            final_type_checking_guard_names,
+        ) = _scope_names(
             statements,
             type_checking_module_names={
                 name
@@ -538,6 +555,12 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                 resolved_names={},
                 definitely_bound_names=set(parameters or ()),
                 resolution_overrides=set(),
+                final_type_checking_module_names=frozenset(
+                    final_type_checking_module_names
+                ),
+                final_type_checking_guard_names=frozenset(
+                    final_type_checking_guard_names
+                ),
             )
         )
         for statement in statements:
@@ -818,7 +841,7 @@ def _scope_names(
     type_checking_module_names: set[str] | None = None,
     type_checking_guard_names: set[str] | None = None,
     shadowed_names: set[str] | None = None,
-) -> tuple[set[str], set[str]]:
+) -> tuple[set[str], set[str], set[str], set[str]]:
     collector = _ScopeNameCollector(
         type_checking_module_names=type_checking_module_names,
         type_checking_guard_names=type_checking_guard_names,
@@ -831,7 +854,12 @@ def _scope_names(
         collector.type_checking_only_names
         - collector.global_or_nonlocal_names
     )
-    return runtime_names, type_checking_only_names
+    return (
+        runtime_names,
+        type_checking_only_names,
+        set(collector.type_checking_module_names),
+        set(collector.type_checking_guard_names),
+    )
 
 
 class _ScopeNameCollector(ast.NodeVisitor):
@@ -936,13 +964,14 @@ class _ScopeNameCollector(ast.NodeVisitor):
         self._bind_typing_assignment_target(node.target, self._typing_binding_kind(node.value))
 
     def visit_Name(self, node: ast.Name) -> None:
-        if isinstance(node.ctx, ast.Store):
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
             self.runtime_names.add(node.id)
             self._shadow_typing_binding(node.id)
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         if node.name is not None:
             self.runtime_names.add(node.name)
+            self._shadow_typing_binding(node.name)
         self.generic_visit(node)
 
     def visit_Global(self, node: ast.Global) -> None:
@@ -993,12 +1022,14 @@ class _ScopeNameCollector(ast.NodeVisitor):
         name = getattr(node, "name", None)
         if name is not None:
             self.runtime_names.add(name)
+            self._shadow_typing_binding(name)
         self.generic_visit(node)
 
     def visit_MatchStar(self, node: ast.AST) -> None:
         name = getattr(node, "name", None)
         if name is not None:
             self.runtime_names.add(name)
+            self._shadow_typing_binding(name)
 
 
 class _TypeCheckingImportCollector(ast.NodeVisitor):

@@ -571,6 +571,21 @@ class AnnotationCompatTests(unittest.TestCase):
         self.assertEqual(len(findings), 1, audit.findings)
         self.assertIn("User", findings[0].message)
 
+    def test_function_bodies_see_late_module_type_guard_imports(self) -> None:
+        audit = annotation_compat.audit_source(
+            "def outer():\n"
+            "    if TC:\n"
+            "        from models import User\n"
+            "    def load(item: User) -> None:\n"
+            "        return None\n"
+            "    return load\n\n"
+            "from typing import TYPE_CHECKING as TC\n"
+        )
+
+        findings = [finding for finding in audit.findings if finding.code == "TPY-A002"]
+        self.assertEqual(len(findings), 1, audit.findings)
+        self.assertIn("User", findings[0].message)
+
     def test_type_checking_guards_respect_shadowing_and_import_identity(self) -> None:
         sources = {
             "unimported name": (
