@@ -485,6 +485,23 @@ class AnnotationCompatTests(unittest.TestCase):
         findings = [finding for finding in audit.findings if finding.code == "TPY-A002"]
         self.assertEqual(len(findings), 3, audit.findings)
 
+    def test_assigned_type_checking_guard_aliases_are_resolved(self) -> None:
+        audit = annotation_compat.audit_source(
+            "import typing as imported_typing\n"
+            "typing_alias = imported_typing\n"
+            "TC: bool = typing_alias.TYPE_CHECKING\n"
+            "if TC:\n"
+            "    from models import User\n"
+            "TC = True\n"
+            "if TC:\n"
+            "    from models import Group\n\n"
+            "def load(user: 'User', group: 'Group') -> None:\n    return None\n"
+        )
+
+        findings = [finding for finding in audit.findings if finding.code == "TPY-A002"]
+        self.assertEqual(len(findings), 1, audit.findings)
+        self.assertIn("User", findings[0].message)
+
     def test_type_checking_guards_respect_shadowing_and_import_identity(self) -> None:
         sources = {
             "unimported name": (

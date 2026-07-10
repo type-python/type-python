@@ -845,6 +845,24 @@ class _ScopeNameCollector(ast.NodeVisitor):
             ):
                 self.type_checking_guard_names.add(local_name)
 
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self.visit(node.value)
+        binding_kind = self._typing_binding_kind(node.value)
+        for target in node.targets:
+            self._bind_typing_assignment_target(target, binding_kind)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is not None:
+            self.visit(node.value)
+        self._bind_typing_assignment_target(
+            node.target,
+            self._typing_binding_kind(node.value) if node.value is not None else None,
+        )
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        self.visit(node.value)
+        self._bind_typing_assignment_target(node.target, self._typing_binding_kind(node.value))
+
     def visit_Name(self, node: ast.Name) -> None:
         if isinstance(node.ctx, ast.Store):
             self.runtime_names.add(node.id)
@@ -864,6 +882,40 @@ class _ScopeNameCollector(ast.NodeVisitor):
     def _shadow_typing_binding(self, name: str) -> None:
         self.type_checking_module_names.discard(name)
         self.type_checking_guard_names.discard(name)
+
+    def _typing_binding_kind(self, value: ast.expr) -> str | None:
+        dotted = _dotted_name(value)
+        if dotted in self.type_checking_guard_names:
+            return "guard"
+        if dotted in self.type_checking_module_names:
+            return "module"
+        if dotted is not None and "." in dotted:
+            owner, name = dotted.rsplit(".", 1)
+            if owner in self.type_checking_module_names and name == "TYPE_CHECKING":
+                return "guard"
+        return None
+
+    def _bind_typing_assignment_target(
+        self,
+        target: ast.expr,
+        binding_kind: str | None,
+    ) -> None:
+        if isinstance(target, ast.Name):
+            self.runtime_names.add(target.id)
+            self._shadow_typing_binding(target.id)
+            if binding_kind == "module":
+                self.type_checking_module_names.add(target.id)
+            elif binding_kind == "guard":
+                self.type_checking_guard_names.add(target.id)
+            return
+        if isinstance(target, (ast.List, ast.Tuple)):
+            for element in target.elts:
+                self._bind_typing_assignment_target(element, None)
+            return
+        if isinstance(target, ast.Starred):
+            self._bind_typing_assignment_target(target.value, None)
+            return
+        self.visit(target)
 
     def visit_MatchAs(self, node: ast.AST) -> None:
         name = getattr(node, "name", None)
