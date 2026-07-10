@@ -37,6 +37,7 @@ pub(super) fn direct_member_access_diagnostics(
                 &access.owner_name,
                 access.through_instance,
                 &owner_type,
+                context.assignability_options(),
             )
             .unwrap_or(owner_type);
             if semantic_union_branches(&owner_type).is_some() {
@@ -123,10 +124,6 @@ pub(super) fn direct_member_access_diagnostics(
         .collect()
 }
 
-fn semantic_branch_is_none(branch: &SemanticType) -> bool {
-    matches!(branch.strip_annotated(), SemanticType::Name(name) if name == "None")
-}
-
 fn union_owner_member_diagnostic(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -136,21 +133,16 @@ fn union_owner_member_diagnostic(
     member: &str,
     line: usize,
 ) -> Option<Diagnostic> {
-    let branches = semantic_union_branches(owner_type)?;
-    let member_required_branches = branches
-        .iter()
-        .filter(|branch| context.strict_nulls || !semantic_branch_is_none(branch))
-        .collect::<Vec<_>>();
+    let branches = semantic_member_union_branches(owner_type, context.strict_nulls)?;
     let available = branches
         .iter()
-        .filter(|branch| context.strict_nulls || !semantic_branch_is_none(branch))
         .filter_map(|branch| {
             let branch_name = semantic_nominal_owner_name(branch)?;
             type_has_readable_member_with_context(context, node, &branch_name, member)
                 .then_some(branch_name)
         })
         .collect::<Vec<_>>();
-    if available.len() == member_required_branches.len() {
+    if available.len() == branches.len() {
         return None;
     }
     let mut diagnostic = Diagnostic::error(
@@ -336,6 +328,7 @@ pub(super) fn direct_method_call_diagnostics(
                         &call.owner_name,
                         call.through_instance,
                         &owner_type,
+                        context.assignability_options(),
                     )
                     .unwrap_or(owner_type)
                 },
@@ -354,8 +347,8 @@ pub(super) fn direct_method_call_diagnostics(
                 call.line,
             ) {
                 diagnostics.push(diagnostic);
+                continue;
             }
-            continue;
         }
         if let Some(scope_owner_type) = &scope_owner_type
             && let Some(scope_owner_type_name) = semantic_nominal_owner_name(scope_owner_type)
@@ -429,189 +422,176 @@ pub(super) fn direct_method_call_diagnostics(
             &call.owner_name,
             call.through_instance,
             &receiver_type,
+            context.assignability_options(),
         );
         let owner_type = bound_owner_type.as_ref().unwrap_or(&receiver_type);
-        let Some(owner_type_name) = semantic_nominal_owner_name(owner_type) else {
-            continue;
+        let owner_variants = if let Some(branches) =
+            semantic_member_union_branches(owner_type, context.strict_nulls)
+        {
+            branches
+                .into_iter()
+                .map(|branch| {
+                    if bound_owner_type.is_some() {
+                        (receiver_type.clone(), Some(branch))
+                    } else {
+                        (branch, None)
+                    }
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![(receiver_type, bound_owner_type)]
         };
-        let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &owner_type_name)
-        else {
-            continue;
-        };
-        let candidates =
-            find_owned_callable_declarations(nodes, class_node, class_decl, &call.method);
-        let Some(target) = candidates.first().copied() else {
-            let before_line = instance_initializer_access_cutoff(
-                &call.owner_name,
-                call.current_owner_name.as_deref(),
-                call.current_owner_type_name.as_deref(),
-                class_decl,
-                call.line,
-            );
-            let member_type = find_owned_readable_member_declaration(
-                nodes,
-                class_node,
-                class_decl,
-                &call.method,
-            )
-            .and_then(|member| {
-                resolve_readable_member_semantic_type_with_self_type(
-                    node,
-                    nodes,
-                    member,
-                    owner_type,
-                    bound_owner_type.as_ref().map(|_| &receiver_type),
-                )
-            })
-            .or_else(|| {
-                owned_instance_assignment_member_semantic_type_with_context(
-                    context,
-                    class_node,
-                    class_decl,
-                    &call.method,
-                    before_line,
-                )
-            });
-            if let Some(member_type) = member_type
-                && !semantic_type_may_be_callable(context, class_node, &member_type)
-            {
-                diagnostics.push(
-                    Diagnostic::error(
-                        "TPY4001",
-                        format!(
-                            "member `{}` on type `{}` has non-callable type `{}`",
-                            call.method,
-                            class_decl.name,
-                            diagnostic_type_text(&member_type),
-                        ),
-                    )
-                    .with_span(Span::new(
-                        node.module_path.display().to_string(),
-                        call.line,
-                        1,
-                        call.line,
-                        1,
-                    )),
-                );
-            }
-            continue;
-        };
-
-        let direct_call = typepython_binding::CallSite {
-            callee: format!("{}.{}", class_decl.name, call.method),
-            arg_count: call.arg_count,
-            arg_values: call.arg_values.clone(),
-            starred_arg_values: call.starred_arg_values.clone(),
-            keyword_names: call.keyword_names.clone(),
-            keyword_arg_values: call.keyword_arg_values.clone(),
-            keyword_expansion_values: call.keyword_expansion_values.clone(),
-            line: call.line,
-        };
-
-        let overloads = candidates
-            .iter()
-            .filter(|declaration| declaration.kind == DeclarationKind::Overload)
-            .map(|declaration| (*declaration, context.load_declaration_semantics(declaration).callable))
-            .collect::<Vec<_>>();
-        if !overloads.is_empty() {
-            match resolve_method_overload_selection(
+        let mut owner_variants = owner_variants.into_iter();
+        let mut branch_diagnostics = owner_variants.next().map_or_else(Vec::new, |variant| {
+            direct_method_call_variant_diagnostics(
+                context,
                 node,
                 nodes,
-                &direct_call,
-                call.current_owner_name.as_deref(),
-                call.current_owner_type_name.as_deref(),
+                call,
+                &variant.0,
+                variant.1.as_ref(),
+            )
+        });
+        for (receiver_type, bound_owner_type) in owner_variants {
+            let variant_diagnostics = direct_method_call_variant_diagnostics(
+                context,
+                node,
+                nodes,
+                call,
                 &receiver_type,
                 bound_owner_type.as_ref(),
-                &overloads,
-                context.assignability_options(),
-            ) {
-                ResolvedOverloadSelection::Selected(candidate) => {
-                    let signature = candidate.signature_sites;
-                    if let Some(diagnostic) =
-                        direct_source_function_arity_diagnostic_in_scope_with_context(
-                        context,
-                        node,
-                        nodes,
-                        &direct_call,
-                        &signature,
-                        call.current_owner_name.as_deref(),
-                        call.current_owner_type_name.as_deref(),
-                    ) {
-                        diagnostics.push(diagnostic);
-                    }
-                    diagnostics.extend(
-                        direct_source_function_keyword_diagnostics_in_scope_with_context(
-                            context,
-                            node,
-                            nodes,
-                            &direct_call,
-                            &signature,
-                            call.current_owner_name.as_deref(),
-                            call.current_owner_type_name.as_deref(),
-                        ),
-                    );
-                    let type_diagnostics =
-                        direct_source_function_type_diagnostics_in_scope_with_context(
-                        context,
-                        node,
-                        nodes,
-                        &direct_call,
-                        &signature,
-                        call.current_owner_name.as_deref(),
-                        call.current_owner_type_name.as_deref(),
-                    );
-                    diagnostics.extend(type_diagnostics);
-                    continue;
-                }
-                ResolvedOverloadSelection::Ambiguous { applicable_count } => {
-                    diagnostics.push(Diagnostic::error(
-                        "TPY4012",
-                        format!(
-                            "call to `{}.{}` in module `{}` is ambiguous across {} overloads after applicability filtering",
-                            class_decl.name,
-                            call.method,
-                            node.module_path.display(),
-                            applicable_count
-                        ),
-                    ));
-                    continue;
-                }
-                ResolvedOverloadSelection::NotApplicable { runtime_generic_failures } => {
-                    if let Some((_declaration, failure)) = runtime_generic_failures.first() {
-                        let callee = format!("{}.{}", class_decl.name, call.method);
-                        diagnostics.push(unresolved_generic_call_diagnostic(
-                            node,
-                            call.line,
-                            &callee,
-                            failure,
-                        ));
-                        continue;
-                    }
+            );
+            let mut matched = vec![false; branch_diagnostics.len()];
+            for diagnostic in variant_diagnostics {
+                let existing = branch_diagnostics
+                    .iter()
+                    .take(matched.len())
+                    .enumerate()
+                    .find_map(|(index, candidate)| {
+                        (!matched[index] && candidate == &diagnostic).then_some(index)
+                    });
+                if let Some(index) = existing {
+                    matched[index] = true;
+                } else {
+                    branch_diagnostics.push(diagnostic);
                 }
             }
         }
+        diagnostics.extend(branch_diagnostics);
+    }
 
-        let target_callable = context.load_declaration_semantics(target).callable;
-        match resolve_method_call_candidate_detailed(
+    diagnostics
+}
+
+fn direct_method_call_variant_diagnostics(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::MethodCallSite,
+    receiver_type: &SemanticType,
+    bound_owner_type: Option<&SemanticType>,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let owner_type = bound_owner_type.unwrap_or(receiver_type);
+    let Some(owner_type_name) = semantic_nominal_owner_name(owner_type) else {
+        return diagnostics;
+    };
+    let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &owner_type_name) else {
+        return diagnostics;
+    };
+    let candidates = find_owned_callable_declarations(nodes, class_node, class_decl, &call.method);
+    let Some(target) = candidates.first().copied() else {
+        let before_line = instance_initializer_access_cutoff(
+            &call.owner_name,
+            call.current_owner_name.as_deref(),
+            call.current_owner_type_name.as_deref(),
+            class_decl,
+            call.line,
+        );
+        let member_type =
+            find_owned_readable_member_declaration(nodes, class_node, class_decl, &call.method)
+                .and_then(|member| {
+                    resolve_readable_member_semantic_type_with_self_type(
+                        node,
+                        nodes,
+                        member,
+                        owner_type,
+                        Some(receiver_type),
+                    )
+                })
+                .or_else(|| {
+                    owned_instance_assignment_member_semantic_type_with_context(
+                        context,
+                        class_node,
+                        class_decl,
+                        &call.method,
+                        before_line,
+                    )
+                });
+        if let Some(member_type) = member_type
+            && !semantic_type_may_be_callable(context, class_node, &member_type)
+        {
+            diagnostics.push(
+                Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "member `{}` on type `{}` has non-callable type `{}`",
+                        call.method,
+                        class_decl.name,
+                        diagnostic_type_text(&member_type),
+                    ),
+                )
+                .with_span(Span::new(
+                    node.module_path.display().to_string(),
+                    call.line,
+                    1,
+                    call.line,
+                    1,
+                )),
+            );
+        }
+        return diagnostics;
+    };
+
+    let direct_call = typepython_binding::CallSite {
+        callee: format!("{}.{}", class_decl.name, call.method),
+        arg_count: call.arg_count,
+        arg_values: call.arg_values.clone(),
+        starred_arg_values: call.starred_arg_values.clone(),
+        keyword_names: call.keyword_names.clone(),
+        keyword_arg_values: call.keyword_arg_values.clone(),
+        keyword_expansion_values: call.keyword_expansion_values.clone(),
+        line: call.line,
+    };
+
+    let overloads = candidates
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Overload)
+        .map(|declaration| {
+            (*declaration, context.load_declaration_semantics(declaration).callable)
+        })
+        .collect::<Vec<_>>();
+    if !overloads.is_empty() {
+        match resolve_method_overload_selection(
             node,
             nodes,
-            target,
             &direct_call,
             call.current_owner_name.as_deref(),
             call.current_owner_type_name.as_deref(),
-            &receiver_type,
-            bound_owner_type.as_ref(),
-            target_callable.as_ref(),
+            receiver_type,
+            bound_owner_type,
+            &overloads,
             context.assignability_options(),
         ) {
-            Ok(resolved) => {
+            ResolvedOverloadSelection::Selected(candidate) => {
+                let signature = candidate.signature_sites;
                 if let Some(diagnostic) =
                     direct_source_function_arity_diagnostic_in_scope_with_context(
                         context,
                         node,
                         nodes,
                         &direct_call,
-                        &resolved.signature_sites,
+                        &signature,
                         call.current_owner_name.as_deref(),
                         call.current_owner_type_name.as_deref(),
                     )
@@ -624,7 +604,7 @@ pub(super) fn direct_method_call_diagnostics(
                         node,
                         nodes,
                         &direct_call,
-                        &resolved.signature_sites,
+                        &signature,
                         call.current_owner_name.as_deref(),
                         call.current_owner_type_name.as_deref(),
                     ),
@@ -634,77 +614,144 @@ pub(super) fn direct_method_call_diagnostics(
                     node,
                     nodes,
                     &direct_call,
-                    &resolved.signature_sites,
+                    &signature,
                     call.current_owner_name.as_deref(),
                     call.current_owner_type_name.as_deref(),
                 ));
-                continue;
+                return diagnostics;
             }
-            Err(failure) if declaration_has_runtime_generic_paramlist(target) => {
-                let callee = format!("{}.{}", class_decl.name, call.method);
-                diagnostics.push(unresolved_generic_call_diagnostic(
-                    node,
-                    call.line,
-                    &callee,
-                    &failure,
+            ResolvedOverloadSelection::Ambiguous { applicable_count } => {
+                diagnostics.push(Diagnostic::error(
+                    "TPY4012",
+                    format!(
+                        "call to `{}.{}` in module `{}` is ambiguous across {} overloads after applicability filtering",
+                        class_decl.name,
+                        call.method,
+                        node.module_path.display(),
+                        applicable_count
+                    ),
                 ));
-                continue;
+                return diagnostics;
             }
-            Err(_) => {}
+            ResolvedOverloadSelection::NotApplicable { runtime_generic_failures } => {
+                if let Some((_declaration, failure)) = runtime_generic_failures.first() {
+                    let callee = format!("{}.{}", class_decl.name, call.method);
+                    diagnostics.push(unresolved_generic_call_diagnostic(
+                        node,
+                        call.line,
+                        &callee,
+                        failure,
+                    ));
+                    return diagnostics;
+                }
+            }
         }
+    }
 
-        let fallback_signature = target_callable
-            .as_ref()
-            .map(|callable| {
-                let owner_substitutions = without_shadowed_generic_params(
-                    owner_generic_substitutions(owner_type, class_decl),
-                    target,
-                );
-                let params =
-                    method_semantic_params_without_self_from_semantics(target, callable);
-                let params =
-                    substitute_semantic_callable_params(&params, &owner_substitutions);
-                let nominal_self_type = SemanticType::Name(class_decl.name.clone());
-                let self_type =
-                    bound_owner_type.as_ref().map_or(&nominal_self_type, |_| &receiver_type);
-                let params =
-                    substitute_self_semantic_params_with_type(&params, Some(self_type));
-                signature_sites_from_semantic_params(&params)
-            })
-            .unwrap_or_default();
-        if let Some(diagnostic) =
-            direct_source_function_arity_diagnostic_in_scope_with_context(
+    let target_callable = context.load_declaration_semantics(target).callable;
+    match resolve_method_call_candidate_detailed(
+        node,
+        nodes,
+        target,
+        &direct_call,
+        call.current_owner_name.as_deref(),
+        call.current_owner_type_name.as_deref(),
+        receiver_type,
+        bound_owner_type,
+        target_callable.as_ref(),
+        context.assignability_options(),
+    ) {
+        Ok(resolved) => {
+            if let Some(diagnostic) =
+                direct_source_function_arity_diagnostic_in_scope_with_context(
+                    context,
+                    node,
+                    nodes,
+                    &direct_call,
+                    &resolved.signature_sites,
+                    call.current_owner_name.as_deref(),
+                    call.current_owner_type_name.as_deref(),
+                )
+            {
+                diagnostics.push(diagnostic);
+            }
+            diagnostics.extend(
+                direct_source_function_keyword_diagnostics_in_scope_with_context(
+                    context,
+                    node,
+                    nodes,
+                    &direct_call,
+                    &resolved.signature_sites,
+                    call.current_owner_name.as_deref(),
+                    call.current_owner_type_name.as_deref(),
+                ),
+            );
+            diagnostics.extend(direct_source_function_type_diagnostics_in_scope_with_context(
                 context,
                 node,
                 nodes,
                 &direct_call,
-                &fallback_signature,
+                &resolved.signature_sites,
                 call.current_owner_name.as_deref(),
                 call.current_owner_type_name.as_deref(),
-            )
-        {
-            diagnostics.push(diagnostic);
+            ));
+            return diagnostics;
         }
-        diagnostics.extend(direct_source_function_keyword_diagnostics_in_scope_with_context(
-            context,
-            node,
-            nodes,
-            &direct_call,
-            &fallback_signature,
-            call.current_owner_name.as_deref(),
-            call.current_owner_type_name.as_deref(),
-        ));
-        diagnostics.extend(direct_source_function_type_diagnostics_in_scope_with_context(
-            context,
-            node,
-            nodes,
-            &direct_call,
-            &fallback_signature,
-            call.current_owner_name.as_deref(),
-            call.current_owner_type_name.as_deref(),
-        ));
+        Err(failure) if declaration_has_runtime_generic_paramlist(target) => {
+            let callee = format!("{}.{}", class_decl.name, call.method);
+            diagnostics.push(unresolved_generic_call_diagnostic(
+                node,
+                call.line,
+                &callee,
+                &failure,
+            ));
+            return diagnostics;
+        }
+        Err(_) => {}
     }
 
+    let fallback_signature = target_callable
+        .as_ref()
+        .map(|callable| {
+            let owner_substitutions = without_shadowed_generic_params(
+                owner_generic_substitutions(owner_type, class_decl),
+                target,
+            );
+            let params = method_semantic_params_without_self_from_semantics(target, callable);
+            let params = substitute_semantic_callable_params(&params, &owner_substitutions);
+            let params = substitute_self_semantic_params_with_type(&params, Some(receiver_type));
+            signature_sites_from_semantic_params(&params)
+        })
+        .unwrap_or_default();
+    if let Some(diagnostic) = direct_source_function_arity_diagnostic_in_scope_with_context(
+        context,
+        node,
+        nodes,
+        &direct_call,
+        &fallback_signature,
+        call.current_owner_name.as_deref(),
+        call.current_owner_type_name.as_deref(),
+    ) {
+        diagnostics.push(diagnostic);
+    }
+    diagnostics.extend(direct_source_function_keyword_diagnostics_in_scope_with_context(
+        context,
+        node,
+        nodes,
+        &direct_call,
+        &fallback_signature,
+        call.current_owner_name.as_deref(),
+        call.current_owner_type_name.as_deref(),
+    ));
+    diagnostics.extend(direct_source_function_type_diagnostics_in_scope_with_context(
+        context,
+        node,
+        nodes,
+        &direct_call,
+        &fallback_signature,
+        call.current_owner_name.as_deref(),
+        call.current_owner_type_name.as_deref(),
+    ));
     diagnostics
 }
 

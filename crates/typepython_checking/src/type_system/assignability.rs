@@ -508,6 +508,18 @@ fn semantic_type_is_none(ty: &SemanticType) -> bool {
     matches!(ty.strip_annotated(), SemanticType::Name(name) if name == "None")
 }
 
+pub(super) fn semantic_member_union_branches(
+    ty: &SemanticType,
+    strict_nulls: bool,
+) -> Option<Vec<SemanticType>> {
+    let branches = semantic_union_branches(ty)?;
+    let branches = branches
+        .into_iter()
+        .filter(|branch| strict_nulls || !semantic_type_is_none(branch))
+        .collect::<Vec<_>>();
+    (!branches.is_empty()).then_some(branches)
+}
+
 fn semantic_type_accepts_implicit_none(ty: &SemanticType) -> bool {
     let ty = ty.strip_annotated();
     if let Some(branches) = semantic_union_branches(ty) {

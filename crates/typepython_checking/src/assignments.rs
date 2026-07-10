@@ -1812,6 +1812,7 @@ fn scoped_mutation_target_bound_semantic_type(
     nodes: &[typepython_graph::ModuleNode],
     site: &typepython_syntax::FrozenFieldMutationSite,
     receiver_type: &SemanticType,
+    options: AssignabilityOptions,
 ) -> Option<SemanticType> {
     scoped_expression_type_param_bound_semantic_type(
         node,
@@ -1821,6 +1822,7 @@ fn scoped_mutation_target_bound_semantic_type(
         site.line,
         &site.target,
         receiver_type,
+        options,
     )
 }
 
@@ -1844,7 +1846,13 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
                 &site.target,
             )?;
             let bound_target_type =
-                scoped_mutation_target_bound_semantic_type(node, nodes, &site, &receiver_type);
+                scoped_mutation_target_bound_semantic_type(
+                    node,
+                    nodes,
+                    &site,
+                    &receiver_type,
+                    context.assignability_options(),
+                );
             let target_type = bound_target_type.as_ref().unwrap_or(&receiver_type);
             let target_type_rendered = diagnostic_type_text(target_type);
             let shape = resolve_known_dataclass_transform_shape_from_type_with_context(
@@ -2037,8 +2045,7 @@ pub(super) fn resolve_writable_member_semantic_type_with_self_type(
             let callable = declaration_callable_semantics(declaration)?;
             let params = method_semantic_params_without_self_from_semantics(declaration, &callable);
             let params = substitute_semantic_callable_params(&params, &owner_substitutions);
-            let nominal_self_type = SemanticType::Name(owner_type_name);
-            let self_type = self_type.unwrap_or(&nominal_self_type);
+            let self_type = self_type.unwrap_or(owner_type);
             let params = substitute_self_semantic_params_with_type(&params, Some(self_type));
             (params.len() == 1).then(|| {
                 rewrite_imported_typing_semantic_type(node, &params[0].annotation_or_dynamic())
@@ -2122,7 +2129,13 @@ pub(super) fn attribute_assignment_type_diagnostics(
                 &site.target,
             )?;
             let bound_target_type =
-                scoped_mutation_target_bound_semantic_type(node, nodes, &site, &receiver_type);
+                scoped_mutation_target_bound_semantic_type(
+                    node,
+                    nodes,
+                    &site,
+                    &receiver_type,
+                    context.assignability_options(),
+                );
             let target_type = bound_target_type.as_ref().unwrap_or(&receiver_type);
             let target_type_rendered = diagnostic_type_text(target_type);
 

@@ -1,4 +1,4 @@
-fn scoped_nominal_type_param_bound_semantic_type(
+fn scoped_type_param_bound_without_provenance(
     node: &typepython_graph::ModuleNode,
     current_owner_name: Option<&str>,
     current_owner_type_name: Option<&str>,
@@ -41,7 +41,6 @@ fn scoped_nominal_type_param_bound_semantic_type(
         .bound_expr
         .as_ref()
         .map(|bound| lower_type_expr(bound.expr.clone()))
-        .filter(|bound| semantic_nominal_owner_name(bound).is_some())
 }
 
 #[expect(
@@ -57,11 +56,12 @@ pub(super) fn scoped_type_param_bound_semantic_type(
     receiver_name: &str,
     through_instance: bool,
     owner_type: &SemanticType,
+    options: AssignabilityOptions,
 ) -> Option<SemanticType> {
     let SemanticType::Name(type_param_name) = owner_type.strip_annotated() else {
         return None;
     };
-    let bound = scoped_nominal_type_param_bound_semantic_type(
+    let bound = scoped_type_param_bound_without_provenance(
         node,
         current_owner_name,
         current_owner_type_name,
@@ -85,6 +85,7 @@ pub(super) fn scoped_type_param_bound_semantic_type(
             current_line,
             receiver_name,
             type_param_name,
+            options,
             &mut BTreeSet::new(),
         )
     };
@@ -94,6 +95,10 @@ pub(super) fn scoped_type_param_bound_semantic_type(
     Some(bound)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "bound lookup needs graph, expression provenance, lexical scope, and checker options"
+)]
 pub(super) fn scoped_expression_type_param_bound_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -102,11 +107,12 @@ pub(super) fn scoped_expression_type_param_bound_semantic_type(
     current_line: usize,
     metadata: &typepython_syntax::DirectExprMetadata,
     owner_type: &SemanticType,
+    options: AssignabilityOptions,
 ) -> Option<SemanticType> {
     let SemanticType::Name(type_param_name) = owner_type.strip_annotated() else {
         return None;
     };
-    let bound = scoped_nominal_type_param_bound_semantic_type(
+    let bound = scoped_type_param_bound_without_provenance(
         node,
         current_owner_name,
         current_owner_type_name,
@@ -120,6 +126,7 @@ pub(super) fn scoped_expression_type_param_bound_semantic_type(
         current_line,
         metadata,
         type_param_name,
+        options,
         &mut BTreeSet::new(),
     )
     .then_some(bound)
@@ -176,9 +183,10 @@ fn scoped_bound_method_returns_self(
     current_owner_type_name: Option<&str>,
     type_param_name: &str,
     method_name: &str,
+    options: AssignabilityOptions,
 ) -> bool {
     let owner_type = SemanticType::Name(type_param_name.to_owned());
-    let Some(bound_type) = scoped_nominal_type_param_bound_semantic_type(
+    let Some(bound_type) = scoped_type_param_bound_without_provenance(
         node,
         current_owner_name,
         current_owner_type_name,
@@ -186,10 +194,26 @@ fn scoped_bound_method_returns_self(
     ) else {
         return false;
     };
-    let Some(bound_name) = semantic_nominal_owner_name(&bound_type) else {
+    method_returns_self_on_owner_type(node, nodes, &bound_type, method_name, options)
+}
+
+fn method_returns_self_on_owner_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    owner_type: &SemanticType,
+    method_name: &str,
+    options: AssignabilityOptions,
+) -> bool {
+    if let Some(branches) = semantic_member_union_branches(owner_type, options.strict_nulls) {
+        return !branches.is_empty()
+            && branches.iter().all(|branch| {
+                method_returns_self_on_owner_type(node, nodes, branch, method_name, options)
+            });
+    }
+    let Some(owner_name) = semantic_nominal_owner_name(owner_type) else {
         return false;
     };
-    let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &bound_name) else {
+    let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &owner_name) else {
         return false;
     };
     let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
@@ -213,6 +237,7 @@ fn scoped_metadata_has_type_param_provenance(
     current_line: usize,
     metadata: &typepython_syntax::DirectExprMetadata,
     type_param_name: &str,
+    options: AssignabilityOptions,
     visiting: &mut BTreeSet<String>,
 ) -> bool {
     if metadata.value_type_expr.as_ref().is_some_and(|value_type| {
@@ -229,6 +254,7 @@ fn scoped_metadata_has_type_param_provenance(
             current_line,
             value_name,
             type_param_name,
+            options,
             visiting,
         );
     }
@@ -264,6 +290,7 @@ fn scoped_metadata_has_type_param_provenance(
                 current_line,
                 receiver_name,
                 type_param_name,
+                options,
                 visiting,
             )
         };
@@ -275,6 +302,7 @@ fn scoped_metadata_has_type_param_provenance(
                 current_owner_type_name,
                 type_param_name,
                 method_name,
+                options,
             );
     }
     if let Some(target) = metadata.value_subscript_target.as_deref()
@@ -299,6 +327,7 @@ fn scoped_metadata_has_type_param_provenance(
             current_line,
             true_value,
             type_param_name,
+            options,
             &mut visiting.clone(),
         ) && scoped_metadata_has_type_param_provenance(
             node,
@@ -308,6 +337,7 @@ fn scoped_metadata_has_type_param_provenance(
             current_line,
             false_value,
             type_param_name,
+            options,
             &mut visiting.clone(),
         );
     }
@@ -326,6 +356,7 @@ fn scoped_value_has_type_param_provenance(
     current_line: usize,
     value_name: &str,
     type_param_name: &str,
+    options: AssignabilityOptions,
     visiting: &mut BTreeSet<String>,
 ) -> bool {
     if !visiting.insert(value_name.to_owned()) {
@@ -418,6 +449,7 @@ fn scoped_value_has_type_param_provenance(
         assignment.line,
         &metadata,
         type_param_name,
+        options,
         visiting,
     )
 }
@@ -486,7 +518,7 @@ pub(super) fn resolve_direct_member_reference_semantic_type_with_options(
         resolve_direct_callable_return_semantic_type(node, nodes, owner_name)
             .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     } else {
-        resolve_direct_name_reference_semantic_type(
+        resolve_direct_name_reference_semantic_type_with_options(
             node,
             nodes,
             signature,
@@ -495,6 +527,7 @@ pub(super) fn resolve_direct_member_reference_semantic_type_with_options(
             current_owner_type_name,
             current_line,
             owner_name,
+            options,
         )
         .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     }?;
@@ -508,6 +541,7 @@ pub(super) fn resolve_direct_member_reference_semantic_type_with_options(
         owner_name,
         through_instance,
         &owner_type,
+        options,
     );
     match bound_owner_type {
         Some(bound_owner_type) => resolve_member_semantic_type_on_owner_type_with_self_type(
@@ -549,6 +583,22 @@ pub(super) fn resolve_member_semantic_type_on_owner_type_with_self_type(
     member_name: &str,
     options: AssignabilityOptions,
 ) -> Option<SemanticType> {
+    if let Some(branches) = semantic_member_union_branches(owner_type, options.strict_nulls) {
+        let member_types = branches
+            .iter()
+            .map(|branch| {
+                resolve_member_semantic_type_on_owner_type_with_self_type(
+                    node,
+                    nodes,
+                    branch,
+                    self_type.or(Some(branch)),
+                    member_name,
+                    options,
+                )
+            })
+            .collect::<Option<Vec<_>>>()?;
+        return Some(join_semantic_type_candidates(member_types));
+    }
     let owner_type_name = semantic_nominal_owner_name(owner_type)?;
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let Some(member) = find_owned_readable_member_declaration(
@@ -580,7 +630,11 @@ pub(super) fn resolve_member_semantic_type_on_owner_type_with_self_type(
         return Some(lower_type_text_or_name(&format!("Literal[{}.{}]", class_decl.name, member_name)));
     }
     resolve_readable_member_semantic_type_with_self_type(
-        node, nodes, member, owner_type, self_type,
+        node,
+        nodes,
+        member,
+        owner_type,
+        self_type.or(Some(owner_type)),
     )
 }
 
@@ -590,10 +644,26 @@ pub(super) fn resolve_method_return_semantic_type_on_owner_type_with_self_type(
     owner_type: &SemanticType,
     self_type: Option<&SemanticType>,
     method_name: &str,
+    options: AssignabilityOptions,
 ) -> Option<SemanticType> {
+    if let Some(branches) = semantic_member_union_branches(owner_type, options.strict_nulls) {
+        let return_types = branches
+            .iter()
+            .map(|branch| {
+                resolve_method_return_semantic_type_on_owner_type_with_self_type(
+                    node,
+                    nodes,
+                    branch,
+                    self_type.or(Some(branch)),
+                    method_name,
+                    options,
+                )
+            })
+            .collect::<Option<Vec<_>>>()?;
+        return Some(join_semantic_type_candidates(return_types));
+    }
     let owner_type_name = semantic_nominal_owner_name(owner_type)?;
-    let nominal_self_type = SemanticType::Name(owner_type_name.clone());
-    let self_type = self_type.unwrap_or(&nominal_self_type);
+    let self_type = self_type.unwrap_or(owner_type);
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let owner_substitutions = owner_generic_substitutions(owner_type, class_decl);
     let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
@@ -687,7 +757,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
         resolve_direct_callable_return_semantic_type(node, nodes, owner_name)
             .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     } else {
-        resolve_direct_name_reference_semantic_type(
+        resolve_direct_name_reference_semantic_type_with_options(
             node,
             nodes,
             signature,
@@ -696,6 +766,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             current_owner_type_name,
             current_line,
             owner_name,
+            options,
         )
         .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     }?;
@@ -709,11 +780,81 @@ pub(super) fn resolve_direct_method_return_semantic_type(
         owner_name,
         through_instance,
         &receiver_type,
+        options,
     );
     let owner_type = bound_owner_type.as_ref().unwrap_or(&receiver_type);
+    if let Some(branches) = semantic_member_union_branches(owner_type, options.strict_nulls) {
+        let return_types = branches
+            .iter()
+            .map(|branch| {
+                if bound_owner_type.is_some() {
+                    resolve_direct_method_return_on_owner_type(
+                        node,
+                        nodes,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        owner_name,
+                        method_name,
+                        through_instance,
+                        &receiver_type,
+                        Some(branch),
+                        options,
+                    )
+                } else {
+                    resolve_direct_method_return_on_owner_type(
+                        node,
+                        nodes,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        owner_name,
+                        method_name,
+                        through_instance,
+                        branch,
+                        None,
+                        options,
+                    )
+                }
+            })
+            .collect::<Option<Vec<_>>>()?;
+        return Some(join_semantic_type_candidates(return_types));
+    }
+    resolve_direct_method_return_on_owner_type(
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        owner_name,
+        method_name,
+        through_instance,
+        &receiver_type,
+        bound_owner_type.as_ref(),
+        options,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "branch-wise method return resolution needs source call context and receiver/lookup types"
+)]
+fn resolve_direct_method_return_on_owner_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    owner_name: &str,
+    method_name: &str,
+    through_instance: bool,
+    receiver_type: &SemanticType,
+    lookup_owner_type: Option<&SemanticType>,
+    options: AssignabilityOptions,
+) -> Option<SemanticType> {
+    let owner_type = lookup_owner_type.unwrap_or(receiver_type);
     let owner_type_name = semantic_nominal_owner_name(owner_type)?;
-    let nominal_self_type = SemanticType::Name(owner_type_name.clone());
-    let self_type = bound_owner_type.as_ref().map_or(&nominal_self_type, |_| &receiver_type);
+    let self_type = receiver_type;
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let owner_substitutions = owner_generic_substitutions(owner_type, class_decl);
     let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
@@ -749,8 +890,8 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             &call,
             current_owner_name,
             current_owner_type_name,
-            &receiver_type,
-            bound_owner_type.as_ref(),
+            receiver_type,
+            lookup_owner_type,
             &overloads,
             options,
         ) {
@@ -782,8 +923,8 @@ pub(super) fn resolve_direct_method_return_semantic_type(
                 &call,
                 current_owner_name,
                 current_owner_type_name,
-                &receiver_type,
-                bound_owner_type.as_ref(),
+                receiver_type,
+                lookup_owner_type,
                 declaration_callable_semantics(method).as_ref(),
                 options,
             )

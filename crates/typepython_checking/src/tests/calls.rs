@@ -1860,6 +1860,291 @@ fn check_does_not_propagate_type_parameter_through_non_self_method_return() {
 }
 
 #[test]
+fn check_resolves_union_receiver_member_and_method_return_joins() {
+    let result = check_temp_typepython_source(concat!(
+        "class Left:\n",
+        "    value: int\n",
+        "    def parse(self, raw: str) -> int:\n",
+        "        return 1\n\n",
+        "class Right:\n",
+        "    value: str\n",
+        "    def parse(self, raw: str) -> str:\n",
+        "        return raw\n\n",
+        "def parse_value(owner: Left | Right) -> int | str:\n",
+        "    return owner.parse(\"value\")\n\n",
+        "def read_value(owner: Left | Right) -> int | str:\n",
+        "    return owner.value\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_validates_each_union_receiver_method_signature() {
+    let result = check_temp_typepython_source(concat!(
+        "class Left:\n",
+        "    def parse(self, raw: str) -> int:\n",
+        "        return 1\n\n",
+        "class Right:\n",
+        "    def parse(self, raw: int) -> int:\n",
+        "        return raw\n\n",
+        "def parse_value(owner: Left | Right) -> int:\n",
+        "    return owner.parse(\"value\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 1, "{rendered}");
+    assert!(rendered.contains("Right.parse"), "{rendered}");
+}
+
+#[test]
+fn check_preserves_self_return_across_union_receiver() {
+    let result = check_temp_typepython_source(concat!(
+        "class Left:\n",
+        "    def clone(self) -> Self:\n",
+        "        return self\n\n",
+        "class Right:\n",
+        "    def clone(self) -> Self:\n",
+        "        return self\n\n",
+        "def clone_value(owner: Left | Right) -> Left | Right:\n",
+        "    return owner.clone()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_resolves_union_bound_member_method_and_self_returns() {
+    let result = check_temp_typepython_source(concat!(
+        "class Left:\n",
+        "    value: int\n",
+        "    def parse(self, raw: str) -> int:\n",
+        "        return 1\n",
+        "    def clone(self) -> Self:\n",
+        "        return self\n\n",
+        "class Right:\n",
+        "    value: str\n",
+        "    def parse(self, raw: str) -> str:\n",
+        "        return raw\n",
+        "    def clone(self) -> Self:\n",
+        "        return self\n\n",
+        "def parse_value[T: Left | Right](owner: T) -> int | str:\n",
+        "    return owner.parse(\"value\")\n\n",
+        "def read_value[T: Left | Right](owner: T) -> int | str:\n",
+        "    return owner.value\n\n",
+        "def clone_value[T: Left | Right](owner: T) -> T:\n",
+        "    return owner.clone()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_validates_each_union_bound_method_signature() {
+    let result = check_temp_typepython_source(concat!(
+        "class Left:\n",
+        "    def parse(self, raw: str) -> int:\n",
+        "        return 1\n\n",
+        "class Right:\n",
+        "    def parse(self, raw: str) -> int:\n",
+        "        return 1\n\n",
+        "def parse_value[T: Left | Right](owner: T) -> int:\n",
+        "    return owner.parse(1)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 2, "{rendered}");
+    assert!(rendered.contains("Left.parse") && rendered.contains("Right.parse"), "{rendered}");
+}
+
+#[test]
+fn check_reports_union_receiver_joined_return_mismatches() {
+    let result = check_temp_typepython_source(concat!(
+        "class Left:\n",
+        "    value: int\n",
+        "    def parse(self) -> int:\n",
+        "        return 1\n\n",
+        "class Right:\n",
+        "    value: str\n",
+        "    def parse(self) -> str:\n",
+        "        return \"value\"\n\n",
+        "def parse_value(owner: Left | Right) -> int:\n",
+        "    return owner.parse()\n\n",
+        "def read_value(owner: Left | Right) -> int:\n",
+        "    return owner.value\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 2, "{rendered}");
+    assert!(rendered.contains("Union[int, str]"), "{rendered}");
+}
+
+#[test]
+fn check_reports_union_bound_joined_return_mismatches() {
+    let result = check_temp_typepython_source(concat!(
+        "class Left:\n",
+        "    value: int\n",
+        "    def parse(self) -> int:\n",
+        "        return 1\n\n",
+        "class Right:\n",
+        "    value: str\n",
+        "    def parse(self) -> str:\n",
+        "        return \"value\"\n\n",
+        "def parse_value[T: Left | Right](owner: T) -> int:\n",
+        "    return owner.parse()\n\n",
+        "def read_value[T: Left | Right](owner: T) -> int:\n",
+        "    return owner.value\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 2, "{rendered}");
+    assert!(rendered.contains("Union[int, str]"), "{rendered}");
+}
+
+#[test]
+fn check_ignores_none_union_branches_consistently_when_strict_nulls_is_disabled() {
+    let result = check_temp_typepython_source_with_checker_options(
+        concat!(
+            "class Box:\n",
+            "    value: int\n",
+            "    def parse(self) -> int:\n",
+            "        return 1\n",
+            "    def clone(self) -> Self:\n",
+            "        return self\n\n",
+            "def wrong_method(owner: Box | None) -> str:\n",
+            "    return owner.parse()\n\n",
+            "def wrong_member(owner: Box | None) -> str:\n",
+            "    return owner.value\n\n",
+            "def wrong_copy[T: Box | None](owner: T) -> str:\n",
+            "    copy = owner.clone()\n",
+            "    return copy.value\n",
+        ),
+        ParseOptions::default(),
+        crate::CheckerOptions {
+            strict: true,
+            strict_nulls: false,
+            ..crate::CheckerOptions::permissive_test_default()
+        },
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 3, "{rendered}");
+    assert!(!rendered.contains("TPY4002"), "{rendered}");
+}
+
+#[test]
+fn check_reports_method_missing_from_one_union_receiver_branch() {
+    let result = check_temp_typepython_source(concat!(
+        "class Left:\n",
+        "    def parse(self) -> int:\n",
+        "        return 1\n\n",
+        "class Right:\n",
+        "    pass\n\n",
+        "def parse_value(owner: Left | Right) -> int:\n",
+        "    return owner.parse()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4002]").count(), 1, "{rendered}");
+    assert!(rendered.contains("has no member `parse` on every union branch"), "{rendered}");
+}
+
+#[test]
+fn check_preserves_parameterized_self_across_union_receiver_branches() {
+    let result = check_temp_typepython_source(concat!(
+        "class Box[T]:\n",
+        "    def clone(self) -> Self:\n",
+        "        return self\n\n",
+        "def clone_value(owner: Box[int] | Box[str]) -> Box[int]:\n",
+        "    return owner.clone()\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 1, "{rendered}");
+    assert!(rendered.contains("Union[Box[int], Box[str]]"), "{rendered}");
+}
+
+#[test]
+fn check_validates_self_parameters_per_union_receiver_branch() {
+    let result = check_temp_typepython_source(concat!(
+        "class Box[T]:\n",
+        "    def merge(self, other: Self) -> Self:\n",
+        "        return self\n\n",
+        "def merge_values(\n",
+        "    owner: Box[int] | Box[str],\n",
+        "    other: Box[int] | Box[str],\n",
+        ") -> None:\n",
+        "    owner.merge(other)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 2, "{rendered}");
+    assert!(rendered.contains("Box[int]") && rendered.contains("Box[str]"), "{rendered}");
+}
+
+#[test]
+fn check_deduplicates_identical_union_branch_method_diagnostics() {
+    let result = check_temp_typepython_source(concat!(
+        "class Box[T]:\n",
+        "    def parse(self, raw: str) -> int:\n",
+        "        return 1\n\n",
+        "def parse_value(owner: Box[int] | Box[str]) -> int:\n",
+        "    return owner.parse(1)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 1, "{rendered}");
+    assert!(rendered.contains("Box.parse"), "{rendered}");
+}
+
+#[test]
+fn check_preserves_duplicate_argument_diagnostics_within_one_method_call() {
+    let result = check_temp_typepython_source(concat!(
+        "class Parser:\n",
+        "    def parse(self, first: str, second: str) -> int:\n",
+        "        return 1\n\n",
+        "def parse_value(parser: Parser) -> int:\n",
+        "    return parser.parse(1, 1)\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 2, "{rendered}");
+    assert_eq!(rendered.matches("passes `int` where parameter expects `str`").count(), 2);
+}
+
+#[test]
+fn check_selects_overloads_on_each_union_receiver_branch() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import overload\n\n",
+        "class Left:\n",
+        "    @overload\n",
+        "    def parse(self, raw: int) -> int: ...\n",
+        "    @overload\n",
+        "    def parse(self, raw: str) -> str: ...\n",
+        "    def parse(self, raw: int | str) -> int | str:\n",
+        "        return raw\n\n",
+        "class Right:\n",
+        "    @overload\n",
+        "    def parse(self, raw: int) -> int: ...\n",
+        "    @overload\n",
+        "    def parse(self, raw: str) -> bytes: ...\n",
+        "    def parse(self, raw: int | str) -> int | bytes:\n",
+        "        return b\"value\"\n\n",
+        "def parse_value(owner: Left | Right) -> str | bytes:\n",
+        "    return owner.parse(\"value\")\n\n",
+        "def wrong_value(owner: Left | Right) -> int:\n",
+        "    return owner.parse(\"value\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 1, "{rendered}");
+    assert!(rendered.contains("Union[str, bytes]"), "{rendered}");
+}
+
+#[test]
 fn check_resolves_method_argument_expansions_in_function_scope() {
     let result = check_temp_typepython_source(concat!(
         "from typing import TypedDict\n\n",

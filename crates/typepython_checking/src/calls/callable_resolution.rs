@@ -427,7 +427,6 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
     callable: Option<&SemanticCallableDeclaration>,
     options: AssignabilityOptions,
 ) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
-    let has_distinct_lookup_owner = lookup_owner_type.is_some();
     let lookup_owner_type = lookup_owner_type.unwrap_or(owner_type);
     let owner_type_name = semantic_nominal_owner_name(lookup_owner_type).ok_or_else(|| {
         DirectCallResolutionFailure::SignatureInstantiationFailed {
@@ -435,8 +434,7 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
             unresolved: Vec::new(),
         }
     })?;
-    let nominal_self_type = SemanticType::Name(owner_type_name.clone());
-    let self_type = if has_distinct_lookup_owner { owner_type } else { &nominal_self_type };
+    let self_type = owner_type;
     let (_, owner_class_decl) = resolve_direct_base(nodes, node, &owner_type_name).ok_or_else(|| {
         DirectCallResolutionFailure::SignatureInstantiationFailed {
             declaration_name: declaration.name.clone(),

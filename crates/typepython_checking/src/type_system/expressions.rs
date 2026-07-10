@@ -751,6 +751,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                         current_line,
                         owner_metadata,
                         &owner_type,
+                        options,
                     );
                     let lookup_owner_type = bound_owner_type.as_ref().unwrap_or(&owner_type);
                     resolve_member_semantic_type_on_owner_type_with_self_type(
@@ -771,6 +772,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                         current_line,
                         owner_metadata,
                         &owner_type,
+                        options,
                     );
                     let lookup_owner_type = bound_owner_type.as_ref().unwrap_or(&owner_type);
                     resolve_method_return_semantic_type_on_owner_type_with_self_type(
@@ -779,6 +781,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                         lookup_owner_type,
                         bound_owner_type.as_ref().map(|_| &owner_type),
                         method_name,
+                        options,
                     )
                 }
                 None => owner_type
@@ -1217,8 +1220,7 @@ pub(super) fn resolve_readable_member_semantic_type_with_self_type(
     self_type: Option<&SemanticType>,
 ) -> Option<SemanticType> {
     let owner_type_name = semantic_nominal_owner_name(owner_type)?;
-    let nominal_self_type = SemanticType::Name(owner_type_name.clone());
-    let self_type = self_type.unwrap_or(&nominal_self_type);
+    let self_type = self_type.unwrap_or(owner_type);
     let (_, owner_class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let owner_substitutions = owner_generic_substitutions(owner_type, owner_class_decl);
     match declaration.kind {
