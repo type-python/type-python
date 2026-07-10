@@ -1765,9 +1765,9 @@ fn render_typepython_type_params(params: &[typepython_syntax::TypeParam]) -> Str
 }
 
 fn public_name(name: &str) -> bool {
-    !name.is_empty()
-        && !name.starts_with('_')
-        && name.chars().all(|character| character == '_' || character.is_ascii_alphanumeric())
+    let mut characters = name.chars();
+    characters.next().is_some_and(|first| unicode_ident::is_xid_start(first) && first != '_')
+        && characters.all(unicode_ident::is_xid_continue)
 }
 
 fn public_member_name(name: &str) -> bool {

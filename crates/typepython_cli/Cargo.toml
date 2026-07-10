@@ -43,6 +43,7 @@ typepython-lsp = { path = "../typepython_lsp" }
 typepython-project = { path = "../typepython_project" }
 typepython-syntax = { path = "../typepython_syntax" }
 typepython-target = { path = "../typepython_target" }
+unicode-ident.workspace = true
 zip.workspace = true
 
 [lints]

@@ -813,6 +813,36 @@ fn diff_api_surfaces_reports_py_typed_metadata_regression() {
 }
 
 #[test]
+fn diff_api_surfaces_includes_unicode_public_identifiers() {
+    let project_dir = temp_project_dir("diff_api_surfaces_includes_unicode_public_identifiers");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "café: str\n",
+                "def 计算(value: int) -> int: ...\n",
+                "class 用户:\n",
+                "    def 显示(self) -> str: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+        fs::write(new_dir.join("app.pyi"), "").expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should retain Unicode identifiers")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.removed.iter().map(|change| change.symbol.as_str()).collect::<BTreeSet<_>>(),
+        BTreeSet::from(["café", "用户", "用户.显示", "计算"])
+    );
+}
+
+#[test]
 fn diff_api_surfaces_recommends_minor_for_additive_changes() {
     let project_dir = temp_project_dir("diff_api_surfaces_recommends_minor_for_additive_changes");
     let report = {

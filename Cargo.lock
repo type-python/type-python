@@ -1926,6 +1926,7 @@ dependencies = [
  "typepython-project",
  "typepython-syntax",
  "typepython-target",
+ "unicode-ident",
  "zip",
 ]
 
