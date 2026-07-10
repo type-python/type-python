@@ -40,7 +40,8 @@ fn plan_emits_for_sources_matches_source_kinds_without_lowered_modules() {
                 source_kind: SourceKind::Stub,
             },
         ],
-    );
+    )
+    .expect("safe source paths should be planned");
 
     assert_eq!(artifacts.len(), 2);
     assert_eq!(artifacts[0].runtime_path, Some(temp_dir.join("build/pkg/__init__.py")));
@@ -967,10 +968,42 @@ fn plan_emits_for_sources_returns_empty_for_no_modules() {
     )
     .expect("test setup should succeed");
     let config = load(&temp_dir).expect("config should load");
-    let artifacts = plan_emits_for_sources(&config, &[]);
+    let artifacts = plan_emits_for_sources(&config, &[]).expect("empty plans should succeed");
 
     remove_temp_dir(&temp_dir);
     assert!(artifacts.is_empty());
+}
+
+#[test]
+fn plan_emits_for_sources_rejects_parent_directory_escape() {
+    let temp_dir = temp_dir("plan_emits_for_sources_rejects_parent_directory_escape");
+    fs::create_dir_all(temp_dir.join("src")).expect("test setup should succeed");
+    fs::write(
+        temp_dir.join("typepython.toml"),
+        "[project]\nroot_dir = \"src\"\nout_dir = \"build\"\n",
+    )
+    .expect("test setup should succeed");
+    let config = load(&temp_dir).expect("config should load");
+    let source_path = temp_dir.join("src/../outside.tpy");
+
+    let error = plan_emits_for_sources(
+        &config,
+        &[PlannedModuleSource {
+            source_path: source_path.clone(),
+            source_kind: SourceKind::TypePython,
+        }],
+    )
+    .expect_err("parent-directory output paths must be rejected");
+
+    assert!(error.to_string().contains("refusing to plan an output"));
+    assert_eq!(
+        error,
+        super::EmitPlanningError::UnsafeSourcePath {
+            source_path,
+            logical_root: temp_dir.join("src"),
+        }
+    );
+    remove_temp_dir(&temp_dir);
 }
 
 #[test]

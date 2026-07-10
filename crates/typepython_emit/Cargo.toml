@@ -12,6 +12,7 @@ version.workspace = true
 littrs-ruff-python-ast = "0.6.2"
 littrs-ruff-python-parser = "0.6.2"
 littrs-ruff-text-size = "0.6.2"
+thiserror.workspace = true
 typepython-config = { path = "../typepython_config" }
 typepython-lowering = { path = "../typepython_lowering" }
 typepython-syntax = { path = "../typepython_syntax" }

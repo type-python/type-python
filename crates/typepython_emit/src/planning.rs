@@ -1,4 +1,21 @@
 use super::*;
+use std::path::Component;
+use thiserror::Error;
+
+/// Errors produced while planning output paths.
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum EmitPlanningError {
+    /// A source path would place an emitted artifact outside the configured output root.
+    #[error(
+        "source path `{source_path}` resolves outside logical root `{logical_root}`; refusing to plan an output containing parent-directory components"
+    )]
+    UnsafeSourcePath {
+        /// Source path that produced an unsafe relative output path.
+        source_path: PathBuf,
+        /// Configured logical project root used to relativize the source.
+        logical_root: PathBuf,
+    },
+}
 
 /// Planned runtime and stub artifacts for one source module.
 #[derive(Debug, Clone)]
@@ -82,8 +99,10 @@ pub enum InferredStubMode {
 }
 
 /// Plans output paths for the provided modules.
-#[must_use]
-pub fn plan_emits(config: &ConfigHandle, modules: &[LoweredModule]) -> Vec<EmitArtifact> {
+pub fn plan_emits(
+    config: &ConfigHandle,
+    modules: &[LoweredModule],
+) -> Result<Vec<EmitArtifact>, EmitPlanningError> {
     let sources: Vec<_> = modules
         .iter()
         .map(|module| PlannedModuleSource {
@@ -95,17 +114,16 @@ pub fn plan_emits(config: &ConfigHandle, modules: &[LoweredModule]) -> Vec<EmitA
 }
 
 /// Plans output paths for the provided source descriptors.
-#[must_use]
 pub fn plan_emits_for_sources(
     config: &ConfigHandle,
     sources: &[PlannedModuleSource],
-) -> Vec<EmitArtifact> {
+) -> Result<Vec<EmitArtifact>, EmitPlanningError> {
     let out_root = config.resolve_relative_path(&config.config.project.out_dir);
     let mut artifacts = Vec::new();
     let mut paired_by_module: BTreeMap<PathBuf, usize> = BTreeMap::new();
 
     for source in sources {
-        let relative = relative_module_path(config, &source.source_path);
+        let relative = relative_module_path(config, &source.source_path)?;
         let module_key = relative.with_extension("");
 
         match source.source_kind {
@@ -150,15 +168,30 @@ pub fn plan_emits_for_sources(
         }
     }
 
-    artifacts
+    Ok(artifacts)
 }
 
-fn relative_module_path(config: &ConfigHandle, source_path: &Path) -> PathBuf {
+fn relative_module_path(
+    config: &ConfigHandle,
+    source_path: &Path,
+) -> Result<PathBuf, EmitPlanningError> {
     let logical_root = config.resolve_relative_path(&config.config.project.root_dir);
 
     if let Ok(relative) = source_path.strip_prefix(logical_root) {
-        return relative.to_path_buf();
+        if !relative.as_os_str().is_empty()
+            && relative.components().all(|component| matches!(component, Component::Normal(_)))
+        {
+            return Ok(relative.to_path_buf());
+        }
+
+        return Err(EmitPlanningError::UnsafeSourcePath {
+            source_path: source_path.to_path_buf(),
+            logical_root: config.resolve_relative_path(&config.config.project.root_dir),
+        });
     }
 
-    source_path.file_name().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("unknown"))
+    source_path.file_name().map(PathBuf::from).ok_or_else(|| EmitPlanningError::UnsafeSourcePath {
+        source_path: source_path.to_path_buf(),
+        logical_root: config.resolve_relative_path(&config.config.project.root_dir),
+    })
 }

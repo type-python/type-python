@@ -599,7 +599,7 @@ fn analyze_pipeline_state(
             source_kind: tree.source.kind,
         })
         .collect();
-    let pre_lowering_emit_plan = plan_emits_for_sources(config, &planned_sources);
+    let pre_lowering_emit_plan = plan_emits_for_sources(config, &planned_sources)?;
 
     Ok(AnalyzedPipelineState {
         bindings,

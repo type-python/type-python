@@ -1859,6 +1859,7 @@ dependencies = [
  "littrs-ruff-python-ast",
  "littrs-ruff-python-parser",
  "littrs-ruff-text-size",
+ "thiserror",
  "typepython-config",
  "typepython-lowering",
  "typepython-syntax",
