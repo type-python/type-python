@@ -174,23 +174,28 @@ def _legacy_eval_namespaces(
     globals: dict[str, Any] | None,
     locals: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    if globals is not None or locals is not None:
-        return globals or {}, locals or globals or {}
-
     if isinstance(obj, ModuleType):
-        namespace = vars(obj)
-        return namespace, namespace
-    if isinstance(obj, type):
+        default_globals = vars(obj)
+        default_locals = None
+    elif isinstance(obj, type):
         module = sys.modules.get(getattr(obj, "__module__", ""))
-        globalns = vars(module) if module is not None else {}
-        return globalns, dict(vars(obj))
+        default_globals = vars(module) if module is not None else {}
+        default_locals = dict(vars(obj))
+    else:
+        default_globals = getattr(obj, "__globals__", None)
+        if default_globals is None:
+            module = sys.modules.get(getattr(obj, "__module__", ""))
+            default_globals = vars(module) if module is not None else {}
+        default_locals = None
 
-    globalns = getattr(obj, "__globals__", None)
-    if globalns is not None:
-        return globalns, globalns
-    module = sys.modules.get(getattr(obj, "__module__", ""))
-    namespace = vars(module) if module is not None else {}
-    return namespace, namespace
+    globalns = globals if globals is not None else default_globals
+    if locals is not None:
+        localns = locals
+    elif default_locals is not None:
+        localns = default_locals
+    else:
+        localns = globalns
+    return globalns, localns
 
 
 class _AnnotationAuditVisitor(ast.NodeVisitor):

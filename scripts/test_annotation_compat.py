@@ -38,6 +38,38 @@ class AnnotationCompatTests(unittest.TestCase):
         self.assertEqual(annotations["value"], int)
         self.assertEqual(annotations["return"], str)
 
+    def test_eval_str_fallback_merges_partial_explicit_namespaces(self) -> None:
+        function_namespace: dict[str, object] = {"GlobalType": bytes}
+        exec(
+            "def build(value: GlobalType) -> LocalType:\n    return value\n",
+            function_namespace,
+            function_namespace,
+        )
+        build = function_namespace["build"]
+
+        function_annotations = annotation_compat.get_annotations(
+            build,
+            locals={"LocalType": str},
+            eval_str=True,
+        )
+
+        class Box:
+            Alias = int
+            value: Alias
+            external: ExternalType
+
+        class_annotations = annotation_compat.get_annotations(
+            Box,
+            globals={"ExternalType": str},
+            eval_str=True,
+        )
+
+        self.assertEqual(function_annotations, {"value": bytes, "return": str})
+        self.assertEqual(class_annotations, {"value": int, "external": str})
+        explicit_empty: dict[str, object] = {}
+        globalns, _ = annotation_compat._legacy_eval_namespaces(build, explicit_empty, None)
+        self.assertIs(globalns, explicit_empty)
+
     def test_non_value_formats_are_gated_without_annotationlib(self) -> None:
         support = annotation_compat.supported_formats()
         if support.forwardref and support.string:
