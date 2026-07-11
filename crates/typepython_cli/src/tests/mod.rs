@@ -1,4 +1,4 @@
-pub(super) use super::adapter::run_adapter_validate;
+pub(super) use super::adapter::{adapter_validation_diagnostics, run_adapter_validate};
 pub(super) use super::api_diff::{api_surface_diff_diagnostics, diff_api_surfaces, run_api_diff};
 pub(super) use super::compat::{compat_checker_allowlist, expand_compat_profile, run_compat};
 pub(super) use super::discovery::{

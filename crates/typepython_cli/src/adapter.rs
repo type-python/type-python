@@ -1,8 +1,10 @@
 use std::{collections::BTreeSet, fs, path::Path, process::ExitCode};
 
 use anyhow::{Context, Result};
+use pep440_rs::Version;
 use serde::{Deserialize, Serialize};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
+use typepython_target::PythonTarget;
 
 use crate::{
     CLI_JSON_SCHEMA_VERSION,
@@ -98,18 +100,62 @@ fn validate_adapter_manifest(
         ("adapter.version", &manifest.adapter.version),
         ("adapter.framework", &manifest.adapter.framework),
         ("adapter.typepython_min", &manifest.adapter.typepython_min),
-        ("adapter.stability", &manifest.adapter.stability),
     ] {
         if value.trim().is_empty() {
             report
                 .push(Diagnostic::error("TPY7003", format!("adapter manifest is missing {field}")));
         }
     }
+    validate_adapter_version("adapter.version", &manifest.adapter.version, &mut report);
+    validate_adapter_version(
+        "adapter.typepython_min",
+        &manifest.adapter.typepython_min,
+        &mut report,
+    );
+    if manifest.adapter.stability.trim().is_empty() {
+        report.push(Diagnostic::error("TPY7003", "adapter manifest is missing adapter.stability"));
+    } else if manifest.adapter.stability != "prototype" {
+        report.push(Diagnostic::error(
+            "TPY7003",
+            format!(
+                "adapter.stability `{}` is unsupported; the adapter SDK currently accepts only `prototype`",
+                manifest.adapter.stability
+            ),
+        ));
+    }
     if manifest.adapter.python_targets.is_empty() {
         report.push(Diagnostic::error(
             "TPY7003",
             "adapter manifest must list at least one adapter.python_targets entry",
         ));
+    } else {
+        let mut seen_targets = BTreeSet::new();
+        for target in &manifest.adapter.python_targets {
+            let parsed = target.parse::<PythonTarget>().ok();
+            let supported = parsed.is_some_and(|target| {
+                matches!(
+                    target,
+                    PythonTarget::PYTHON_3_10
+                        | PythonTarget::PYTHON_3_11
+                        | PythonTarget::PYTHON_3_12
+                        | PythonTarget::PYTHON_3_13
+                        | PythonTarget::PYTHON_3_14
+                )
+            });
+            if !supported {
+                report.push(Diagnostic::error(
+                    "TPY7003",
+                    format!(
+                        "adapter.python_targets entry `{target}` is unsupported; expected one of `3.10`, `3.11`, `3.12`, `3.13`, or `3.14`"
+                    ),
+                ));
+            } else if !seen_targets.insert(parsed.expect("supported target must parse")) {
+                report.push(Diagnostic::error(
+                    "TPY7003",
+                    format!("adapter.python_targets contains duplicate target `{target}`"),
+                ));
+            }
+        }
     }
     if manifest.transforms.is_empty() {
         report.push(Diagnostic::error(
@@ -130,6 +176,25 @@ fn validate_adapter_manifest(
         validate_golden_test(golden, base_dir, &mut report);
     }
     report
+}
+
+fn validate_adapter_version(field: &str, value: &str, report: &mut DiagnosticReport) {
+    if !value.trim().is_empty() && value.parse::<Version>().is_err() {
+        report.push(Diagnostic::error(
+            "TPY7003",
+            format!("adapter manifest {field} `{value}` is not a valid PEP 440 version"),
+        ));
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn adapter_validation_diagnostics(
+    contents: &str,
+    base_dir: Option<&Path>,
+) -> DiagnosticReport {
+    let manifest: AdapterManifest =
+        toml::from_str(contents).expect("adapter test manifest should parse");
+    validate_adapter_manifest(&manifest, base_dir)
 }
 
 fn validate_transform(transform: &AdapterTransform, report: &mut DiagnosticReport) {
@@ -303,7 +368,7 @@ fn validate_golden_test(
         ));
     }
     for checker in &golden.checkers {
-        if !matches!(checker.as_str(), "mypy" | "pyright" | "ty") {
+        if !matches!(checker.as_str(), "basedpyright" | "mypy" | "pyright" | "ty") {
             report.push(Diagnostic::error(
                 "TPY7003",
                 format!(
