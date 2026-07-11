@@ -1809,11 +1809,25 @@ fn decorated_header_signature(
         })
         .chain(std::iter::once(canonical_tokens(
             source,
-            header_and_body_tokens,
+            declaration_header_tokens(header_and_body_tokens),
             TokenLimit::Header,
         )))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn declaration_header_tokens(tokens: &[Token]) -> &[Token] {
+    let Some(declaration) =
+        tokens.iter().position(|token| matches!(token.kind(), TokenKind::Def | TokenKind::Class))
+    else {
+        return tokens;
+    };
+    let start = tokens[..declaration]
+        .iter()
+        .rposition(|token| !token_is_trivia(token.kind()))
+        .filter(|index| tokens[*index].kind() == TokenKind::Async)
+        .unwrap_or(declaration);
+    &tokens[start..]
 }
 
 fn canonical_tokens(source: &str, tokens: &[Token], limit: TokenLimit) -> String {

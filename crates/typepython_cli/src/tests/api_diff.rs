@@ -1393,6 +1393,17 @@ fn diff_api_surfaces_classifies_decorated_callable_any_variance() {
     assert_eq!(classifications.get("load"), Some(&"likely type-breaking"));
     assert_eq!(classifications.get("Box.value"), Some(&"likely type-compatible"));
     assert_eq!(classifications.get("parse"), Some(&"likely type-breaking"));
+    let old_signature = |symbol: &str| {
+        report
+            .changed
+            .iter()
+            .find(|change| change.symbol == symbol)
+            .and_then(|change| change.old_signature.as_deref())
+            .expect("changed symbol should retain its old signature")
+    };
+    assert_eq!(old_signature("load").matches("@decorator").count(), 1);
+    assert_eq!(old_signature("Box.value").matches("@property").count(), 1);
+    assert_eq!(old_signature("parse").matches("@overload").count(), 2);
 }
 
 #[test]
