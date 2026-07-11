@@ -1246,7 +1246,17 @@ impl PythonSurfaceExtractor<'_> {
                         kind,
                         Some(class_overload_bindings),
                     );
-                    self.insert_instance_attributes(key, function);
+                    let binds_class_receiver = function.decorator_list.iter().any(|decorator| {
+                        matches!(
+                            class_overload_bindings.expression_binding(
+                                &decorator.expression,
+                                Some(&self.overload_bindings),
+                            ),
+                            OverloadBinding::ClassMethodDecorator
+                                | OverloadBinding::StaticMethodDecorator
+                        )
+                    });
+                    self.insert_instance_attributes(key, function, binds_class_receiver);
                 }
                 Stmt::ClassDef(nested) if public_member_name(nested.name.as_str()) => {
                     self.insert_class(&format!("{key}.{}", nested.name.as_str()), nested);
@@ -1518,12 +1528,9 @@ impl PythonSurfaceExtractor<'_> {
         &mut self,
         class_key: &str,
         function: &ruff_python_ast::StmtFunctionDef,
+        binds_class_receiver: bool,
     ) {
-        if function
-            .decorator_list
-            .iter()
-            .any(|decorator| decorator_name(&decorator.expression) == Some("staticmethod"))
-        {
+        if binds_class_receiver {
             return;
         }
         let Some(receiver) = function.parameters.iter().next().map(|parameter| parameter.name())
@@ -1634,6 +1641,9 @@ impl<'a> Visitor<'a> for InstanceAttributeCollector<'a> {
 enum OverloadBinding {
     Decorator,
     AnyType,
+    BuiltinsModule,
+    ClassMethodDecorator,
+    StaticMethodDecorator,
     TypeAliasMarker,
     TypingModule,
     Other,
@@ -1650,6 +1660,11 @@ impl OverloadBindings {
             .get(name)
             .copied()
             .or_else(|| fallback.and_then(|bindings| bindings.names.get(name).copied()))
+            .or(match name {
+                "classmethod" => Some(OverloadBinding::ClassMethodDecorator),
+                "staticmethod" => Some(OverloadBinding::StaticMethodDecorator),
+                _ => None,
+            })
     }
 
     fn expression_binding(
@@ -1694,6 +1709,21 @@ impl OverloadBindings {
             {
                 OverloadBinding::TypeAliasMarker
             }
+            Expr::Attribute(attribute)
+                if matches!(attribute.attr.as_str(), "classmethod" | "staticmethod")
+                    && matches!(
+                        attribute.value.as_ref(),
+                        Expr::Name(name)
+                            if self.resolve(name.id.as_str(), fallback)
+                                == Some(OverloadBinding::BuiltinsModule)
+                    ) =>
+            {
+                if attribute.attr.as_str() == "classmethod" {
+                    OverloadBinding::ClassMethodDecorator
+                } else {
+                    OverloadBinding::StaticMethodDecorator
+                }
+            }
             _ => OverloadBinding::Other,
         }
     }
@@ -1707,10 +1737,10 @@ impl OverloadBindings {
                         || source_name.split('.').next().unwrap_or(source_name),
                         ruff_python_ast::Identifier::as_str,
                     );
-                    let binding = if matches!(source_name, "typing" | "typing_extensions") {
-                        OverloadBinding::TypingModule
-                    } else {
-                        OverloadBinding::Other
+                    let binding = match source_name {
+                        "builtins" => OverloadBinding::BuiltinsModule,
+                        "typing" | "typing_extensions" => OverloadBinding::TypingModule,
+                        _ => OverloadBinding::Other,
                     };
                     self.names.insert(local_name.to_owned(), binding);
                 }
@@ -1720,6 +1750,8 @@ impl OverloadBindings {
                     && import.module.as_ref().is_some_and(|module| {
                         matches!(module.as_str(), "typing" | "typing_extensions")
                     });
+                let imports_builtins = import.level == 0
+                    && import.module.as_ref().is_some_and(|module| module.as_str() == "builtins");
                 for alias in &import.names {
                     let source_name = alias.name.as_str();
                     if source_name == "*" {
@@ -1733,6 +1765,12 @@ impl OverloadBindings {
                         (true, "overload") => OverloadBinding::Decorator,
                         (true, "Any") => OverloadBinding::AnyType,
                         (true, "TypeAlias") => OverloadBinding::TypeAliasMarker,
+                        (false, "classmethod") if imports_builtins => {
+                            OverloadBinding::ClassMethodDecorator
+                        }
+                        (false, "staticmethod") if imports_builtins => {
+                            OverloadBinding::StaticMethodDecorator
+                        }
                         _ => OverloadBinding::Other,
                     };
                     self.names.insert(local_name.to_owned(), binding);

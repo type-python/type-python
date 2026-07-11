@@ -827,6 +827,65 @@ fn diff_api_surfaces_resolves_legacy_type_alias_identity() {
 }
 
 #[test]
+fn diff_api_surfaces_resolves_static_and_class_method_identity_for_attributes() {
+    let project_dir = temp_project_dir("diff_api_surfaces_resolves_method_decorator_identity");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        let surface = |instance_assignment: &str, class_assignment: &str| {
+            format!(
+                concat!(
+                    "import builtins as _b\n",
+                    "def _identity(value): return value\n",
+                    "class _Decorators:\n",
+                    "    staticmethod = _identity\n",
+                    "_decorators = _Decorators()\n",
+                    "_sm = staticmethod\n",
+                    "from builtins import classmethod as _cm\n",
+                    "class AliasStatic:\n",
+                    "    @_sm\n",
+                    "    def build(self) -> None:\n",
+                    "        {0}\n",
+                    "class AliasClass:\n",
+                    "    @_cm\n",
+                    "    def build(cls) -> None:\n",
+                    "        {1}\n",
+                    "class QualifiedStatic:\n",
+                    "    @_b.staticmethod\n",
+                    "    def build(self) -> None:\n",
+                    "        {0}\n",
+                    "class Custom:\n",
+                    "    @_decorators.staticmethod\n",
+                    "    def build(self) -> None:\n",
+                    "        {0}\n",
+                    "staticmethod = _identity\n",
+                    "class Shadowed:\n",
+                    "    @staticmethod\n",
+                    "    def build(self) -> None:\n",
+                    "        {0}\n",
+                ),
+                instance_assignment, class_assignment
+            )
+        };
+        fs::write(old_dir.join("app.pyi"), surface("self.token: str", "cls.token: str"))
+            .expect("old surface should be written");
+        fs::write(new_dir.join("app.pyi"), surface("pass", "pass"))
+            .expect("new surface should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should resolve method decorator identities")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.removed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["Custom.token", "Shadowed.token"]
+    );
+}
+
+#[test]
 fn diff_api_surfaces_uses_static_all_for_private_and_reexported_names() {
     let project_dir =
         temp_project_dir("diff_api_surfaces_uses_static_all_for_private_and_reexported_names");
