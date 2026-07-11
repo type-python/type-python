@@ -19,6 +19,7 @@ use zip::ZipArchive;
 
 use crate::archive::{
     ArchiveMemberPaths, ArchivePathKind, ArchiveReadBudget, BoundedArchiveReader,
+    sdist_tar_entry_is_file,
 };
 use crate::{
     CLI_JSON_SCHEMA_VERSION, CommandSummary,
@@ -488,10 +489,12 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
         let entry_path = member_paths
             .register(raw_path.as_ref(), entry_type.is_dir())
             .map_err(anyhow::Error::msg)?;
+        let is_file =
+            sdist_tar_entry_is_file(entry_type, &entry_path).map_err(anyhow::Error::msg)?;
         let declared_bytes = entry.size();
         budget.register_member().map_err(anyhow::Error::msg)?;
         budget.register_payload(&entry_path, declared_bytes, None).map_err(anyhow::Error::msg)?;
-        if !entry_type.is_file() && !entry_type.is_contiguous() {
+        if !is_file {
             continue;
         }
         if let Some(typed_root) = archive_typed_root(&entry_path) {

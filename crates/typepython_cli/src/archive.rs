@@ -505,6 +505,22 @@ pub(crate) fn validate_wheel_record_path(path: &str) -> Result<String, String> {
     validate_archive_member_path(path.as_bytes(), ArchivePathKind::Wheel, false)
 }
 
+pub(crate) fn sdist_tar_entry_is_file(
+    entry_type: tar::EntryType,
+    path: &str,
+) -> Result<bool, String> {
+    if entry_type.is_file() || entry_type.is_contiguous() {
+        return Ok(true);
+    }
+    if entry_type.is_dir() {
+        return Ok(false);
+    }
+    Err(format!(
+        "sdist archive member `{path}` has unsupported tar entry type 0x{:02x}",
+        entry_type.as_byte()
+    ))
+}
+
 fn validate_archive_member_path(
     raw_path: &[u8],
     kind: ArchivePathKind,
@@ -630,6 +646,24 @@ mod tests {
         let mut relative_sdist = ArchiveMemberPaths::new(ArchivePathKind::Sdist);
         assert!(relative_sdist.register(b"/pkg/module.py", false).is_err());
         assert!(relative_sdist.register(b"pkg/module.py", false).is_ok());
+    }
+
+    #[test]
+    fn rejects_non_file_tar_entry_types() {
+        assert_eq!(sdist_tar_entry_is_file(tar::EntryType::file(), "file"), Ok(true));
+        assert_eq!(sdist_tar_entry_is_file(tar::EntryType::contiguous(), "file"), Ok(true));
+        assert_eq!(sdist_tar_entry_is_file(tar::EntryType::dir(), "directory"), Ok(false));
+
+        for entry_type in [
+            tar::EntryType::hard_link(),
+            tar::EntryType::symlink(),
+            tar::EntryType::character_special(),
+            tar::EntryType::block_special(),
+            tar::EntryType::fifo(),
+            tar::EntryType::GNUSparse,
+        ] {
+            assert!(sdist_tar_entry_is_file(entry_type, "unsafe").is_err());
+        }
     }
 
     #[test]

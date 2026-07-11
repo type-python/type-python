@@ -45,6 +45,38 @@ fn supplied_archive_reader_rejects_absolute_sdist_member_paths() {
 }
 
 #[test]
+fn supplied_archive_reader_rejects_tar_link_members() {
+    let project_dir = temp_project_dir("supplied_archive_reader_rejects_tar_link_members");
+    let error = {
+        let sdist = project_dir.join("demo-0.1.0.tar.gz");
+        let file = fs::File::create(&sdist).expect("sdist should be created");
+        let encoder = GzEncoder::new(file, Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        let mut header = tar::Header::new_gnu();
+        header.set_mode(0o777);
+        header.set_entry_type(tar::EntryType::symlink());
+        header.set_size(0);
+        header.set_link_name("/etc/passwd").expect("link target should be valid");
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "demo-0.1.0/leak", std::io::empty())
+            .expect("symlink entry should be written");
+        let encoder = builder.into_inner().expect("tar stream should finish");
+        encoder.finish().expect("gzip stream should finish");
+
+        inspect_supplied_archive_paths(&SuppliedVerifyArtifact {
+            kind: SuppliedArtifactKind::Sdist,
+            path: sdist,
+        })
+        .expect_err("tar link member should be rejected")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(error.contains("unsupported tar entry type"), "{error}");
+    assert!(error.contains("demo-0.1.0/leak"), "{error}");
+}
+
+#[test]
 fn supplied_archive_reader_rejects_duplicate_member_paths() {
     let project_dir = temp_project_dir("supplied_archive_reader_rejects_duplicate_member_paths");
     let errors = {

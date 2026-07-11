@@ -28,7 +28,7 @@ use zip::ZipArchive;
 use crate::api_diff::{ApiSurfaceDiffReport, api_surface_diff_diagnostics, diff_api_surfaces};
 use crate::archive::{
     ArchiveMemberPaths, ArchivePathKind, ArchiveReadBudget, BoundedArchiveReader,
-    validate_wheel_record_path,
+    sdist_tar_entry_is_file, validate_wheel_record_path,
 };
 use crate::cli::{OutputFormat, VerifyArgs};
 use crate::discovery::normalize_glob_path;
@@ -2933,10 +2933,11 @@ fn read_tar_gz_entries(path: &Path) -> std::result::Result<Vec<(String, Vec<u8>)
         let entry_type = entry.header().entry_type();
         let raw_path = entry.path_bytes();
         let entry_path = member_paths.register(raw_path.as_ref(), entry_type.is_dir())?;
+        let is_file = sdist_tar_entry_is_file(entry_type, &entry_path)?;
         let declared_bytes = entry.size();
         budget.register_member()?;
         budget.register_payload(&entry_path, declared_bytes, None)?;
-        if !entry_type.is_file() && !entry_type.is_contiguous() {
+        if !is_file {
             continue;
         }
         let bytes = budget.read_entry(&mut entry, &entry_path, declared_bytes)?;
