@@ -12,7 +12,7 @@ use ruff_python_ast::{
     token::{Token, TokenKind, Tokens},
     visitor::{self, Visitor},
 };
-use ruff_python_parser::parse_module;
+use ruff_python_parser::{parse_expression, parse_module};
 use serde::Serialize;
 use tar::Archive as TarArchive;
 use zip::ZipArchive;
@@ -2022,6 +2022,7 @@ fn canonical_tokens(source: &str, tokens: &[Token], limit: TokenLimit) -> String
     let end = if limit == TokenLimit::Header { header_token_end(tokens) } else { tokens.len() };
     let significant =
         tokens[..end].iter().filter(|token| !token_is_trivia(token.kind())).collect::<Vec<_>>();
+    let significant = canonical_token_units(source, &significant);
     let mut output = String::new();
     let mut previous = None;
     let mut delimiter_stack = Vec::<bool>::new();
@@ -2029,23 +2030,20 @@ fn canonical_tokens(source: &str, tokens: &[Token], limit: TokenLimit) -> String
     let mut saw_declaration_name = false;
     let mut saw_parameter_list = false;
 
-    for (index, token) in significant.iter().enumerate() {
-        let kind = token.kind();
+    for (index, (kind, text)) in significant.iter().enumerate() {
+        let kind = *kind;
         if matches!(kind, TokenKind::Def | TokenKind::Class) {
             saw_declaration_keyword = true;
         } else if saw_declaration_keyword && !saw_declaration_name && kind == TokenKind::Name {
             saw_declaration_name = true;
         }
         if kind == TokenKind::Comma
-            && significant
-                .get(index + 1)
-                .is_some_and(|next| token_is_closing_delimiter(next.kind()))
+            && significant.get(index + 1).is_some_and(|(next, _)| token_is_closing_delimiter(*next))
             && limit == TokenLimit::Header
             && delimiter_stack.last() == Some(&true)
         {
             continue;
         }
-        let text = token_text(source, token);
         if !output.is_empty() && token_needs_leading_space(previous, kind) {
             output.push(' ');
         }
@@ -2067,6 +2065,101 @@ fn canonical_tokens(source: &str, tokens: &[Token], limit: TokenLimit) -> String
         }
     }
     output
+}
+
+fn canonical_token_units(source: &str, tokens: &[&Token]) -> Vec<(TokenKind, String)> {
+    let mut units = Vec::with_capacity(tokens.len());
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = tokens[index];
+        if token.kind() != TokenKind::String {
+            units.push((token.kind(), token_text(source, token).to_owned()));
+            index += 1;
+            continue;
+        }
+
+        let start = index;
+        while index < tokens.len() && tokens[index].kind() == TokenKind::String {
+            index += 1;
+        }
+        let group = &tokens[start..index];
+        if let Some(canonical) = canonical_string_literal_group(source, group) {
+            units.push((TokenKind::String, canonical));
+        } else {
+            units.extend(
+                group.iter().map(|token| (TokenKind::String, token_text(source, token).to_owned())),
+            );
+        }
+    }
+    units
+}
+
+fn canonical_string_literal_group(source: &str, tokens: &[&Token]) -> Option<String> {
+    if tokens.iter().any(|token| string_token_has_lossy_surrogate_escape(token_text(source, token)))
+    {
+        return None;
+    }
+    let expression =
+        tokens.iter().map(|token| token_text(source, token)).collect::<Vec<_>>().join(" ");
+    let parsed = parse_expression(&expression).ok()?;
+    match parsed.expr() {
+        Expr::StringLiteral(literal) => serde_json::to_string(literal.value.to_str()).ok(),
+        Expr::BytesLiteral(literal) => {
+            let escaped = literal
+                .value
+                .bytes()
+                .map(|byte| format!("\\x{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join("");
+            Some(format!("b\"{escaped}\""))
+        }
+        _ => None,
+    }
+}
+
+fn string_token_has_lossy_surrogate_escape(text: &str) -> bool {
+    let Some(prefix_end) = text.find(['\'', '"']) else {
+        return false;
+    };
+    if text[..prefix_end].to_ascii_lowercase().contains('r') {
+        return false;
+    }
+
+    let bytes = text.as_bytes();
+    let mut index = prefix_end;
+    while index < bytes.len() {
+        if bytes[index] != b'\\' {
+            index += 1;
+            continue;
+        }
+        let run_start = index;
+        while index < bytes.len() && bytes[index] == b'\\' {
+            index += 1;
+        }
+        if (index - run_start) % 2 == 0 || index >= bytes.len() {
+            continue;
+        }
+        let width = match bytes[index] {
+            b'u' => 4,
+            b'U' => 8,
+            _ => continue,
+        };
+        let digits_start = index + 1;
+        let digits_end = digits_start + width;
+        let Some(digits) = bytes.get(digits_start..digits_end) else {
+            continue;
+        };
+        let Ok(digits) = std::str::from_utf8(digits) else {
+            continue;
+        };
+        let Ok(value) = u32::from_str_radix(digits, 16) else {
+            continue;
+        };
+        if (0xd800..=0xdfff).contains(&value) {
+            return true;
+        }
+    }
+    false
 }
 
 fn header_token_end(tokens: &[Token]) -> usize {
@@ -2379,6 +2472,11 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
             typepython_syntax::SyntaxStatement::TypeAlias(alias)
                 if typepython_name_is_exported(&alias.name, explicit_exports.as_ref()) =>
             {
+                let value = alias
+                    .value_expr
+                    .as_ref()
+                    .map(typepython_syntax::TypeExpr::render)
+                    .unwrap_or_else(|| alias.value.clone());
                 symbols.insert(
                     alias.name.clone(),
                     PublicSymbol::new(
@@ -2387,7 +2485,7 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
                             "typealias {}{} = {}",
                             alias.name,
                             render_typepython_type_params(&alias.type_params),
-                            alias.value
+                            canonicalize_typepython_type_text(&value)
                         ),
                     ),
                 );
@@ -2462,7 +2560,10 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
                             .unwrap_or_else(|| String::from("unknown"));
                         symbols.insert(
                             name.clone(),
-                            PublicSymbol::new("value", format!("{name}: {detail}")),
+                            PublicSymbol::new(
+                                "value",
+                                format!("{name}: {}", canonicalize_typepython_type_text(&detail)),
+                            ),
                         );
                     }
                 }
@@ -2567,7 +2668,10 @@ fn insert_typepython_class_symbols(
                     .unwrap_or_else(|| String::from("unknown"));
                 symbols.insert(
                     key,
-                    PublicSymbol::new("attribute", format!("{}: {detail}", member.name)),
+                    PublicSymbol::new(
+                        "attribute",
+                        format!("{}: {}", member.name, canonicalize_typepython_type_text(&detail)),
+                    ),
                 );
             }
             typepython_syntax::ClassMemberKind::Method => {
@@ -2628,7 +2732,9 @@ fn render_typepython_function(function: &typepython_syntax::FunctionStatement) -
             .as_ref()
             .map(typepython_syntax::TypeExpr::render)
             .or_else(|| function.returns.clone())
-            .map_or_else(String::new, |returns| format!(" -> {returns}")),
+            .map_or_else(String::new, |returns| {
+                format!(" -> {}", canonicalize_typepython_type_text(&returns))
+            }),
     )
 }
 
@@ -2648,7 +2754,9 @@ fn render_typepython_member(member: &typepython_syntax::ClassMember) -> String {
         member.name,
         render_typepython_type_params(&member.type_params),
         render_typepython_params(&member.params),
-        member.rendered_returns().map_or_else(String::new, |returns| format!(" -> {returns}")),
+        member.rendered_returns().map_or_else(String::new, |returns| {
+            format!(" -> {}", canonicalize_typepython_type_text(&returns))
+        }),
     )
 }
 
@@ -2663,9 +2771,9 @@ fn render_typepython_params(params: &[typepython_syntax::FunctionParam]) -> Stri
             } else {
                 ""
             };
-            let annotation = param
-                .rendered_annotation()
-                .map_or_else(String::new, |annotation| format!(": {annotation}"));
+            let annotation = param.rendered_annotation().map_or_else(String::new, |annotation| {
+                format!(": {}", canonicalize_typepython_type_text(&annotation))
+            });
             let default = if param.has_default { " = ..." } else { "" };
             format!("{prefix}{}{annotation}{default}", param.name)
         })
@@ -2688,17 +2796,34 @@ fn render_typepython_type_params(params: &[typepython_syntax::TypeParam]) -> Str
                     typepython_syntax::TypeParamKind::TypeVarTuple => "*",
                 };
                 let constraint = if !param.rendered_constraints().is_empty() {
-                    format!(": ({})", param.rendered_constraints().join(", "))
+                    format!(
+                        ": ({})",
+                        param
+                            .rendered_constraints()
+                            .iter()
+                            .map(|constraint| canonicalize_typepython_type_text(constraint))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
                 } else {
-                    param.rendered_bound().map_or_else(String::new, |bound| format!(": {bound}"))
+                    param.rendered_bound().map_or_else(String::new, |bound| {
+                        format!(": {}", canonicalize_typepython_type_text(&bound))
+                    })
                 };
-                let default = param
-                    .rendered_default()
-                    .map_or_else(String::new, |default| format!(" = {default}"));
+                let default = param.rendered_default().map_or_else(String::new, |default| {
+                    format!(" = {}", canonicalize_typepython_type_text(&default))
+                });
                 format!("{prefix}{}{constraint}{default}", param.name)
             })
             .collect::<Vec<_>>()
             .join(", ")
+    )
+}
+
+fn canonicalize_typepython_type_text(text: &str) -> String {
+    parse_expression(text).map_or_else(
+        |_| text.to_owned(),
+        |parsed| canonical_tokens(text, parsed.tokens(), TokenLimit::All),
     )
 }
 

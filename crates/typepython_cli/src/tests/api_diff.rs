@@ -550,6 +550,123 @@ fn diff_api_surfaces_canonicalizes_multiline_overload_signatures() {
 }
 
 #[test]
+fn diff_api_surfaces_canonicalizes_equivalent_string_literals() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_canonicalizes_equivalent_string_literals");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            r#"from typing import Literal
+def stable(value: Literal["x" "y"], escaped: Literal[r"\n"] = r"\n", unicode: Literal["\u0078"] = "\x78", escaped_surrogate: Literal["\\ud800"] = "\\ud800") -> Literal[b"a" b"b"]: ...
+"#,
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            r#"from typing import Literal
+def stable(value: Literal['xy'], escaped: Literal["\\n"] = "\\n", unicode: Literal[u'x'] = 'x', escaped_surrogate: Literal[r"\ud800"] = r"\ud800") -> Literal[b"\x61\x62"]: ...
+"#,
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should normalize string literals")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty(), "{:?}", report.changed);
+}
+
+#[test]
+fn diff_api_surfaces_canonicalizes_typepython_string_literal_quotes() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_canonicalizes_typepython_string_literal_quotes");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.tpy"),
+            concat!(
+                "from typing import Literal\n",
+                "typealias Label = Literal[\"x\" \"y\"]\n",
+                "class Holder:\n",
+                "    value: Literal[r\"\\n\"]\n",
+                "def stable(value: Literal[\"x\"]) -> Literal[b\"a\"]:\n",
+                "    ...\n",
+            ),
+        )
+        .expect("old source should be written");
+        fs::write(
+            new_dir.join("app.tpy"),
+            concat!(
+                "from typing import Literal\n",
+                "typealias Label = Literal['xy']\n",
+                "class Holder:\n",
+                "    value: Literal[\"\\\\n\"]\n",
+                "def stable(value: Literal['x']) -> Literal[b\"\\x61\"]:\n",
+                "    ...\n",
+            ),
+        )
+        .expect("new source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should normalize TypePython string literals")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.changed.is_empty(), "{:?}", report.changed);
+}
+
+#[test]
+fn diff_api_surfaces_preserves_distinct_string_literal_values() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_preserves_distinct_string_literal_values");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            r#"from typing import Literal
+def raw() -> Literal[r"\n"]: ...
+def kind() -> Literal["x"]: ...
+def bytes_raw() -> Literal[rb"\x61"]: ...
+def surrogate() -> Literal["\ud800"]: ...
+def replacement() -> Literal["\ud800"]: ...
+"#,
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            r#"from typing import Literal
+def raw() -> Literal["\n"]: ...
+def kind() -> Literal[b"x"]: ...
+def bytes_raw() -> Literal[b"\x61"]: ...
+def surrogate() -> Literal["\ud801"]: ...
+def replacement() -> Literal["�"]: ...
+"#,
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should preserve literal semantics")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.changed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["bytes_raw", "kind", "raw", "replacement", "surrogate"]
+    );
+}
+
+#[test]
 fn diff_api_surfaces_preserves_semantic_tuple_commas_in_annotations() {
     let project_dir =
         temp_project_dir("diff_api_surfaces_preserves_semantic_tuple_commas_in_annotations");
