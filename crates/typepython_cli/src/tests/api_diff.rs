@@ -1592,6 +1592,355 @@ fn diff_api_surfaces_honors_typepython_all_exports() {
     assert!(report.removed.iter().chain(&report.changed).all(|change| change.symbol != "hidden"));
 }
 
+fn assert_static_all_source_is_rejected(test_name: &str, source: &str) {
+    let project_dir = temp_project_dir(test_name);
+    let error = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(old_dir.join("app.py"), source).expect("old source should be written");
+
+        format!(
+            "{:#}",
+            diff_api_surfaces(&old_dir, &new_dir)
+                .expect_err("uncertain __all__ effects must fail closed")
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(error.contains("unable to statically resolve module `__all__`"), "{error}");
+}
+
+fn assert_static_all_source_is_accepted(test_name: &str, source: &str) {
+    let project_dir = temp_project_dir(test_name);
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(old_dir.join("app.py"), source).expect("old source should be written");
+        fs::write(new_dir.join("app.py"), source).expect("new source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("scope-local and read-only __all__ uses should remain statically resolvable")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+}
+
+#[test]
+fn diff_api_surfaces_ignores_function_local_all_bindings() {
+    let cases = [
+        (
+            "assignment",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper():\n",
+                "    __all__ = ['local']\n",
+                "helper()\n",
+                "def public(): pass\n",
+            ),
+        ),
+        (
+            "parameter",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper(__all__):\n",
+                "    __all__.append('local')\n",
+                "helper([])\n",
+                "def public(): pass\n",
+            ),
+        ),
+        (
+            "for_target",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper():\n",
+                "    for __all__ in [[]]:\n",
+                "        __all__.append('local')\n",
+                "helper()\n",
+                "def public(): pass\n",
+            ),
+        ),
+        (
+            "import_alias",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper():\n",
+                "    import optional_dependency as __all__\n",
+                "    return __all__\n",
+                "helper()\n",
+                "def public(): pass\n",
+            ),
+        ),
+        (
+            "with_target",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper():\n",
+                "    with context() as __all__:\n",
+                "        __all__.append('local')\n",
+                "helper()\n",
+                "def public(): pass\n",
+            ),
+        ),
+        (
+            "except_target",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper():\n",
+                "    try:\n",
+                "        risky()\n",
+                "    except Exception as __all__:\n",
+                "        return __all__\n",
+                "helper()\n",
+                "def public(): pass\n",
+            ),
+        ),
+        (
+            "match_capture",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper():\n",
+                "    match []:\n",
+                "        case __all__:\n",
+                "            return __all__\n",
+                "helper()\n",
+                "def public(): pass\n",
+            ),
+        ),
+        (
+            "lambda_parameter",
+            concat!(
+                "__all__ = ['public']\n",
+                "(lambda __all__: __all__.append('local'))([])\n",
+                "def public(): pass\n",
+            ),
+        ),
+        (
+            "lambda_named_expression",
+            concat!(
+                "__all__ = ['public']\n",
+                "(lambda: (__all__ := ['local']))()\n",
+                "def public(): pass\n",
+            ),
+        ),
+        (
+            "comprehension_target",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper():\n",
+                "    return [__all__ for __all__ in [[]]]\n",
+                "helper()\n",
+                "def public(): pass\n",
+            ),
+        ),
+        (
+            "comprehension_named_expression",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper():\n",
+                "    [(__all__ := ['local']) for _ in [0]]\n",
+                "helper()\n",
+                "def public(): pass\n",
+            ),
+        ),
+        (
+            "nested_closure",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper():\n",
+                "    __all__ = []\n",
+                "    def inner():\n",
+                "        __all__.append('local')\n",
+                "    inner()\n",
+                "helper()\n",
+                "def public(): pass\n",
+            ),
+        ),
+    ];
+
+    for (label, source) in cases {
+        assert_static_all_source_is_accepted(
+            &format!("diff_api_surfaces_ignores_function_local_all_bindings_{label}"),
+            source,
+        );
+    }
+}
+
+#[test]
+fn diff_api_surfaces_preserves_read_only_all_callables() {
+    let cases = [
+        (
+            "function_reader",
+            concat!(
+                "__all__ = ['public']\n",
+                "def exports_snapshot():\n",
+                "    if __all__:\n",
+                "        return 1\n",
+                "    return 0\n",
+                "snapshot = exports_snapshot()\n",
+                "def public(): pass\n",
+            ),
+        ),
+        (
+            "deferred_method_reader",
+            concat!(
+                "__all__ = ['C']\n",
+                "class C:\n",
+                "    def exports(self):\n",
+                "        if __all__:\n",
+                "            return 1\n",
+                "        return 0\n",
+            ),
+        ),
+        (
+            "class_local_assignment",
+            concat!("__all__ = ['C']\n", "class C:\n", "    __all__ = ['local']\n",),
+        ),
+        (
+            "class_local_mutation",
+            concat!(
+                "__all__ = ['C']\n",
+                "class C:\n",
+                "    __all__ = ['local']\n",
+                "    __all__.append('inner')\n",
+            ),
+        ),
+    ];
+
+    for (label, source) in cases {
+        assert_static_all_source_is_accepted(
+            &format!("diff_api_surfaces_preserves_read_only_all_callables_{label}"),
+            source,
+        );
+    }
+}
+
+#[test]
+fn diff_api_surfaces_rejects_called_global_all_mutators() {
+    let cases = [
+        (
+            "implicit_global",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper():\n",
+                "    __all__.append('extra')\n",
+                "helper()\n",
+                "def public(): pass\n",
+                "def extra(): pass\n",
+            ),
+        ),
+        (
+            "explicit_global",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper():\n",
+                "    global __all__\n",
+                "    __all__ = ['extra']\n",
+                "helper()\n",
+                "def public(): pass\n",
+                "def extra(): pass\n",
+            ),
+        ),
+        (
+            "global_alias",
+            concat!(
+                "EXPORTS = ['public']\n",
+                "__all__ = EXPORTS\n",
+                "def helper():\n",
+                "    EXPORTS.append('extra')\n",
+                "helper()\n",
+                "def public(): pass\n",
+                "def extra(): pass\n",
+            ),
+        ),
+        (
+            "nested_call_chain",
+            concat!(
+                "__all__ = ['public']\n",
+                "def mutate():\n",
+                "    __all__.append('extra')\n",
+                "def helper():\n",
+                "    mutate()\n",
+                "helper()\n",
+                "def public(): pass\n",
+                "def extra(): pass\n",
+            ),
+        ),
+        (
+            "nested_local_callable",
+            concat!(
+                "__all__ = ['public']\n",
+                "def helper():\n",
+                "    def inner():\n",
+                "        __all__.append('extra')\n",
+                "    inner()\n",
+                "helper()\n",
+                "def public(): pass\n",
+                "def extra(): pass\n",
+            ),
+        ),
+        (
+            "class_body",
+            concat!(
+                "__all__ = ['public']\n",
+                "class C:\n",
+                "    __all__.append('extra')\n",
+                "def public(): pass\n",
+                "def extra(): pass\n",
+            ),
+        ),
+        (
+            "called_method",
+            concat!(
+                "__all__ = ['public']\n",
+                "class C:\n",
+                "    def mutate(self):\n",
+                "        __all__.append('extra')\n",
+                "C().mutate()\n",
+                "def public(): pass\n",
+                "def extra(): pass\n",
+            ),
+        ),
+        (
+            "yielded_alias",
+            concat!(
+                "__all__ = ['public']\n",
+                "def exports():\n",
+                "    yield __all__\n",
+                "next(exports()).append('extra')\n",
+                "def public(): pass\n",
+                "def extra(): pass\n",
+            ),
+        ),
+        (
+            "shadowed_copy_name",
+            concat!(
+                "__all__ = ['public']\n",
+                "def tuple(value):\n",
+                "    value.append('extra')\n",
+                "def exports_snapshot():\n",
+                "    return tuple(__all__)\n",
+                "exports_snapshot()\n",
+                "def public(): pass\n",
+                "def extra(): pass\n",
+            ),
+        ),
+    ];
+
+    for (label, source) in cases {
+        assert_static_all_source_is_rejected(
+            &format!("diff_api_surfaces_rejects_called_global_all_mutators_{label}"),
+            source,
+        );
+    }
+}
+
 #[test]
 fn diff_api_surfaces_tracks_static_all_mutations() {
     let project_dir = temp_project_dir("diff_api_surfaces_tracks_static_all_mutations");
@@ -1625,6 +1974,639 @@ fn diff_api_surfaces_tracks_static_all_mutations() {
         report.removed.iter().map(|change| change.symbol.as_str()).collect::<BTreeSet<_>>(),
         BTreeSet::from(["appended", "extended"])
     );
+}
+
+#[test]
+fn diff_api_surfaces_tracks_unaliased_all_augassign() {
+    let project_dir = temp_project_dir("diff_api_surfaces_tracks_unaliased_all_augassign");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.py"),
+            concat!(
+                "__all__ = ['kept']\n",
+                "__all__ += ['removed']\n",
+                "def kept(): pass\n",
+                "def removed(): pass\n",
+            ),
+        )
+        .expect("old source should be written");
+        fs::write(new_dir.join("app.py"), "__all__ = ['kept']\ndef kept(): pass\n")
+            .expect("new source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("unaliased static __all__ += should remain supported")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.removed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["removed"]
+    );
+}
+
+#[test]
+fn diff_api_surfaces_merges_static_all_across_if_branches() {
+    let project_dir = temp_project_dir("diff_api_surfaces_merges_static_all_across_if_branches");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.py"),
+            concat!(
+                "if FLAG:\n",
+                "    EXPORTS = ['_hidden', '_if_only']\n",
+                "    __all__ = EXPORTS\n",
+                "else:\n",
+                "    EXPORTS = ['_hidden', '_else_only']\n",
+                "    __all__ = EXPORTS\n",
+                "def _hidden(): pass\n",
+                "def _if_only(): pass\n",
+                "def _else_only(): pass\n",
+            ),
+        )
+        .expect("old source should be written");
+        fs::write(
+            new_dir.join("app.py"),
+            concat!(
+                "if FLAG:\n",
+                "    EXPORTS = ['_if_only']\n",
+                "    __all__ = EXPORTS\n",
+                "else:\n",
+                "    EXPORTS = ['_else_only']\n",
+                "    __all__ = EXPORTS\n",
+                "def _if_only(): pass\n",
+                "def _else_only(): pass\n",
+            ),
+        )
+        .expect("new source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should merge every static __all__ branch")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.removed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["_hidden"]
+    );
+    assert!(report.added.is_empty());
+    assert!(report.changed.is_empty());
+    assert_eq!(report.semver_recommendation, "major");
+}
+
+#[test]
+fn diff_api_surfaces_merges_static_all_across_try_branches() {
+    let project_dir = temp_project_dir("diff_api_surfaces_merges_static_all_across_try_branches");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "try:\n",
+                "    __all__ = ['_primary']\n",
+                "except ImportError:\n",
+                "    __all__ = ['_fallback']\n",
+                "try:\n",
+                "    import optional_dependency\n",
+                "except ImportError:\n",
+                "    pass\n",
+                "finally:\n",
+                "    __all__.append('_shared')\n",
+                "def _primary() -> int: ...\n",
+                "def _fallback() -> int: ...\n",
+                "def _shared() -> int: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "try:\n",
+                "    __all__ = ['_primary']\n",
+                "except ImportError:\n",
+                "    __all__ = ['_fallback']\n",
+                "try:\n",
+                "    import optional_dependency\n",
+                "except ImportError:\n",
+                "    pass\n",
+                "finally:\n",
+                "    __all__.append('_shared')\n",
+                "def _primary() -> str: ...\n",
+                "def _fallback() -> str: ...\n",
+                "def _shared() -> str: ...\n",
+            ),
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should merge static try and except __all__ states")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.changed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["_fallback", "_primary", "_shared"]
+    );
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+}
+
+#[test]
+fn diff_api_surfaces_rejects_dynamic_all_in_conditional_flows() {
+    let cases = [
+        (
+            "if",
+            concat!(
+                "__all__ = ['kept']\n",
+                "if FLAG:\n",
+                "    __all__.extend(dynamic_exports())\n",
+                "def kept(): pass\n",
+            ),
+        ),
+        (
+            "try",
+            concat!(
+                "__all__ = ['kept']\n",
+                "try:\n",
+                "    import optional_dependency\n",
+                "except ImportError:\n",
+                "    __all__.extend(dynamic_exports())\n",
+                "def kept(): pass\n",
+            ),
+        ),
+        (
+            "guard",
+            concat!(
+                "__all__ = ['kept']\n",
+                "if __all__.extend(dynamic_exports()):\n",
+                "    pass\n",
+                "def kept(): pass\n",
+            ),
+        ),
+    ];
+
+    for (label, source) in cases {
+        let project_dir = temp_project_dir(&format!(
+            "diff_api_surfaces_rejects_dynamic_all_in_conditional_flows_{label}"
+        ));
+        let error = {
+            let old_dir = project_dir.join("old");
+            let new_dir = project_dir.join("new");
+            fs::create_dir_all(&old_dir).expect("old dir should be created");
+            fs::create_dir_all(&new_dir).expect("new dir should be created");
+            fs::write(old_dir.join("app.py"), source).expect("old source should be written");
+
+            format!(
+                "{:#}",
+                diff_api_surfaces(&old_dir, &new_dir)
+                    .expect_err("dynamic conditional __all__ must fail closed")
+            )
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(error.contains("unable to statically resolve module `__all__`"), "{error}");
+    }
+}
+
+#[test]
+fn diff_api_surfaces_rejects_mixed_conditional_all_presence() {
+    let cases = [
+        ("if", concat!("if FLAG:\n", "    __all__ = ['kept']\n", "def kept(): pass\n",)),
+        (
+            "try",
+            concat!(
+                "try:\n",
+                "    __all__ = ['kept']\n",
+                "except ImportError:\n",
+                "    pass\n",
+                "def kept(): pass\n",
+            ),
+        ),
+    ];
+
+    for (label, source) in cases {
+        let project_dir = temp_project_dir(&format!(
+            "diff_api_surfaces_rejects_mixed_conditional_all_presence_{label}"
+        ));
+        let error = {
+            let old_dir = project_dir.join("old");
+            let new_dir = project_dir.join("new");
+            fs::create_dir_all(&old_dir).expect("old dir should be created");
+            fs::create_dir_all(&new_dir).expect("new dir should be created");
+            fs::write(old_dir.join("app.py"), source).expect("old source should be written");
+
+            format!(
+                "{:#}",
+                diff_api_surfaces(&old_dir, &new_dir)
+                    .expect_err("mixed conditional __all__ presence must fail closed")
+            )
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(error.contains("unable to statically resolve module `__all__`"), "{error}");
+    }
+}
+
+#[test]
+fn diff_api_surfaces_rejects_uncertain_all_side_effects() {
+    let cases = [
+        (
+            "guard_mutation",
+            concat!(
+                "__all__ = ['kept']\n",
+                "if __all__.append('guarded'):\n",
+                "    pass\n",
+                "def kept(): pass\n",
+                "def guarded(): pass\n",
+            ),
+        ),
+        (
+            "nested_try_flow",
+            concat!(
+                "__all__ = ['base']\n",
+                "try:\n",
+                "    if FLAG:\n",
+                "        __all__ = ['intermediate']\n",
+                "        risky()\n",
+                "        __all__ = ['final']\n",
+                "except RuntimeError:\n",
+                "    pass\n",
+                "def base(): pass\n",
+                "def intermediate(): pass\n",
+                "def final(): pass\n",
+            ),
+        ),
+        (
+            "except_target",
+            concat!(
+                "__all__ = ['kept']\n",
+                "try:\n",
+                "    risky()\n",
+                "except RuntimeError as __all__:\n",
+                "    pass\n",
+                "def kept(): pass\n",
+            ),
+        ),
+        (
+            "mixed_delete",
+            concat!(
+                "__all__ = ['kept']\n",
+                "if FLAG:\n",
+                "    del __all__\n",
+                "def kept(): pass\n",
+            ),
+        ),
+        (
+            "subscript_delete",
+            concat!(
+                "__all__ = ['kept', 'removed']\n",
+                "del __all__[0]\n",
+                "def kept(): pass\n",
+                "def removed(): pass\n",
+            ),
+        ),
+    ];
+
+    for (label, source) in cases {
+        let project_dir = temp_project_dir(&format!(
+            "diff_api_surfaces_rejects_uncertain_all_side_effects_{label}"
+        ));
+        let error = {
+            let old_dir = project_dir.join("old");
+            let new_dir = project_dir.join("new");
+            fs::create_dir_all(&old_dir).expect("old dir should be created");
+            fs::create_dir_all(&new_dir).expect("new dir should be created");
+            fs::write(old_dir.join("app.py"), source).expect("old source should be written");
+
+            format!(
+                "{:#}",
+                diff_api_surfaces(&old_dir, &new_dir)
+                    .expect_err("uncertain __all__ effects must fail closed")
+            )
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(error.contains("unable to statically resolve module `__all__`"), "{error}");
+    }
+}
+
+#[test]
+fn diff_api_surfaces_rejects_unsupported_compound_all_effects() {
+    let cases = [
+        (
+            "for",
+            concat!(
+                "__all__ = ['a']\n",
+                "for _ in [0]:\n",
+                "    __all__.append('b')\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+        (
+            "while",
+            concat!(
+                "__all__ = ['a']\n",
+                "while True:\n",
+                "    __all__.append('b')\n",
+                "    break\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+        (
+            "match",
+            concat!(
+                "__all__ = ['a']\n",
+                "match FLAG:\n",
+                "    case _:\n",
+                "        __all__.append('b')\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+        (
+            "match_capture",
+            concat!(
+                "__all__ = ['a']\n",
+                "match ['b']:\n",
+                "    case __all__:\n",
+                "        pass\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+        (
+            "with",
+            concat!(
+                "__all__ = ['a']\n",
+                "with context():\n",
+                "    __all__.append('b')\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+        (
+            "comprehension",
+            concat!(
+                "__all__ = ['a']\n",
+                "[__all__.append('b') for _ in [0]]\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+        (
+            "nested_try_while",
+            concat!(
+                "__all__ = ['base']\n",
+                "try:\n",
+                "    while FLAG:\n",
+                "        __all__ = ['intermediate']\n",
+                "        risky()\n",
+                "        break\n",
+                "except RuntimeError:\n",
+                "    pass\n",
+                "def base(): pass\n",
+                "def intermediate(): pass\n",
+            ),
+        ),
+    ];
+
+    for (label, source) in cases {
+        assert_static_all_source_is_rejected(
+            &format!("diff_api_surfaces_rejects_unsupported_compound_all_effects_{label}"),
+            source,
+        );
+    }
+}
+
+#[test]
+fn diff_api_surfaces_rejects_unknown_expression_all_effects() {
+    let cases = [
+        ("call", concat!("__all__ = ['a']\n", "mutate(__all__)\n", "def a(): pass\n",)),
+        (
+            "assignment_rhs",
+            concat!("__all__ = ['a']\n", "RESULT = mutate(__all__)\n", "def a(): pass\n",),
+        ),
+        (
+            "decorator",
+            concat!(
+                "__all__ = ['a']\n",
+                "@mutate(__all__)\n",
+                "def decorated(): pass\n",
+                "def a(): pass\n",
+            ),
+        ),
+        (
+            "named_expression",
+            concat!(
+                "__all__ = ['a']\n",
+                "(__all__ := ['b'])\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+        (
+            "handler_type",
+            concat!(
+                "__all__ = ['a']\n",
+                "try:\n",
+                "    risky()\n",
+                "except choose(__all__):\n",
+                "    pass\n",
+                "def a(): pass\n",
+            ),
+        ),
+        (
+            "local_no_argument_call",
+            concat!(
+                "__all__ = ['a']\n",
+                "def mutate_exports():\n",
+                "    __all__.append('b')\n",
+                "mutate_exports()\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+    ];
+
+    for (label, source) in cases {
+        assert_static_all_source_is_rejected(
+            &format!("diff_api_surfaces_rejects_unknown_expression_all_effects_{label}"),
+            source,
+        );
+    }
+}
+
+#[test]
+fn diff_api_surfaces_rejects_mutation_through_static_all_aliases() {
+    let cases = [
+        (
+            "source_alias",
+            concat!(
+                "EXPORTS = ['a']\n",
+                "__all__ = EXPORTS\n",
+                "EXPORTS.append('b')\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+        (
+            "reverse_alias",
+            concat!(
+                "__all__ = ['a']\n",
+                "EXPORTS = __all__\n",
+                "EXPORTS.append('b')\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+        (
+            "augmented_alias",
+            concat!(
+                "__all__ = ['a']\n",
+                "EXPORTS = __all__\n",
+                "EXPORTS += ['b']\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+        (
+            "subscript_delete_alias",
+            concat!(
+                "__all__ = ['a', 'b']\n",
+                "EXPORTS = __all__\n",
+                "del EXPORTS[0]\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+        (
+            "unpacked_alias",
+            concat!(
+                "__all__ = ['a']\n",
+                "EXPORTS, = (__all__,)\n",
+                "EXPORTS.append('b')\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+        (
+            "attribute_alias",
+            concat!(
+                "class Holder: pass\n",
+                "holder = Holder()\n",
+                "__all__ = ['a']\n",
+                "holder.exports = __all__\n",
+                "holder.exports.append('b')\n",
+                "def a(): pass\n",
+                "def b(): pass\n",
+            ),
+        ),
+    ];
+
+    for (label, source) in cases {
+        assert_static_all_source_is_rejected(
+            &format!("diff_api_surfaces_rejects_mutation_through_static_all_aliases_{label}"),
+            source,
+        );
+    }
+}
+
+#[test]
+fn diff_api_surfaces_preserves_pure_static_all_guards() {
+    let project_dir = temp_project_dir("diff_api_surfaces_preserves_pure_static_all_guards");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        let source = concat!(
+            "EXPORTS = ['kept']\n",
+            "if EXPORTS:\n",
+            "    pass\n",
+            "__all__ = EXPORTS\n",
+            "if __all__:\n",
+            "    pass\n",
+            "def kept(): pass\n",
+        );
+        fs::write(old_dir.join("app.py"), source).expect("old source should be written");
+        fs::write(new_dir.join("app.py"), source).expect("new source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("pure reads in guards should preserve known sequence values")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+}
+
+#[test]
+fn diff_api_surfaces_tracks_only_static_all_dependency_sequences() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_tracks_only_static_all_dependency_sequences");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        let mut source = String::new();
+        for index in 0..10 {
+            source.push_str(&format!(
+                "if FLAG_{index}:\n    VALUES_{index} = ['left']\nelse:\n    VALUES_{index} = ['right']\n"
+            ));
+        }
+        source.push_str("__all__ = ['public']\ndef public(): pass\n");
+        fs::write(old_dir.join("app.py"), &source).expect("old source should be written");
+        fs::write(new_dir.join("app.py"), source).expect("new source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("unrelated conditional sequences should not consume __all__ states")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+}
+
+#[test]
+fn diff_api_surfaces_ignores_unreachable_dynamic_all_mutations() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_ignores_unreachable_dynamic_all_mutations");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        let source = concat!(
+            "__all__ = ['kept']\n",
+            "if False:\n",
+            "    __all__.extend(dynamic_exports())\n",
+            "def kept(): pass\n",
+        );
+        fs::write(old_dir.join("app.py"), source).expect("old source should be written");
+        fs::write(new_dir.join("app.py"), source).expect("new source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("unreachable dynamic __all__ code should not poison the surface")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
 }
 
 #[test]

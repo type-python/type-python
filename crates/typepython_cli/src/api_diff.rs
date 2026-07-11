@@ -2298,124 +2298,1968 @@ fn function_is_property(
     })
 }
 
-fn static_all_names(suite: &[Stmt]) -> Result<Option<BTreeSet<String>>> {
-    let mut known_sequences = BTreeMap::<String, Vec<String>>::new();
-    let mut exports = None::<Vec<String>>;
-    let mut has_all = false;
+const MAX_STATIC_ALL_STATES: usize = 256;
 
+// Keep conditional sequence bindings separate until the module finishes. Joining the maps at an
+// `if`/`try` boundary would lose enough information to resolve a later `__all__ = EXPORTS`.
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
+enum StaticAllExports {
+    Missing,
+    Known(Vec<String>),
+    Dynamic,
+}
+
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
+struct StaticAllState {
+    tracked_names: BTreeSet<String>,
+    known_sequences: BTreeMap<String, Vec<String>>,
+    aliases: BTreeSet<(String, String)>,
+    exports: StaticAllExports,
+    saw_dynamic_exports: bool,
+}
+
+impl StaticAllState {
+    fn new(tracked_names: BTreeSet<String>) -> Self {
+        Self {
+            tracked_names,
+            known_sequences: BTreeMap::new(),
+            aliases: BTreeSet::new(),
+            exports: StaticAllExports::Missing,
+            saw_dynamic_exports: false,
+        }
+    }
+
+    fn assign_sequence(&mut self, name: &str, values: Option<Vec<String>>) {
+        if !self.tracked_names.contains(name) {
+            return;
+        }
+        self.break_alias(name);
+        match values {
+            Some(values) => {
+                self.known_sequences.insert(name.to_owned(), values.clone());
+                if name == "__all__" {
+                    self.exports = StaticAllExports::Known(values);
+                }
+            }
+            None => {
+                self.known_sequences.remove(name);
+                if name == "__all__" {
+                    self.exports = StaticAllExports::Dynamic;
+                    self.saw_dynamic_exports = true;
+                }
+            }
+        }
+    }
+
+    fn delete_sequence(&mut self, name: &str) {
+        if !self.tracked_names.contains(name) {
+            return;
+        }
+        self.break_alias(name);
+        self.known_sequences.remove(name);
+        if name == "__all__" {
+            self.exports = StaticAllExports::Missing;
+        }
+    }
+
+    fn add_alias(&mut self, left: &str, right: &str) {
+        if left == right
+            || !self.tracked_names.contains(left)
+            || !self.tracked_names.contains(right)
+        {
+            return;
+        }
+        let mut group = BTreeSet::from([left.to_owned(), right.to_owned()]);
+        loop {
+            let previous_len = group.len();
+            for (first, second) in &self.aliases {
+                if group.contains(first) || group.contains(second) {
+                    group.insert(first.clone());
+                    group.insert(second.clone());
+                }
+            }
+            if group.len() == previous_len {
+                break;
+            }
+        }
+        let names = group.into_iter().collect::<Vec<_>>();
+        for (index, first) in names.iter().enumerate() {
+            for second in &names[index + 1..] {
+                self.aliases.insert((first.clone(), second.clone()));
+            }
+        }
+    }
+
+    fn break_alias(&mut self, name: &str) {
+        self.aliases.retain(|(first, second)| first != name && second != name);
+    }
+
+    fn is_aliased(&self, name: &str) -> bool {
+        self.aliases.iter().any(|(first, second)| first == name || second == name)
+    }
+
+    fn mark_dynamic_exports(&mut self) {
+        self.known_sequences.remove("__all__");
+        self.exports = StaticAllExports::Dynamic;
+        self.saw_dynamic_exports = true;
+    }
+}
+
+fn static_all_names(suite: &[Stmt]) -> Result<Option<BTreeSet<String>>> {
+    if !suite_references_static_all(suite) {
+        return Ok(None);
+    }
+
+    let tracked_names = static_all_dependency_names(suite);
+    let states = evaluate_static_all_suite(vec![StaticAllState::new(tracked_names)], suite)?;
+    if states.iter().any(|state| {
+        state.saw_dynamic_exports || matches!(state.exports, StaticAllExports::Dynamic)
+    }) {
+        return Err(unresolved_static_all());
+    }
+
+    let has_missing = states.iter().any(|state| matches!(state.exports, StaticAllExports::Missing));
+    let has_known = states.iter().any(|state| matches!(state.exports, StaticAllExports::Known(_)));
+    if has_missing && has_known {
+        return Err(unresolved_static_all());
+    }
+    if !has_known {
+        return Ok(None);
+    }
+
+    // Every surviving path defines a static `__all__`; expose every name that can be exported on
+    // one of those paths. A missing or dynamic path is rejected above instead of using heuristics.
+    let exports = states
+        .into_iter()
+        .filter_map(|state| match state.exports {
+            StaticAllExports::Known(exports) => Some(exports),
+            StaticAllExports::Missing | StaticAllExports::Dynamic => None,
+        })
+        .flatten()
+        .collect();
+    Ok(Some(exports))
+}
+
+fn evaluate_static_all_suite(
+    mut states: Vec<StaticAllState>,
+    suite: &[Stmt],
+) -> Result<Vec<StaticAllState>> {
     for statement in suite {
+        states = evaluate_static_all_statement(states, statement)?;
+    }
+    Ok(states)
+}
+
+fn evaluate_static_all_statement(
+    states: Vec<StaticAllState>,
+    statement: &Stmt,
+) -> Result<Vec<StaticAllState>> {
+    match statement {
+        Stmt::If(statement) => evaluate_static_all_if(states, statement),
+        Stmt::Try(statement) => evaluate_static_all_try(states, statement),
+        _ => {
+            let mut states = states;
+            for state in &mut states {
+                evaluate_static_all_simple_statement(state, statement);
+            }
+            bounded_static_all_states(states)
+        }
+    }
+}
+
+fn evaluate_static_all_if(
+    states: Vec<StaticAllState>,
+    statement: &ruff_python_ast::StmtIf,
+) -> Result<Vec<StaticAllState>> {
+    let mut remaining = states;
+    let mut completed = Vec::new();
+    let candidates = std::iter::once((Some(statement.test.as_ref()), statement.body.as_slice()))
+        .chain(
+            statement
+                .elif_else_clauses
+                .iter()
+                .map(|clause| (clause.test.as_ref(), clause.body.as_slice())),
+        );
+
+    for (test, body) in candidates {
+        if let Some(test) = test {
+            for state in &mut remaining {
+                if expression_has_potential_tracked_effect(state, test) {
+                    state.mark_dynamic_exports();
+                }
+            }
+        }
+        match test.and_then(literal_boolean_value) {
+            Some(false) => {}
+            Some(true) => {
+                completed.extend(evaluate_static_all_suite(remaining, body)?);
+                remaining = Vec::new();
+                break;
+            }
+            None if test.is_none() => {
+                completed.extend(evaluate_static_all_suite(remaining, body)?);
+                remaining = Vec::new();
+                break;
+            }
+            None => completed.extend(evaluate_static_all_suite(remaining.clone(), body)?),
+        }
+    }
+    completed.extend(remaining);
+    bounded_static_all_states(completed)
+}
+
+fn evaluate_static_all_try(
+    states: Vec<StaticAllState>,
+    statement: &ruff_python_ast::StmtTry,
+) -> Result<Vec<StaticAllState>> {
+    let mut completed = Vec::new();
+    for state in states {
+        let (successful, exceptional) = evaluate_static_all_try_body(state, &statement.body)?;
+        completed.extend(evaluate_static_all_suite(successful, &statement.orelse)?);
+
+        for handler in &statement.handlers {
+            let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+            let mut handler_states = exceptional.clone();
+            if let Some(type_) = handler.type_.as_deref() {
+                for state in &mut handler_states {
+                    if expression_has_potential_tracked_effect(state, type_) {
+                        state.mark_dynamic_exports();
+                    }
+                }
+            }
+            if let Some(name) = handler.name.as_ref() {
+                for state in &mut handler_states {
+                    state.assign_sequence(name.as_str(), None);
+                }
+            }
+            let mut handler_states = evaluate_static_all_suite(handler_states, &handler.body)?;
+            if let Some(name) = handler.name.as_ref() {
+                for state in &mut handler_states {
+                    state.delete_sequence(name.as_str());
+                }
+            }
+            completed.extend(handler_states);
+        }
+    }
+    let completed = bounded_static_all_states(completed)?;
+    evaluate_static_all_suite(completed, &statement.finalbody)
+}
+
+fn evaluate_static_all_try_body(
+    state: StaticAllState,
+    body: &[Stmt],
+) -> Result<(Vec<StaticAllState>, Vec<StaticAllState>)> {
+    let mut normal = vec![state.clone()];
+    let mut exceptional = vec![state];
+    for statement in body {
+        if matches!(statement, Stmt::If(_) | Stmt::Try(_))
+            && nested_control_may_change_static_sequences(statement, &normal)
+        {
+            return Err(unresolved_static_all());
+        }
+        // An exception handler can observe state from any completed prefix of the try body. The
+        // over-approximation is deliberate: if those states cannot all be resolved, fail closed.
+        exceptional.extend(normal.clone());
+        normal = evaluate_static_all_statement(normal, statement)?;
+        exceptional.extend(normal.clone());
+        exceptional = bounded_static_all_states(exceptional)?;
+    }
+    Ok((normal, exceptional))
+}
+
+fn evaluate_static_all_simple_statement(state: &mut StaticAllState, statement: &Stmt) {
+    match statement {
+        Stmt::Assign(assign) => {
+            if expression_has_potential_tracked_effect(state, assign.value.as_ref()) {
+                state.mark_dynamic_exports();
+                return;
+            }
+            let value_names = module_expression_names(assign.value.as_ref());
+            if value_names.iter().any(|name| state.tracked_names.contains(name))
+                && assign.targets.iter().any(|target| simple_target_names(target).is_empty())
+            {
+                state.mark_dynamic_exports();
+                return;
+            }
+            let resolved = resolve_string_sequence(assign.value.as_ref(), &state.known_sequences);
+            for target in &assign.targets {
+                let names = simple_target_names(target);
+                if names.is_empty() {
+                    invalidate_static_sequence_target(state, target);
+                } else {
+                    for name in names {
+                        state.assign_sequence(name, resolved.clone());
+                    }
+                }
+            }
+            let direct_targets = assign
+                .targets
+                .iter()
+                .filter_map(|target| match target {
+                    Expr::Name(name) => Some(name.id.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if let Expr::Name(source) = assign.value.as_ref() {
+                for target in &direct_targets {
+                    state.add_alias(target, source.id.as_str());
+                }
+            }
+            if let Some(first) = direct_targets.first() {
+                for target in &direct_targets[1..] {
+                    state.add_alias(first, target);
+                }
+            }
+        }
+        Stmt::AnnAssign(assign) => {
+            if assign
+                .value
+                .as_deref()
+                .is_some_and(|value| expression_has_potential_tracked_effect(state, value))
+            {
+                state.mark_dynamic_exports();
+                return;
+            }
+            if let Expr::Name(name) = assign.target.as_ref() {
+                let resolved = assign
+                    .value
+                    .as_deref()
+                    .and_then(|value| resolve_string_sequence(value, &state.known_sequences));
+                state.assign_sequence(name.id.as_str(), resolved);
+                if let Some(Expr::Name(source)) = assign.value.as_deref() {
+                    state.add_alias(name.id.as_str(), source.id.as_str());
+                }
+            } else {
+                if assign.value.as_deref().is_some_and(|value| {
+                    module_expression_names(value)
+                        .iter()
+                        .any(|name| state.tracked_names.contains(name))
+                }) {
+                    state.mark_dynamic_exports();
+                    return;
+                }
+                invalidate_static_sequence_target(state, assign.target.as_ref());
+            }
+        }
+        Stmt::AugAssign(assign) => {
+            if let Expr::Name(name) = assign.target.as_ref() {
+                let name = name.id.as_str();
+                if state.is_aliased(name)
+                    || expression_has_potential_tracked_effect(state, assign.value.as_ref())
+                {
+                    state.mark_dynamic_exports();
+                    return;
+                }
+                let updated = if matches!(assign.op, Operator::Add) {
+                    state.known_sequences.get(name).cloned().and_then(|mut current| {
+                        current.extend(resolve_string_sequence(
+                            assign.value.as_ref(),
+                            &state.known_sequences,
+                        )?);
+                        Some(current)
+                    })
+                } else {
+                    None
+                };
+                if let Some(updated) = updated {
+                    state.assign_sequence(name, Some(updated));
+                } else if state.tracked_names.contains(name) {
+                    state.mark_dynamic_exports();
+                }
+            } else {
+                invalidate_static_sequence_target(state, assign.target.as_ref());
+            }
+        }
+        Stmt::Expr(expression) => {
+            let Expr::Call(call) = expression.value.as_ref() else {
+                if expression_has_potential_tracked_effect(state, expression.value.as_ref()) {
+                    state.mark_dynamic_exports();
+                }
+                return;
+            };
+            let Expr::Attribute(attribute) = call.func.as_ref() else {
+                if expression_has_potential_tracked_effect(state, expression.value.as_ref()) {
+                    state.mark_dynamic_exports();
+                }
+                return;
+            };
+            let Expr::Name(receiver) = attribute.value.as_ref() else {
+                if expression_has_potential_tracked_effect(state, expression.value.as_ref()) {
+                    state.mark_dynamic_exports();
+                }
+                return;
+            };
+            let receiver = receiver.id.as_str();
+            if receiver != "__all__" && !state.tracked_names.contains(receiver) {
+                if expression_has_potential_tracked_effect(state, expression.value.as_ref()) {
+                    state.mark_dynamic_exports();
+                }
+                return;
+            }
+            if state.is_aliased(receiver)
+                || call
+                    .arguments
+                    .args
+                    .iter()
+                    .any(|argument| expression_has_potential_tracked_effect(state, argument))
+                || call
+                    .arguments
+                    .keywords
+                    .iter()
+                    .any(|keyword| expression_has_potential_tracked_effect(state, &keyword.value))
+            {
+                state.mark_dynamic_exports();
+                return;
+            }
+            let updated = if call.arguments.args.len() == 1
+                && call.arguments.keywords.is_empty()
+                && matches!(attribute.attr.as_str(), "append" | "extend")
+            {
+                state.known_sequences.get(receiver).cloned().and_then(|mut current| {
+                    match attribute.attr.as_str() {
+                        "append" => {
+                            let Expr::StringLiteral(value) = &call.arguments.args[0] else {
+                                return None;
+                            };
+                            current.push(value.value.to_str().to_owned());
+                        }
+                        "extend" => current.extend(resolve_string_sequence(
+                            &call.arguments.args[0],
+                            &state.known_sequences,
+                        )?),
+                        _ => return None,
+                    }
+                    Some(current)
+                })
+            } else {
+                None
+            };
+            if let Some(updated) = updated {
+                state.assign_sequence(receiver, Some(updated));
+            } else {
+                state.mark_dynamic_exports();
+            }
+        }
+        Stmt::Import(import) => {
+            for alias in &import.names {
+                let source_name = alias.name.as_str();
+                let local_name = alias.asname.as_ref().map_or_else(
+                    || source_name.split('.').next().unwrap_or(source_name),
+                    ruff_python_ast::Identifier::as_str,
+                );
+                state.assign_sequence(local_name, None);
+            }
+        }
+        Stmt::ImportFrom(import) => {
+            for alias in &import.names {
+                if alias.name.as_str() == "*" {
+                    continue;
+                }
+                let local_name = alias
+                    .asname
+                    .as_ref()
+                    .map_or(alias.name.as_str(), ruff_python_ast::Identifier::as_str);
+                state.assign_sequence(local_name, None);
+            }
+        }
+        Stmt::FunctionDef(function) => {
+            if function_header_has_potential_tracked_effect(state, function) {
+                state.mark_dynamic_exports();
+                return;
+            }
+            state.assign_sequence(function.name.as_str(), None);
+        }
+        Stmt::ClassDef(class_def) => {
+            if class_definition_has_potential_tracked_effect(state, class_def) {
+                state.mark_dynamic_exports();
+                return;
+            }
+            state.assign_sequence(class_def.name.as_str(), None);
+        }
+        Stmt::TypeAlias(type_alias) => {
+            if expression_has_potential_tracked_effect(state, type_alias.value.as_ref()) {
+                state.mark_dynamic_exports();
+                return;
+            }
+            if let Expr::Name(name) = type_alias.name.as_ref() {
+                state.assign_sequence(name.id.as_str(), None);
+            }
+        }
+        Stmt::Delete(delete) => {
+            for target in &delete.targets {
+                let names = simple_target_names(target);
+                if names.is_empty() {
+                    if sequence_target_is_aliased(state, target) {
+                        state.mark_dynamic_exports();
+                        return;
+                    }
+                    invalidate_static_sequence_target(state, target);
+                } else {
+                    for name in names {
+                        state.delete_sequence(name);
+                    }
+                }
+            }
+        }
+        _ => {
+            if statement_has_potential_tracked_effect(state, statement) {
+                state.mark_dynamic_exports();
+            }
+        }
+    }
+}
+
+fn invalidate_static_sequence_target(state: &mut StaticAllState, target: &Expr) {
+    let receiver = match target {
+        Expr::Subscript(subscript) => subscript.value.as_ref(),
+        Expr::Attribute(attribute) => attribute.value.as_ref(),
+        _ => return,
+    };
+    if let Expr::Name(name) = receiver {
+        let name = name.id.as_str();
+        if state.tracked_names.contains(name) {
+            state.mark_dynamic_exports();
+        }
+    }
+}
+
+fn sequence_target_is_aliased(state: &StaticAllState, target: &Expr) -> bool {
+    let receiver = match target {
+        Expr::Subscript(subscript) => subscript.value.as_ref(),
+        Expr::Attribute(attribute) => attribute.value.as_ref(),
+        _ => return false,
+    };
+    matches!(receiver, Expr::Name(name) if state.is_aliased(name.id.as_str()))
+}
+
+#[derive(Default)]
+struct StaticAllReferenceFinder {
+    found: bool,
+}
+
+impl<'a> Visitor<'a> for StaticAllReferenceFinder {
+    fn visit_stmt(&mut self, statement: &'a Stmt) {
         match statement {
+            Stmt::FunctionDef(function) => {
+                let mut header = ScopedModuleReferenceCollector::module();
+                header.visit_function_header(function);
+                self.found |= function.name.as_str() == "__all__"
+                    || header.references.contains("__all__")
+                    || function_module_reference_names(function, Vec::new()).contains("__all__");
+                return;
+            }
+            Stmt::ClassDef(class_def) => {
+                let mut header = ScopedModuleReferenceCollector::module();
+                header.visit_class_header(class_def);
+                self.found |= class_def.name.as_str() == "__all__"
+                    || header.references.contains("__all__")
+                    || class_module_reference_names(class_def, Vec::new()).contains("__all__");
+                return;
+            }
+            _ => {}
+        }
+        visitor::walk_stmt(self, statement);
+    }
+
+    fn visit_expr(&mut self, expression: &'a Expr) {
+        if matches!(
+            expression,
+            Expr::Lambda(_)
+                | Expr::ListComp(_)
+                | Expr::SetComp(_)
+                | Expr::DictComp(_)
+                | Expr::Generator(_)
+        ) {
+            self.found |= module_expression_names(expression).contains("__all__");
+            return;
+        }
+        if matches!(expression, Expr::Name(name) if name.id.as_str() == "__all__") {
+            self.found = true;
+        }
+        visitor::walk_expr(self, expression);
+    }
+
+    fn visit_alias(&mut self, alias: &'a ruff_python_ast::Alias) {
+        let source_name = alias.name.as_str();
+        let local_name = alias.asname.as_ref().map_or_else(
+            || source_name.split('.').next().unwrap_or(source_name),
+            ruff_python_ast::Identifier::as_str,
+        );
+        if local_name == "__all__" {
+            self.found = true;
+        }
+        visitor::walk_alias(self, alias);
+    }
+
+    fn visit_except_handler(&mut self, except_handler: &'a ruff_python_ast::ExceptHandler) {
+        let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = except_handler;
+        if handler.name.as_ref().is_some_and(|name| name.as_str() == "__all__") {
+            self.found = true;
+        }
+        visitor::walk_except_handler(self, except_handler);
+    }
+}
+
+fn suite_references_static_all(suite: &[Stmt]) -> bool {
+    let mut finder = StaticAllReferenceFinder::default();
+    finder.visit_body(suite);
+    finder.found
+}
+
+#[derive(Default)]
+struct StaticAllDependencyCollector {
+    edges: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl StaticAllDependencyCollector {
+    fn add_edges(&mut self, target: &str, dependencies: impl IntoIterator<Item = String>) {
+        self.edges.entry(target.to_owned()).or_default().extend(dependencies);
+    }
+
+    fn add_aliases(&mut self, names: &[&str]) {
+        for (index, first) in names.iter().enumerate() {
+            for second in &names[index + 1..] {
+                self.add_edges(first, [(*second).to_owned()]);
+                self.add_edges(second, [(*first).to_owned()]);
+            }
+        }
+    }
+}
+
+impl<'a> Visitor<'a> for StaticAllDependencyCollector {
+    fn visit_stmt(&mut self, statement: &'a Stmt) {
+        match statement {
+            // Function bodies are deferred, but a later module-level call can execute code that
+            // touches a tracked sequence without passing it as an argument. Link every referenced
+            // name back to the callable so such calls fail closed.
+            Stmt::FunctionDef(function) => {
+                for name in function_module_effect_names(function, Vec::new()) {
+                    self.add_edges(&name, [function.name.as_str().to_owned()]);
+                }
+                return;
+            }
+            Stmt::ClassDef(class_def) => {
+                let (_, deferred) = class_module_effect_names(class_def, Vec::new());
+                for name in deferred {
+                    self.add_edges(&name, [class_def.name.as_str().to_owned()]);
+                }
+                return;
+            }
             Stmt::Assign(assign) => {
-                let resolved = resolve_string_sequence(assign.value.as_ref(), &known_sequences);
-                for name in assign.targets.iter().flat_map(simple_target_names) {
-                    if let Some(values) = &resolved {
-                        known_sequences.insert(name.to_owned(), values.clone());
-                    } else {
-                        known_sequences.remove(name);
+                let targets =
+                    assign.targets.iter().flat_map(simple_target_names).collect::<Vec<_>>();
+                let dependencies = module_expression_names(assign.value.as_ref());
+                for target in &targets {
+                    self.add_edges(target, dependencies.iter().cloned());
+                }
+                for dependency in &dependencies {
+                    self.add_edges(dependency, targets.iter().map(|target| (*target).to_owned()));
+                }
+                if matches!(assign.value.as_ref(), Expr::Name(_)) {
+                    self.add_aliases(&targets);
+                    if let Expr::Name(source) = assign.value.as_ref() {
+                        for target in &targets {
+                            self.add_edges(source.id.as_str(), [(*target).to_owned()]);
+                        }
                     }
-                    if name == "__all__" {
-                        has_all = true;
-                        exports = resolved.clone();
-                    }
+                } else if assign.targets.len() > 1
+                    && assign.targets.iter().all(|target| matches!(target, Expr::Name(_)))
+                {
+                    self.add_aliases(&targets);
                 }
             }
             Stmt::AnnAssign(assign) => {
-                if let Expr::Name(name) = assign.target.as_ref() {
-                    let resolved = assign
-                        .value
-                        .as_deref()
-                        .and_then(|value| resolve_string_sequence(value, &known_sequences));
-                    if let Some(values) = &resolved {
-                        known_sequences.insert(name.id.as_str().to_owned(), values.clone());
-                    } else {
-                        known_sequences.remove(name.id.as_str());
+                if let Expr::Name(target) = assign.target.as_ref()
+                    && let Some(value) = assign.value.as_deref()
+                {
+                    let dependencies = module_expression_names(value);
+                    self.add_edges(target.id.as_str(), dependencies.iter().cloned());
+                    for dependency in dependencies {
+                        self.add_edges(&dependency, [target.id.as_str().to_owned()]);
                     }
-                    if name.id.as_str() == "__all__" {
-                        has_all = true;
-                        exports = resolved;
+                    if let Expr::Name(source) = value {
+                        self.add_edges(source.id.as_str(), [target.id.as_str().to_owned()]);
                     }
                 }
             }
-            Stmt::AugAssign(assign)
-                if matches!(assign.op, Operator::Add)
-                    && matches!(assign.target.as_ref(), Expr::Name(name) if name.id.as_str() == "__all__") =>
-            {
-                has_all = true;
-                if let (Some(current), Some(mut additional)) = (
-                    exports.as_mut(),
-                    resolve_string_sequence(assign.value.as_ref(), &known_sequences),
-                ) {
-                    current.append(&mut additional);
-                    known_sequences.insert(String::from("__all__"), current.clone());
-                } else {
-                    exports = None;
-                    known_sequences.remove("__all__");
-                }
-            }
-            Stmt::Expr(expression) => {
-                let Expr::Call(call) = expression.value.as_ref() else {
-                    continue;
-                };
-                let Expr::Attribute(attribute) = call.func.as_ref() else {
-                    continue;
-                };
-                let Expr::Name(receiver) = attribute.value.as_ref() else {
-                    continue;
-                };
-                let receiver = receiver.id.as_str();
-                if !matches!(attribute.attr.as_str(), "append" | "extend") {
-                    continue;
-                }
-                let updated =
-                    if call.arguments.args.len() == 1 && call.arguments.keywords.is_empty() {
-                        known_sequences.get(receiver).cloned().and_then(|mut current| {
-                            match attribute.attr.as_str() {
-                                "append" => {
-                                    let Expr::StringLiteral(value) = &call.arguments.args[0] else {
-                                        return None;
-                                    };
-                                    current.push(value.value.to_str().to_owned());
-                                }
-                                "extend" => current.extend(resolve_string_sequence(
-                                    &call.arguments.args[0],
-                                    &known_sequences,
-                                )?),
-                                _ => return None,
-                            }
-                            Some(current)
-                        })
-                    } else {
-                        None
-                    };
-                if let Some(values) = &updated {
-                    known_sequences.insert(receiver.to_owned(), values.clone());
-                } else {
-                    known_sequences.remove(receiver);
-                }
-                if receiver == "__all__" {
-                    has_all = true;
-                    exports = updated;
-                }
-            }
-            Stmt::Delete(delete) => {
-                for name in delete.targets.iter().flat_map(simple_target_names) {
-                    known_sequences.remove(name);
-                    if name == "__all__" {
-                        has_all = false;
-                        exports = None;
-                    }
+            Stmt::AugAssign(assign) => {
+                if let Expr::Name(target) = assign.target.as_ref() {
+                    self.add_edges(
+                        target.id.as_str(),
+                        module_expression_names(assign.value.as_ref()),
+                    );
                 }
             }
             _ => {}
         }
+        visitor::walk_stmt(self, statement);
     }
 
-    if !has_all {
-        return Ok(None);
+    fn visit_expr(&mut self, expression: &'a Expr) {
+        match expression {
+            Expr::Named(named) => {
+                if let Expr::Name(target) = named.target.as_ref() {
+                    let dependencies = module_expression_names(named.value.as_ref());
+                    self.add_edges(target.id.as_str(), dependencies.iter().cloned());
+                    for dependency in dependencies {
+                        self.add_edges(&dependency, [target.id.as_str().to_owned()]);
+                    }
+                    if let Expr::Name(source) = named.value.as_ref() {
+                        self.add_edges(source.id.as_str(), [target.id.as_str().to_owned()]);
+                    }
+                }
+            }
+            Expr::Call(call) => {
+                if let Expr::Attribute(attribute) = call.func.as_ref()
+                    && let Expr::Name(receiver) = attribute.value.as_ref()
+                {
+                    let dependencies =
+                        call.arguments.args.iter().flat_map(module_expression_names).chain(
+                            call.arguments
+                                .keywords
+                                .iter()
+                                .flat_map(|keyword| module_expression_names(&keyword.value)),
+                        );
+                    self.add_edges(receiver.id.as_str(), dependencies);
+                }
+            }
+            _ => {}
+        }
+        visitor::walk_expr(self, expression);
     }
-    exports
-        .map(|names| Some(names.into_iter().collect()))
-        .ok_or_else(|| anyhow::anyhow!("unable to statically resolve module `__all__`"))
+}
+
+fn static_all_dependency_names(suite: &[Stmt]) -> BTreeSet<String> {
+    let mut collector = StaticAllDependencyCollector::default();
+    collector.visit_body(suite);
+
+    let mut dependencies = BTreeSet::from([String::from("__all__")]);
+    loop {
+        let previous_len = dependencies.len();
+        let current = dependencies.iter().cloned().collect::<Vec<_>>();
+        for name in current {
+            if let Some(names) = collector.edges.get(&name) {
+                dependencies.extend(names.iter().cloned());
+            }
+        }
+        if dependencies.len() == previous_len {
+            break;
+        }
+    }
+    dependencies
+}
+
+#[derive(Default)]
+struct FunctionBindingCollector {
+    bound: BTreeSet<String>,
+    globals: BTreeSet<String>,
+    nonlocals: BTreeSet<String>,
+}
+
+impl FunctionBindingCollector {
+    fn bind_target(&mut self, target: &Expr) {
+        self.bound.extend(simple_target_names(target).into_iter().map(str::to_owned));
+    }
+}
+
+#[derive(Default)]
+struct NamedExpressionBindingCollector {
+    bound: BTreeSet<String>,
+}
+
+impl<'a> Visitor<'a> for NamedExpressionBindingCollector {
+    fn visit_expr(&mut self, expression: &'a Expr) {
+        match expression {
+            Expr::Named(named) => {
+                self.bound.extend(
+                    simple_target_names(named.target.as_ref()).into_iter().map(str::to_owned),
+                );
+            }
+            Expr::Lambda(lambda) => {
+                // Defaults execute in the containing scope, while the lambda body owns its
+                // named-expression bindings.
+                if let Some(parameters) = lambda.parameters.as_deref() {
+                    self.visit_parameters(parameters);
+                }
+                return;
+            }
+            _ => {}
+        }
+        visitor::walk_expr(self, expression);
+    }
+}
+
+fn named_expression_binding_names(expression: &Expr) -> BTreeSet<String> {
+    let mut collector = NamedExpressionBindingCollector::default();
+    collector.visit_expr(expression);
+    collector.bound
+}
+
+impl<'a> Visitor<'a> for FunctionBindingCollector {
+    fn visit_stmt(&mut self, statement: &'a Stmt) {
+        match statement {
+            Stmt::FunctionDef(function) => {
+                self.bound.insert(function.name.as_str().to_owned());
+                for decorator in &function.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                self.visit_parameters(function.parameters.as_ref());
+                if let Some(returns) = function.returns.as_deref() {
+                    self.visit_annotation(returns);
+                }
+                if let Some(type_params) = function.type_params.as_deref() {
+                    self.visit_type_params(type_params);
+                }
+                return;
+            }
+            Stmt::ClassDef(class_def) => {
+                self.bound.insert(class_def.name.as_str().to_owned());
+                for decorator in &class_def.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                if let Some(arguments) = class_def.arguments.as_deref() {
+                    self.visit_arguments(arguments);
+                }
+                if let Some(type_params) = class_def.type_params.as_deref() {
+                    self.visit_type_params(type_params);
+                }
+                return;
+            }
+            Stmt::Assign(assign) => {
+                for target in &assign.targets {
+                    self.bind_target(target);
+                }
+            }
+            Stmt::AnnAssign(assign) => self.bind_target(assign.target.as_ref()),
+            Stmt::AugAssign(assign) => self.bind_target(assign.target.as_ref()),
+            Stmt::Delete(delete) => {
+                for target in &delete.targets {
+                    self.bind_target(target);
+                }
+            }
+            Stmt::For(for_statement) => self.bind_target(for_statement.target.as_ref()),
+            Stmt::With(with_statement) => {
+                for item in &with_statement.items {
+                    if let Some(target) = item.optional_vars.as_deref() {
+                        self.bind_target(target);
+                    }
+                }
+            }
+            Stmt::Import(import) => {
+                for alias in &import.names {
+                    let source_name = alias.name.as_str();
+                    let local_name = alias.asname.as_ref().map_or_else(
+                        || source_name.split('.').next().unwrap_or(source_name),
+                        ruff_python_ast::Identifier::as_str,
+                    );
+                    self.bound.insert(local_name.to_owned());
+                }
+            }
+            Stmt::ImportFrom(import) => {
+                for alias in &import.names {
+                    if alias.name.as_str() == "*" {
+                        continue;
+                    }
+                    let local_name = alias
+                        .asname
+                        .as_ref()
+                        .map_or(alias.name.as_str(), ruff_python_ast::Identifier::as_str);
+                    self.bound.insert(local_name.to_owned());
+                }
+            }
+            Stmt::TypeAlias(type_alias) => self.bind_target(type_alias.name.as_ref()),
+            Stmt::Global(global) => {
+                self.globals.extend(global.names.iter().map(|name| name.as_str().to_owned()));
+                return;
+            }
+            Stmt::Nonlocal(nonlocal) => {
+                self.nonlocals.extend(nonlocal.names.iter().map(|name| name.as_str().to_owned()));
+                return;
+            }
+            _ => {}
+        }
+        visitor::walk_stmt(self, statement);
+    }
+
+    fn visit_expr(&mut self, expression: &'a Expr) {
+        match expression {
+            Expr::Named(named) => self.bind_target(named.target.as_ref()),
+            Expr::Lambda(lambda) => {
+                if let Some(parameters) = lambda.parameters.as_deref() {
+                    self.visit_parameters(parameters);
+                }
+                return;
+            }
+            Expr::ListComp(_) | Expr::SetComp(_) | Expr::DictComp(_) | Expr::Generator(_) => {
+                // Comprehension targets belong to the implicit comprehension scope, not to the
+                // containing function. Named expressions are the exception: Python binds those
+                // in the nearest enclosing non-comprehension scope.
+                self.bound.extend(named_expression_binding_names(expression));
+                return;
+            }
+            _ => {}
+        }
+        visitor::walk_expr(self, expression);
+    }
+
+    fn visit_except_handler(&mut self, except_handler: &'a ruff_python_ast::ExceptHandler) {
+        let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = except_handler;
+        if let Some(name) = handler.name.as_ref() {
+            self.bound.insert(name.as_str().to_owned());
+        }
+        visitor::walk_except_handler(self, except_handler);
+    }
+
+    fn visit_pattern(&mut self, pattern: &'a ruff_python_ast::Pattern) {
+        let bound_name = match pattern {
+            ruff_python_ast::Pattern::MatchMapping(mapping) => mapping.rest.as_ref(),
+            ruff_python_ast::Pattern::MatchStar(star) => star.name.as_ref(),
+            ruff_python_ast::Pattern::MatchAs(as_pattern) => as_pattern.name.as_ref(),
+            _ => None,
+        };
+        if let Some(name) = bound_name {
+            self.bound.insert(name.as_str().to_owned());
+        }
+        visitor::walk_pattern(self, pattern);
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ReferenceScopeKind {
+    Module,
+    Function,
+    Class,
+}
+
+struct ScopedModuleReferenceCollector {
+    kind: ReferenceScopeKind,
+    locals: BTreeSet<String>,
+    globals: BTreeSet<String>,
+    nonlocals: BTreeSet<String>,
+    enclosing_function_locals: Vec<BTreeSet<String>>,
+    references: BTreeSet<String>,
+}
+
+impl ScopedModuleReferenceCollector {
+    fn module() -> Self {
+        Self {
+            kind: ReferenceScopeKind::Module,
+            locals: BTreeSet::new(),
+            globals: BTreeSet::new(),
+            nonlocals: BTreeSet::new(),
+            enclosing_function_locals: Vec::new(),
+            references: BTreeSet::new(),
+        }
+    }
+
+    fn function(
+        function: &ruff_python_ast::StmtFunctionDef,
+        enclosing_function_locals: Vec<BTreeSet<String>>,
+    ) -> Self {
+        let mut bindings = FunctionBindingCollector::default();
+        bindings.bound.extend(
+            function.parameters.iter().map(|parameter| parameter.name().as_str().to_owned()),
+        );
+        bindings.visit_body(&function.body);
+        bindings
+            .bound
+            .retain(|name| !bindings.globals.contains(name) && !bindings.nonlocals.contains(name));
+        Self {
+            kind: ReferenceScopeKind::Function,
+            locals: bindings.bound,
+            globals: bindings.globals,
+            nonlocals: bindings.nonlocals,
+            enclosing_function_locals,
+            references: BTreeSet::new(),
+        }
+    }
+
+    fn class(enclosing_function_locals: Vec<BTreeSet<String>>, body: &[Stmt]) -> Self {
+        let mut bindings = FunctionBindingCollector::default();
+        bindings.visit_body(body);
+        Self {
+            kind: ReferenceScopeKind::Class,
+            locals: BTreeSet::new(),
+            globals: bindings.globals,
+            nonlocals: bindings.nonlocals,
+            enclosing_function_locals,
+            references: BTreeSet::new(),
+        }
+    }
+
+    fn closure_locals(&self) -> Vec<BTreeSet<String>> {
+        let mut enclosing = self.enclosing_function_locals.clone();
+        if matches!(self.kind, ReferenceScopeKind::Function) {
+            enclosing.push(self.locals.clone());
+        }
+        enclosing
+    }
+
+    fn name_resolves_to_module(&self, name: &str, context: ruff_python_ast::ExprContext) -> bool {
+        if matches!(self.kind, ReferenceScopeKind::Module) {
+            return true;
+        }
+        if self.globals.contains(name) {
+            return true;
+        }
+        if matches!(self.kind, ReferenceScopeKind::Class) {
+            if self.locals.contains(name) {
+                return false;
+            }
+            if matches!(
+                context,
+                ruff_python_ast::ExprContext::Store | ruff_python_ast::ExprContext::Del
+            ) {
+                return false;
+            }
+        }
+        if matches!(self.kind, ReferenceScopeKind::Function) && self.locals.contains(name) {
+            return false;
+        }
+        if self.nonlocals.contains(name) {
+            return false;
+        }
+        !self.enclosing_function_locals.iter().rev().any(|locals| locals.contains(name))
+    }
+
+    fn merge(&mut self, child: Self) {
+        self.references.extend(child.references);
+    }
+
+    fn bind_class_name(&mut self, name: &str) {
+        if matches!(self.kind, ReferenceScopeKind::Class)
+            && !self.globals.contains(name)
+            && !self.nonlocals.contains(name)
+        {
+            self.locals.insert(name.to_owned());
+        }
+    }
+
+    fn bind_class_target(&mut self, target: &Expr) {
+        for name in simple_target_names(target) {
+            self.bind_class_name(name);
+        }
+    }
+
+    fn unbind_class_target(&mut self, target: &Expr) {
+        if matches!(self.kind, ReferenceScopeKind::Class) {
+            for name in simple_target_names(target) {
+                self.locals.remove(name);
+            }
+        }
+    }
+
+    fn visit_function_header(&mut self, function: &'_ ruff_python_ast::StmtFunctionDef) {
+        for decorator in &function.decorator_list {
+            self.visit_decorator(decorator);
+        }
+        self.visit_parameters(function.parameters.as_ref());
+        if let Some(returns) = function.returns.as_deref() {
+            self.visit_annotation(returns);
+        }
+        if let Some(type_params) = function.type_params.as_deref() {
+            self.visit_type_params(type_params);
+        }
+    }
+
+    fn visit_class_header(&mut self, class_def: &'_ ruff_python_ast::StmtClassDef) {
+        for decorator in &class_def.decorator_list {
+            self.visit_decorator(decorator);
+        }
+        if let Some(arguments) = class_def.arguments.as_deref() {
+            self.visit_arguments(arguments);
+        }
+        if let Some(type_params) = class_def.type_params.as_deref() {
+            self.visit_type_params(type_params);
+        }
+    }
+
+    fn visit_comprehension_expression(
+        &mut self,
+        generators: &[ruff_python_ast::Comprehension],
+        outputs: &[&Expr],
+    ) {
+        let Some((first, remaining)) = generators.split_first() else {
+            for output in outputs {
+                self.visit_expr(output);
+            }
+            return;
+        };
+        self.visit_expr(&first.iter);
+
+        let mut child = Self {
+            kind: ReferenceScopeKind::Function,
+            locals: simple_target_names(&first.target).into_iter().map(str::to_owned).collect(),
+            globals: BTreeSet::new(),
+            nonlocals: BTreeSet::new(),
+            enclosing_function_locals: self.closure_locals(),
+            references: BTreeSet::new(),
+        };
+        for condition in &first.ifs {
+            child.visit_expr(condition);
+        }
+        for generator in remaining {
+            child.visit_expr(&generator.iter);
+            child
+                .locals
+                .extend(simple_target_names(&generator.target).into_iter().map(str::to_owned));
+            for condition in &generator.ifs {
+                child.visit_expr(condition);
+            }
+        }
+        for output in outputs {
+            child.visit_expr(output);
+        }
+        self.merge(child);
+    }
+}
+
+impl<'a> Visitor<'a> for ScopedModuleReferenceCollector {
+    fn visit_stmt(&mut self, statement: &'a Stmt) {
+        match statement {
+            Stmt::FunctionDef(function) => {
+                self.visit_function_header(function);
+                let mut child = Self::function(function, self.closure_locals());
+                child.visit_body(&function.body);
+                self.merge(child);
+                self.bind_class_name(function.name.as_str());
+                return;
+            }
+            Stmt::ClassDef(class_def) => {
+                self.visit_class_header(class_def);
+                let mut child = Self::class(self.closure_locals(), &class_def.body);
+                child.visit_body(&class_def.body);
+                self.merge(child);
+                self.bind_class_name(class_def.name.as_str());
+                return;
+            }
+            Stmt::Assign(assign) if matches!(self.kind, ReferenceScopeKind::Class) => {
+                self.visit_expr(assign.value.as_ref());
+                for target in &assign.targets {
+                    self.visit_expr(target);
+                    self.bind_class_target(target);
+                }
+                return;
+            }
+            Stmt::AnnAssign(assign) if matches!(self.kind, ReferenceScopeKind::Class) => {
+                self.visit_annotation(assign.annotation.as_ref());
+                if let Some(value) = assign.value.as_deref() {
+                    self.visit_expr(value);
+                }
+                self.visit_expr(assign.target.as_ref());
+                self.bind_class_target(assign.target.as_ref());
+                return;
+            }
+            Stmt::AugAssign(assign) if matches!(self.kind, ReferenceScopeKind::Class) => {
+                if let Expr::Name(name) = assign.target.as_ref()
+                    && self.name_resolves_to_module(
+                        name.id.as_str(),
+                        ruff_python_ast::ExprContext::Load,
+                    )
+                {
+                    self.references.insert(name.id.as_str().to_owned());
+                }
+                self.visit_expr(assign.target.as_ref());
+                self.visit_expr(assign.value.as_ref());
+                self.bind_class_target(assign.target.as_ref());
+                return;
+            }
+            Stmt::Delete(delete) if matches!(self.kind, ReferenceScopeKind::Class) => {
+                for target in &delete.targets {
+                    self.visit_expr(target);
+                    self.unbind_class_target(target);
+                }
+                return;
+            }
+            Stmt::Import(import) if matches!(self.kind, ReferenceScopeKind::Class) => {
+                for alias in &import.names {
+                    let source_name = alias.name.as_str();
+                    let local_name = alias.asname.as_ref().map_or_else(
+                        || source_name.split('.').next().unwrap_or(source_name),
+                        ruff_python_ast::Identifier::as_str,
+                    );
+                    self.bind_class_name(local_name);
+                }
+                return;
+            }
+            Stmt::ImportFrom(import) if matches!(self.kind, ReferenceScopeKind::Class) => {
+                for alias in &import.names {
+                    if alias.name.as_str() != "*" {
+                        let local_name = alias
+                            .asname
+                            .as_ref()
+                            .map_or(alias.name.as_str(), ruff_python_ast::Identifier::as_str);
+                        self.bind_class_name(local_name);
+                    }
+                }
+                return;
+            }
+            _ => {}
+        }
+        visitor::walk_stmt(self, statement);
+    }
+
+    fn visit_expr(&mut self, expression: &'a Expr) {
+        match expression {
+            Expr::Name(name) => {
+                if self.name_resolves_to_module(name.id.as_str(), name.ctx) {
+                    self.references.insert(name.id.as_str().to_owned());
+                }
+                return;
+            }
+            Expr::Lambda(lambda) => {
+                if let Some(parameters) = lambda.parameters.as_deref() {
+                    self.visit_parameters(parameters);
+                }
+                let locals =
+                    lambda.parameters.as_deref().map_or_else(BTreeSet::new, |parameters| {
+                        parameters
+                            .iter()
+                            .map(|parameter| parameter.name().as_str().to_owned())
+                            .collect()
+                    });
+                let mut locals = locals;
+                locals.extend(named_expression_binding_names(lambda.body.as_ref()));
+                let mut child = Self {
+                    kind: ReferenceScopeKind::Function,
+                    locals,
+                    globals: BTreeSet::new(),
+                    nonlocals: BTreeSet::new(),
+                    enclosing_function_locals: self.closure_locals(),
+                    references: BTreeSet::new(),
+                };
+                child.visit_expr(lambda.body.as_ref());
+                self.merge(child);
+                return;
+            }
+            Expr::ListComp(comprehension) => {
+                self.visit_comprehension_expression(
+                    &comprehension.generators,
+                    &[comprehension.elt.as_ref()],
+                );
+                return;
+            }
+            Expr::SetComp(comprehension) => {
+                self.visit_comprehension_expression(
+                    &comprehension.generators,
+                    &[comprehension.elt.as_ref()],
+                );
+                return;
+            }
+            Expr::DictComp(comprehension) => {
+                self.visit_comprehension_expression(
+                    &comprehension.generators,
+                    &[comprehension.key.as_ref(), comprehension.value.as_ref()],
+                );
+                return;
+            }
+            Expr::Generator(comprehension) => {
+                self.visit_comprehension_expression(
+                    &comprehension.generators,
+                    &[comprehension.elt.as_ref()],
+                );
+                return;
+            }
+            _ => {}
+        }
+        visitor::walk_expr(self, expression);
+    }
+}
+
+fn module_expression_names(expression: &Expr) -> BTreeSet<String> {
+    let mut collector = ScopedModuleReferenceCollector::module();
+    collector.visit_expr(expression);
+    collector.references
+}
+
+fn function_module_reference_names(
+    function: &ruff_python_ast::StmtFunctionDef,
+    enclosing_function_locals: Vec<BTreeSet<String>>,
+) -> BTreeSet<String> {
+    let mut collector =
+        ScopedModuleReferenceCollector::function(function, enclosing_function_locals);
+    collector.visit_body(&function.body);
+    collector.references
+}
+
+fn class_module_reference_names(
+    class_def: &ruff_python_ast::StmtClassDef,
+    enclosing_function_locals: Vec<BTreeSet<String>>,
+) -> BTreeSet<String> {
+    let mut collector =
+        ScopedModuleReferenceCollector::class(enclosing_function_locals, &class_def.body);
+    collector.visit_body(&class_def.body);
+    collector.references
+}
+
+struct ScopedModuleEffectCollector {
+    kind: ReferenceScopeKind,
+    locals: BTreeSet<String>,
+    globals: BTreeSet<String>,
+    nonlocals: BTreeSet<String>,
+    enclosing_function_locals: Vec<BTreeSet<String>>,
+    dependencies: BTreeSet<String>,
+    deferred_dependencies: BTreeSet<String>,
+    local_callables: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl ScopedModuleEffectCollector {
+    fn function(
+        function: &ruff_python_ast::StmtFunctionDef,
+        enclosing_function_locals: Vec<BTreeSet<String>>,
+    ) -> Self {
+        let scope = ScopedModuleReferenceCollector::function(function, enclosing_function_locals);
+        Self::from_reference_scope(scope)
+    }
+
+    fn class(enclosing_function_locals: Vec<BTreeSet<String>>, body: &[Stmt]) -> Self {
+        let scope = ScopedModuleReferenceCollector::class(enclosing_function_locals, body);
+        Self::from_reference_scope(scope)
+    }
+
+    fn from_reference_scope(scope: ScopedModuleReferenceCollector) -> Self {
+        Self {
+            kind: scope.kind,
+            locals: scope.locals,
+            globals: scope.globals,
+            nonlocals: scope.nonlocals,
+            enclosing_function_locals: scope.enclosing_function_locals,
+            dependencies: BTreeSet::new(),
+            deferred_dependencies: BTreeSet::new(),
+            local_callables: BTreeMap::new(),
+        }
+    }
+
+    fn closure_locals(&self) -> Vec<BTreeSet<String>> {
+        let mut enclosing = self.enclosing_function_locals.clone();
+        if matches!(self.kind, ReferenceScopeKind::Function) {
+            enclosing.push(self.locals.clone());
+        }
+        enclosing
+    }
+
+    fn name_resolves_to_module(&self, name: &str, context: ruff_python_ast::ExprContext) -> bool {
+        if self.globals.contains(name) {
+            return true;
+        }
+        if matches!(self.kind, ReferenceScopeKind::Class) {
+            if self.locals.contains(name) {
+                return false;
+            }
+            if matches!(
+                context,
+                ruff_python_ast::ExprContext::Store | ruff_python_ast::ExprContext::Del
+            ) {
+                return false;
+            }
+        }
+        if matches!(self.kind, ReferenceScopeKind::Function) && self.locals.contains(name) {
+            return false;
+        }
+        if self.nonlocals.contains(name) {
+            return false;
+        }
+        !self.enclosing_function_locals.iter().rev().any(|locals| locals.contains(name))
+    }
+
+    fn expression_module_names(&self, expression: &Expr) -> BTreeSet<String> {
+        let mut collector = ScopedModuleReferenceCollector {
+            kind: self.kind,
+            locals: self.locals.clone(),
+            globals: self.globals.clone(),
+            nonlocals: self.nonlocals.clone(),
+            enclosing_function_locals: self.enclosing_function_locals.clone(),
+            references: BTreeSet::new(),
+        };
+        collector.visit_expr(expression);
+        collector.references
+    }
+
+    fn expression_may_retain_module_reference(&self, expression: &Expr) -> bool {
+        !self.expression_module_names(expression).is_empty()
+    }
+
+    fn visit_function_header(&mut self, function: &'_ ruff_python_ast::StmtFunctionDef) {
+        for decorator in &function.decorator_list {
+            self.visit_decorator(decorator);
+        }
+        self.visit_parameters(function.parameters.as_ref());
+        if let Some(returns) = function.returns.as_deref() {
+            self.visit_annotation(returns);
+        }
+        if let Some(type_params) = function.type_params.as_deref() {
+            self.visit_type_params(type_params);
+        }
+    }
+
+    fn visit_class_header(&mut self, class_def: &'_ ruff_python_ast::StmtClassDef) {
+        for decorator in &class_def.decorator_list {
+            self.visit_decorator(decorator);
+        }
+        if let Some(arguments) = class_def.arguments.as_deref() {
+            self.visit_arguments(arguments);
+        }
+        if let Some(type_params) = class_def.type_params.as_deref() {
+            self.visit_type_params(type_params);
+        }
+    }
+
+    fn record_binding(&mut self, name: &str) {
+        if self.name_resolves_to_module(name, ruff_python_ast::ExprContext::Store) {
+            self.dependencies.insert(name.to_owned());
+        }
+    }
+
+    fn bind_class_name(&mut self, name: &str) {
+        if matches!(self.kind, ReferenceScopeKind::Class)
+            && !self.globals.contains(name)
+            && !self.nonlocals.contains(name)
+        {
+            self.locals.insert(name.to_owned());
+        }
+    }
+
+    fn bind_class_target(&mut self, target: &Expr) {
+        for name in simple_target_names(target) {
+            self.bind_class_name(name);
+        }
+    }
+
+    fn unbind_class_target(&mut self, target: &Expr) {
+        if matches!(self.kind, ReferenceScopeKind::Class) {
+            for name in simple_target_names(target) {
+                self.locals.remove(name);
+            }
+        }
+    }
+
+    fn register_local_callable(&mut self, name: &str, dependencies: BTreeSet<String>) {
+        if matches!(self.kind, ReferenceScopeKind::Class) {
+            self.deferred_dependencies.extend(dependencies.iter().cloned());
+        }
+        self.local_callables.insert(name.to_owned(), dependencies);
+    }
+}
+
+impl<'a> Visitor<'a> for ScopedModuleEffectCollector {
+    fn visit_stmt(&mut self, statement: &'a Stmt) {
+        match statement {
+            Stmt::FunctionDef(function) => {
+                self.record_binding(function.name.as_str());
+                self.visit_function_header(function);
+                let dependencies = function_module_effect_names(function, self.closure_locals());
+                self.register_local_callable(function.name.as_str(), dependencies);
+                self.bind_class_name(function.name.as_str());
+                return;
+            }
+            Stmt::ClassDef(class_def) => {
+                self.record_binding(class_def.name.as_str());
+                self.visit_class_header(class_def);
+                let (executed, deferred) =
+                    class_module_effect_names(class_def, self.closure_locals());
+                self.dependencies.extend(executed.iter().cloned());
+                let mut callable = executed;
+                callable.extend(deferred);
+                self.register_local_callable(class_def.name.as_str(), callable);
+                self.bind_class_name(class_def.name.as_str());
+                return;
+            }
+            Stmt::Assign(assign) => {
+                if self.expression_may_retain_module_reference(assign.value.as_ref()) {
+                    self.dependencies.extend(self.expression_module_names(assign.value.as_ref()));
+                }
+                if matches!(self.kind, ReferenceScopeKind::Class) {
+                    self.visit_expr(assign.value.as_ref());
+                    for target in &assign.targets {
+                        self.visit_expr(target);
+                        self.bind_class_target(target);
+                    }
+                    return;
+                }
+            }
+            Stmt::AnnAssign(assign) => {
+                if let Some(value) = assign.value.as_deref()
+                    && self.expression_may_retain_module_reference(value)
+                {
+                    self.dependencies.extend(self.expression_module_names(value));
+                }
+                if matches!(self.kind, ReferenceScopeKind::Class) {
+                    self.visit_annotation(assign.annotation.as_ref());
+                    if let Some(value) = assign.value.as_deref() {
+                        self.visit_expr(value);
+                    }
+                    self.visit_expr(assign.target.as_ref());
+                    self.bind_class_target(assign.target.as_ref());
+                    return;
+                }
+            }
+            Stmt::AugAssign(assign) if matches!(self.kind, ReferenceScopeKind::Class) => {
+                if let Expr::Name(name) = assign.target.as_ref()
+                    && self.name_resolves_to_module(
+                        name.id.as_str(),
+                        ruff_python_ast::ExprContext::Load,
+                    )
+                {
+                    self.dependencies.insert(name.id.as_str().to_owned());
+                }
+                self.visit_expr(assign.target.as_ref());
+                self.visit_expr(assign.value.as_ref());
+                self.bind_class_target(assign.target.as_ref());
+                return;
+            }
+            Stmt::Delete(delete) if matches!(self.kind, ReferenceScopeKind::Class) => {
+                for target in &delete.targets {
+                    self.visit_expr(target);
+                    self.unbind_class_target(target);
+                }
+                return;
+            }
+            Stmt::Return(return_statement) => {
+                if let Some(value) = return_statement.value.as_deref()
+                    && self.expression_may_retain_module_reference(value)
+                {
+                    self.dependencies.extend(self.expression_module_names(value));
+                }
+            }
+            Stmt::Import(import) => {
+                for alias in &import.names {
+                    let source_name = alias.name.as_str();
+                    let local_name = alias.asname.as_ref().map_or_else(
+                        || source_name.split('.').next().unwrap_or(source_name),
+                        ruff_python_ast::Identifier::as_str,
+                    );
+                    self.record_binding(local_name);
+                    self.bind_class_name(local_name);
+                }
+                if matches!(self.kind, ReferenceScopeKind::Class) {
+                    return;
+                }
+            }
+            Stmt::ImportFrom(import) => {
+                for alias in &import.names {
+                    if alias.name.as_str() != "*" {
+                        let local_name = alias
+                            .asname
+                            .as_ref()
+                            .map_or(alias.name.as_str(), ruff_python_ast::Identifier::as_str);
+                        self.record_binding(local_name);
+                        self.bind_class_name(local_name);
+                    }
+                }
+                if matches!(self.kind, ReferenceScopeKind::Class) {
+                    return;
+                }
+            }
+            _ => {}
+        }
+        visitor::walk_stmt(self, statement);
+    }
+
+    fn visit_expr(&mut self, expression: &'a Expr) {
+        match expression {
+            Expr::Name(name)
+                if matches!(
+                    name.ctx,
+                    ruff_python_ast::ExprContext::Store | ruff_python_ast::ExprContext::Del
+                ) && self.name_resolves_to_module(name.id.as_str(), name.ctx) =>
+            {
+                self.dependencies.insert(name.id.as_str().to_owned());
+                return;
+            }
+            Expr::Call(call) => {
+                match call.func.as_ref() {
+                    Expr::Name(name) => {
+                        let name = name.id.as_str();
+                        if let Some(dependencies) = self.local_callables.get(name) {
+                            self.dependencies.extend(dependencies.iter().cloned());
+                        } else if self
+                            .name_resolves_to_module(name, ruff_python_ast::ExprContext::Load)
+                        {
+                            self.dependencies.insert(name.to_owned());
+                        }
+                    }
+                    Expr::Attribute(attribute) => {
+                        self.dependencies
+                            .extend(self.expression_module_names(attribute.value.as_ref()));
+                    }
+                    function => {
+                        self.dependencies.extend(self.expression_module_names(function));
+                    }
+                }
+                for argument in &call.arguments.args {
+                    self.dependencies.extend(self.expression_module_names(argument));
+                }
+                for keyword in &call.arguments.keywords {
+                    self.dependencies.extend(self.expression_module_names(&keyword.value));
+                }
+            }
+            Expr::Attribute(attribute)
+                if matches!(
+                    attribute.ctx,
+                    ruff_python_ast::ExprContext::Store | ruff_python_ast::ExprContext::Del
+                ) =>
+            {
+                self.dependencies.extend(self.expression_module_names(attribute.value.as_ref()));
+            }
+            Expr::Subscript(subscript)
+                if matches!(
+                    subscript.ctx,
+                    ruff_python_ast::ExprContext::Store | ruff_python_ast::ExprContext::Del
+                ) =>
+            {
+                self.dependencies.extend(self.expression_module_names(subscript.value.as_ref()));
+            }
+            Expr::Yield(yield_expression) => {
+                if let Some(value) = yield_expression.value.as_deref()
+                    && self.expression_may_retain_module_reference(value)
+                {
+                    self.dependencies.extend(self.expression_module_names(value));
+                }
+            }
+            Expr::YieldFrom(yield_expression) => {
+                if self.expression_may_retain_module_reference(&yield_expression.value) {
+                    self.dependencies.extend(self.expression_module_names(&yield_expression.value));
+                }
+            }
+            Expr::Lambda(_) => {
+                // A lambda body is deferred; a call that can execute or retain it accounts for
+                // its module references at the call site.
+                return;
+            }
+            Expr::ListComp(_) | Expr::SetComp(_) | Expr::DictComp(_) | Expr::Generator(_) => {
+                // Comprehensions execute immediately. Their target scope is handled by the
+                // reference collector, so a shadowing target does not become a module effect.
+                self.dependencies.extend(self.expression_module_names(expression));
+                return;
+            }
+            _ => {}
+        }
+        visitor::walk_expr(self, expression);
+    }
+
+    fn visit_except_handler(&mut self, except_handler: &'a ruff_python_ast::ExceptHandler) {
+        let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = except_handler;
+        if let Some(name) = handler.name.as_ref() {
+            self.record_binding(name.as_str());
+        }
+        visitor::walk_except_handler(self, except_handler);
+    }
+
+    fn visit_pattern(&mut self, pattern: &'a ruff_python_ast::Pattern) {
+        let bound_name = match pattern {
+            ruff_python_ast::Pattern::MatchMapping(mapping) => mapping.rest.as_ref(),
+            ruff_python_ast::Pattern::MatchStar(star) => star.name.as_ref(),
+            ruff_python_ast::Pattern::MatchAs(as_pattern) => as_pattern.name.as_ref(),
+            _ => None,
+        };
+        if let Some(name) = bound_name {
+            self.record_binding(name.as_str());
+        }
+        visitor::walk_pattern(self, pattern);
+    }
+}
+
+fn function_module_effect_names(
+    function: &ruff_python_ast::StmtFunctionDef,
+    enclosing_function_locals: Vec<BTreeSet<String>>,
+) -> BTreeSet<String> {
+    let mut collector = ScopedModuleEffectCollector::function(function, enclosing_function_locals);
+    collector.visit_body(&function.body);
+    collector.dependencies
+}
+
+fn class_module_effect_names(
+    class_def: &ruff_python_ast::StmtClassDef,
+    enclosing_function_locals: Vec<BTreeSet<String>>,
+) -> (BTreeSet<String>, BTreeSet<String>) {
+    let mut collector =
+        ScopedModuleEffectCollector::class(enclosing_function_locals, &class_def.body);
+    collector.visit_body(&class_def.body);
+    (collector.dependencies, collector.deferred_dependencies)
+}
+
+struct TrackedEffectFinder<'a> {
+    tracked_names: &'a BTreeSet<String>,
+    found: bool,
+}
+
+impl<'a> TrackedEffectFinder<'a> {
+    fn new(tracked_names: &'a BTreeSet<String>) -> Self {
+        Self { tracked_names, found: false }
+    }
+
+    fn expression_references_tracked_name(&self, expression: &Expr) -> bool {
+        module_expression_names(expression).iter().any(|name| self.tracked_names.contains(name))
+    }
+}
+
+impl<'a> Visitor<'a> for TrackedEffectFinder<'_> {
+    fn visit_stmt(&mut self, statement: &'a Stmt) {
+        if self.found {
+            return;
+        }
+        match statement {
+            Stmt::FunctionDef(function) => {
+                for decorator in &function.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                if let Some(type_params) = function.type_params.as_deref() {
+                    self.visit_type_params(type_params);
+                }
+                self.visit_parameters(function.parameters.as_ref());
+                if let Some(returns) = function.returns.as_deref() {
+                    self.visit_annotation(returns);
+                }
+                return;
+            }
+            Stmt::ClassDef(class_def) => {
+                for decorator in &class_def.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                if let Some(type_params) = class_def.type_params.as_deref() {
+                    self.visit_type_params(type_params);
+                }
+                if let Some(arguments) = class_def.arguments.as_deref() {
+                    self.visit_arguments(arguments);
+                }
+                let (executed, _) = class_module_effect_names(class_def, Vec::new());
+                self.found |= executed.iter().any(|name| self.tracked_names.contains(name));
+                return;
+            }
+            _ => {}
+        }
+        visitor::walk_stmt(self, statement);
+    }
+
+    fn visit_expr(&mut self, expression: &'a Expr) {
+        if self.found {
+            return;
+        }
+        match expression {
+            Expr::Call(call) => {
+                let function_is_tracked =
+                    self.expression_references_tracked_name(call.func.as_ref());
+                let argument_is_tracked = call
+                    .arguments
+                    .args
+                    .iter()
+                    .any(|argument| self.expression_references_tracked_name(argument))
+                    || call
+                        .arguments
+                        .keywords
+                        .iter()
+                        .any(|keyword| self.expression_references_tracked_name(&keyword.value));
+                if function_is_tracked || argument_is_tracked {
+                    self.found = true;
+                    return;
+                }
+                visitor::walk_expr(self, expression);
+                return;
+            }
+            Expr::Named(named)
+                if self.expression_references_tracked_name(named.target.as_ref()) =>
+            {
+                self.found = true;
+                return;
+            }
+            Expr::Name(name)
+                if self.tracked_names.contains(name.id.as_str())
+                    && matches!(
+                        name.ctx,
+                        ruff_python_ast::ExprContext::Store | ruff_python_ast::ExprContext::Del
+                    ) =>
+            {
+                self.found = true;
+                return;
+            }
+            Expr::Attribute(attribute)
+                if matches!(
+                    attribute.ctx,
+                    ruff_python_ast::ExprContext::Store | ruff_python_ast::ExprContext::Del
+                ) && self.expression_references_tracked_name(attribute.value.as_ref()) =>
+            {
+                self.found = true;
+                return;
+            }
+            Expr::Subscript(subscript)
+                if matches!(
+                    subscript.ctx,
+                    ruff_python_ast::ExprContext::Store | ruff_python_ast::ExprContext::Del
+                ) && self.expression_references_tracked_name(subscript.value.as_ref()) =>
+            {
+                self.found = true;
+                return;
+            }
+            Expr::ListComp(_) | Expr::SetComp(_) | Expr::DictComp(_) | Expr::Generator(_)
+                if self.expression_references_tracked_name(expression) =>
+            {
+                self.found = true;
+                return;
+            }
+            Expr::Lambda(_)
+            | Expr::ListComp(_)
+            | Expr::SetComp(_)
+            | Expr::DictComp(_)
+            | Expr::Generator(_) => return,
+            _ => {}
+        }
+        visitor::walk_expr(self, expression);
+    }
+
+    fn visit_pattern(&mut self, pattern: &'a ruff_python_ast::Pattern) {
+        let bound_name = match pattern {
+            ruff_python_ast::Pattern::MatchMapping(mapping) => mapping.rest.as_ref(),
+            ruff_python_ast::Pattern::MatchStar(star) => star.name.as_ref(),
+            ruff_python_ast::Pattern::MatchAs(as_pattern) => as_pattern.name.as_ref(),
+            _ => None,
+        };
+        if bound_name.is_some_and(|name| self.tracked_names.contains(name.as_str())) {
+            self.found = true;
+            return;
+        }
+        visitor::walk_pattern(self, pattern);
+    }
+}
+
+fn expression_has_potential_tracked_effect(state: &StaticAllState, expression: &Expr) -> bool {
+    expression_has_potential_effect_for_names(&state.tracked_names, expression)
+}
+
+fn expression_has_potential_effect_for_names(
+    tracked_names: &BTreeSet<String>,
+    expression: &Expr,
+) -> bool {
+    let mut finder = TrackedEffectFinder::new(tracked_names);
+    finder.visit_expr(expression);
+    finder.found
+}
+
+fn statement_has_potential_tracked_effect(state: &StaticAllState, statement: &Stmt) -> bool {
+    let mut finder = TrackedEffectFinder::new(&state.tracked_names);
+    finder.visit_stmt(statement);
+    finder.found
+}
+
+fn function_header_has_potential_tracked_effect(
+    state: &StaticAllState,
+    function: &ruff_python_ast::StmtFunctionDef,
+) -> bool {
+    let mut finder = TrackedEffectFinder::new(&state.tracked_names);
+    for decorator in &function.decorator_list {
+        finder.visit_decorator(decorator);
+    }
+    if let Some(type_params) = function.type_params.as_deref() {
+        finder.visit_type_params(type_params);
+    }
+    finder.visit_parameters(function.parameters.as_ref());
+    if let Some(returns) = function.returns.as_deref() {
+        finder.visit_annotation(returns);
+    }
+    finder.found
+}
+
+fn class_definition_has_potential_tracked_effect(
+    state: &StaticAllState,
+    class_def: &ruff_python_ast::StmtClassDef,
+) -> bool {
+    let mut finder = TrackedEffectFinder::new(&state.tracked_names);
+    for decorator in &class_def.decorator_list {
+        finder.visit_decorator(decorator);
+    }
+    if let Some(type_params) = class_def.type_params.as_deref() {
+        finder.visit_type_params(type_params);
+    }
+    if let Some(arguments) = class_def.arguments.as_deref() {
+        finder.visit_arguments(arguments);
+    }
+    let (executed, _) = class_module_effect_names(class_def, Vec::new());
+    finder.found || executed.iter().any(|name| state.tracked_names.contains(name))
+}
+
+fn nested_control_may_change_static_sequences(statement: &Stmt, states: &[StaticAllState]) -> bool {
+    let tracked = states.first().map_or_else(
+        || BTreeSet::from([String::from("__all__")]),
+        |state| state.tracked_names.clone(),
+    );
+    statement_may_change_static_sequences(statement, &tracked)
+}
+
+fn statement_may_change_static_sequences(statement: &Stmt, tracked: &BTreeSet<String>) -> bool {
+    match statement {
+        Stmt::Assign(assign) => {
+            assign.targets.iter().any(|target| target_may_change_sequence(target, tracked))
+        }
+        Stmt::AnnAssign(assign) => target_may_change_sequence(assign.target.as_ref(), tracked),
+        Stmt::AugAssign(assign) => target_may_change_sequence(assign.target.as_ref(), tracked),
+        Stmt::Expr(expression) => matches!(
+            expression.value.as_ref(),
+            Expr::Call(call)
+                if matches!(call.func.as_ref(), Expr::Attribute(attribute)
+                    if matches!(attribute.value.as_ref(), Expr::Name(receiver)
+                        if tracked.contains(receiver.id.as_str())))
+        ),
+        Stmt::Delete(delete) => {
+            delete.targets.iter().any(|target| target_may_change_sequence(target, tracked))
+        }
+        Stmt::If(statement) => {
+            expression_has_potential_effect_for_names(tracked, statement.test.as_ref())
+                || suite_may_change_static_sequences(&statement.body, tracked)
+                || statement.elif_else_clauses.iter().any(|clause| {
+                    clause.test.as_ref().is_some_and(|test| {
+                        expression_has_potential_effect_for_names(tracked, test)
+                    }) || suite_may_change_static_sequences(&clause.body, tracked)
+                })
+        }
+        Stmt::Try(statement) => {
+            suite_may_change_static_sequences(&statement.body, tracked)
+                || suite_may_change_static_sequences(&statement.orelse, tracked)
+                || suite_may_change_static_sequences(&statement.finalbody, tracked)
+                || statement.handlers.iter().any(|handler| {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    handler.name.as_ref().is_some_and(|name| tracked.contains(name.as_str()))
+                        || suite_may_change_static_sequences(&handler.body, tracked)
+                })
+        }
+        _ => false,
+    }
+}
+
+fn suite_may_change_static_sequences(suite: &[Stmt], tracked: &BTreeSet<String>) -> bool {
+    suite.iter().any(|statement| statement_may_change_static_sequences(statement, tracked))
+}
+
+fn target_may_change_sequence(target: &Expr, tracked: &BTreeSet<String>) -> bool {
+    match target {
+        Expr::Name(name) => tracked.contains(name.id.as_str()),
+        Expr::Tuple(tuple) => {
+            tuple.elts.iter().any(|target| target_may_change_sequence(target, tracked))
+        }
+        Expr::List(list) => {
+            list.elts.iter().any(|target| target_may_change_sequence(target, tracked))
+        }
+        Expr::Subscript(subscript) => matches!(
+            subscript.value.as_ref(),
+            Expr::Name(name) if tracked.contains(name.id.as_str())
+        ),
+        Expr::Attribute(attribute) => matches!(
+            attribute.value.as_ref(),
+            Expr::Name(name) if tracked.contains(name.id.as_str())
+        ),
+        _ => false,
+    }
+}
+
+fn bounded_static_all_states(mut states: Vec<StaticAllState>) -> Result<Vec<StaticAllState>> {
+    states.sort_unstable();
+    states.dedup();
+    if states.len() > MAX_STATIC_ALL_STATES {
+        return Err(unresolved_static_all());
+    }
+    Ok(states)
+}
+
+fn unresolved_static_all() -> anyhow::Error {
+    anyhow::anyhow!("unable to statically resolve module `__all__`")
 }
 
 fn resolve_string_sequence(
