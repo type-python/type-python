@@ -523,13 +523,10 @@ fn validate_archive_member_path(
         ));
     }
 
-    let mut path = match kind {
-        ArchivePathKind::Wheel if rendered.starts_with('/') => {
-            return Err(format!("wheel archive member path `{rendered}` must be relative"));
-        }
-        ArchivePathKind::Sdist => rendered.strip_prefix('/').unwrap_or(rendered),
-        ArchivePathKind::Wheel => rendered,
-    };
+    if rendered.starts_with('/') {
+        return Err(format!("{} archive member path `{rendered}` must be relative", kind.label()));
+    }
+    let mut path = rendered;
     if path.starts_with('/') {
         return Err(format!(
             "{} archive member path `{rendered}` contains an empty component",
@@ -603,9 +600,8 @@ mod tests {
         assert!(
             validate_archive_member_path(b"/pkg/module.py", ArchivePathKind::Wheel, false).is_err()
         );
-        assert_eq!(
-            validate_archive_member_path(b"/pkg/module.py", ArchivePathKind::Sdist, false),
-            Ok(String::from("pkg/module.py"))
+        assert!(
+            validate_archive_member_path(b"/pkg/module.py", ArchivePathKind::Sdist, false).is_err()
         );
         assert_eq!(
             validate_archive_member_path(b"pkg/", ArchivePathKind::Wheel, true),
@@ -631,9 +627,9 @@ mod tests {
         assert!(directory_file.register(b"pkg/", true).is_ok());
         assert!(directory_file.register(b"pkg", false).is_err());
 
-        let mut normalized_sdist = ArchiveMemberPaths::new(ArchivePathKind::Sdist);
-        assert!(normalized_sdist.register(b"/pkg/module.py", false).is_ok());
-        assert!(normalized_sdist.register(b"pkg/module.py", false).is_err());
+        let mut relative_sdist = ArchiveMemberPaths::new(ArchivePathKind::Sdist);
+        assert!(relative_sdist.register(b"/pkg/module.py", false).is_err());
+        assert!(relative_sdist.register(b"pkg/module.py", false).is_ok());
     }
 
     #[test]

@@ -26,6 +26,25 @@ fn supplied_archive_reader_rejects_unsafe_member_paths() {
 }
 
 #[test]
+fn supplied_archive_reader_rejects_absolute_sdist_member_paths() {
+    let project_dir =
+        temp_project_dir("supplied_archive_reader_rejects_absolute_sdist_member_paths");
+    let error = {
+        let sdist = project_dir.join("demo-0.1.0.zip");
+        write_zip_archive(&sdist, &[("/demo-0.1.0/app/__init__.py", "pass\n")]);
+
+        inspect_supplied_archive_paths(&SuppliedVerifyArtifact {
+            kind: SuppliedArtifactKind::Sdist,
+            path: sdist,
+        })
+        .expect_err("absolute sdist member path should be rejected")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(error.contains("must be relative"), "{error}");
+}
+
+#[test]
 fn supplied_archive_reader_rejects_duplicate_member_paths() {
     let project_dir = temp_project_dir("supplied_archive_reader_rejects_duplicate_member_paths");
     let errors = {
