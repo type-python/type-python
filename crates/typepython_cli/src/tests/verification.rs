@@ -2010,7 +2010,7 @@ fn verify_publication_metadata_reports_requires_python_mismatch_for_native_outpu
     let project_dir = temp_project_dir(
         "verify_publication_metadata_reports_requires_python_mismatch_for_native_output",
     );
-    let rendered = {
+    let report = {
         fs::create_dir_all(project_dir.join("build/app")).expect("build dir should be created");
         fs::write(
             project_dir.join("typepython.toml"),
@@ -2038,10 +2038,11 @@ fn verify_publication_metadata_reports_requires_python_mismatch_for_native_outpu
             None,
             &[],
         )
-        .as_text()
     };
     remove_temp_project_dir(&project_dir);
 
+    assert!(report.has_errors(), "unsafe Requires-Python metadata must block verification");
+    let rendered = report.as_text();
     assert!(rendered.contains("TPY5003"));
     assert!(rendered.contains("Requires-Python"));
     assert!(rendered.contains("at least `3.13`"));

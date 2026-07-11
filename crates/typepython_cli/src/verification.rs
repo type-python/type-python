@@ -10,6 +10,10 @@ use std::{
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use flate2::read::GzDecoder;
+use pep440_rs::{
+    Version, VersionSpecifier, VersionSpecifiers, release_specifier_to_range,
+    release_specifiers_to_ranges,
+};
 use rayon::prelude::*;
 use regex::Regex;
 use ruff_python_ast::{
@@ -145,6 +149,13 @@ struct PublicationRequirements {
 struct PackageMetadata {
     requires_python: Option<String>,
     requires_dist: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum RequiresPythonCompatibility {
+    Compatible,
+    AllowsUnsupported,
+    Unsatisfiable,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -1202,27 +1213,49 @@ fn publication_metadata_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    if let Some(required_python) = requirements.min_python {
-        match metadata
-            .requires_python
-            .as_deref()
-            .and_then(minimum_python_from_specifier)
-        {
-            Some(actual_min) if actual_min < required_python => diagnostics.push(Diagnostic::error(
-                "TPY5003",
-                format!(
-                    "{label} declares Requires-Python `{}` but emitted artifacts require at least `{required_python}`",
-                    metadata.requires_python.as_deref().unwrap_or_default()
-                ),
-            )),
-            None => diagnostics.push(Diagnostic::warning(
-                "TPY5003",
-                format!(
-                    "{label} does not declare a parseable Requires-Python lower bound while emitted artifacts require at least `{required_python}`"
-                ),
-            )),
-            Some(_) => {}
+    match (metadata.requires_python.as_deref(), requirements.min_python) {
+        (Some(specifier), required_python) => {
+            let compatibility_target = required_python.unwrap_or(PythonTarget::new(0, 0));
+            match requires_python_compatibility(specifier, compatibility_target) {
+                Ok(RequiresPythonCompatibility::Compatible) => {}
+                Ok(RequiresPythonCompatibility::AllowsUnsupported) => {
+                    if let Some(required_python) = required_python {
+                        diagnostics.push(Diagnostic::error(
+                            "TPY5003",
+                            format!(
+                                "{label} declares Requires-Python `{specifier}`, which permits Python versions below `{required_python}`; emitted artifacts require at least `{required_python}`"
+                            ),
+                        ));
+                    }
+                }
+                Ok(RequiresPythonCompatibility::Unsatisfiable) => {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY5003",
+                        format!(
+                            "{label} declares an unsatisfiable Requires-Python specifier `{specifier}`"
+                        ),
+                    ));
+                }
+                Err(error) => diagnostics.push(Diagnostic::error(
+                    "TPY5003",
+                    match required_python {
+                        Some(required_python) => format!(
+                            "{label} declares invalid Requires-Python `{specifier}` while emitted artifacts require at least `{required_python}`: {error}"
+                        ),
+                        None => format!(
+                            "{label} declares invalid Requires-Python `{specifier}`: {error}"
+                        ),
+                    },
+                )),
+            }
         }
+        (None, Some(required_python)) => diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "{label} does not declare Requires-Python, but emitted artifacts require at least `{required_python}`"
+            ),
+        )),
+        (None, None) => {}
     }
 
     if requirements.needs_typing_extensions {
@@ -1247,12 +1280,28 @@ fn publication_metadata_diagnostics(
     diagnostics
 }
 
-fn minimum_python_from_specifier(specifier: &str) -> Option<PythonTarget> {
-    specifier.split(',').find_map(|clause| {
-        let clause = clause.trim();
-        let version = clause.strip_prefix(">=")?;
-        PythonTarget::parse(version.trim())
-    })
+fn requires_python_compatibility(
+    specifier: &str,
+    required_python: PythonTarget,
+) -> std::result::Result<RequiresPythonCompatibility, String> {
+    if specifier.trim().is_empty() {
+        return Err(String::from("the specifier is empty"));
+    }
+    let specifiers = specifier.parse::<VersionSpecifiers>().map_err(|error| error.to_string())?;
+    let allowed = release_specifiers_to_ranges(specifiers);
+    if allowed.is_empty() {
+        return Ok(RequiresPythonCompatibility::Unsatisfiable);
+    }
+
+    let required_version =
+        Version::new([u64::from(required_python.major), u64::from(required_python.minor)]);
+    let below_required =
+        release_specifier_to_range(VersionSpecifier::less_than_version(required_version));
+    if allowed.intersection(&below_required).is_empty() {
+        Ok(RequiresPythonCompatibility::Compatible)
+    } else {
+        Ok(RequiresPythonCompatibility::AllowsUnsupported)
+    }
 }
 
 fn typing_extensions_lower_bound(requirements: &[String]) -> Option<(u16, u16)> {
@@ -3890,6 +3939,92 @@ mod unit_tests {
             (record_path.to_owned(), record.as_bytes().to_vec()),
             (format!("{record_path}.jws"), b"signature".to_vec()),
         ])
+    }
+
+    #[test]
+    fn requires_python_ranges_reject_every_unsupported_release() {
+        for specifier in [
+            ">=3.13",
+            ">=3.13.1",
+            ">3.13",
+            "~=3.13",
+            "==3.13.*",
+            ">3.12,!=3.12.*",
+            ">=3.9,>=3.13",
+            ">=3.9,!=3.9.*,!=3.10.*,!=3.11.*,!=3.12.*",
+        ] {
+            assert_eq!(
+                requires_python_compatibility(specifier, PythonTarget::PYTHON_3_13),
+                Ok(RequiresPythonCompatibility::Compatible),
+                "{specifier}"
+            );
+        }
+    }
+
+    #[test]
+    fn requires_python_ranges_detect_any_unsupported_release() {
+        for specifier in
+            [">=3.12.1", ">3.12", "~=3.12", "==3.12.*", ">=3.10,<3.13", ">=3.9,!=3.12.*"]
+        {
+            assert_eq!(
+                requires_python_compatibility(specifier, PythonTarget::PYTHON_3_13),
+                Ok(RequiresPythonCompatibility::AllowsUnsupported),
+                "{specifier}"
+            );
+        }
+    }
+
+    #[test]
+    fn requires_python_ranges_reject_invalid_and_unsatisfiable_specifiers() {
+        assert!(requires_python_compatibility("^3.13", PythonTarget::PYTHON_3_13).is_err());
+        assert_eq!(
+            requires_python_compatibility(">=3.13,<3.13", PythonTarget::PYTHON_3_13),
+            Ok(RequiresPythonCompatibility::Unsatisfiable)
+        );
+        assert_eq!(
+            requires_python_compatibility("==3.13.*,!=3.13.*", PythonTarget::PYTHON_3_13),
+            Ok(RequiresPythonCompatibility::Unsatisfiable)
+        );
+    }
+
+    #[test]
+    fn required_python_metadata_failures_are_blocking() {
+        let requirements = PublicationRequirements {
+            min_python: Some(PythonTarget::PYTHON_3_13),
+            needs_typing_extensions: false,
+        };
+        for requires_python in [None, Some(">=3.12.1"), Some("^3.13"), Some(">=3.13,<3.13")] {
+            let diagnostics = publication_metadata_diagnostics(
+                "test metadata",
+                &requirements,
+                &PackageMetadata {
+                    requires_python: requires_python.map(str::to_owned),
+                    requires_dist: Vec::new(),
+                },
+            );
+            assert!(
+                diagnostics.iter().any(|diagnostic| diagnostic.severity == Severity::Error),
+                "{requires_python:?}: {diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_requires_python_is_blocking_without_an_artifact_floor() {
+        for requires_python in ["", "^3.13", ">=3.13,<3.13"] {
+            let diagnostics = publication_metadata_diagnostics(
+                "test metadata",
+                &PublicationRequirements::default(),
+                &PackageMetadata {
+                    requires_python: Some(requires_python.to_owned()),
+                    requires_dist: Vec::new(),
+                },
+            );
+            assert!(
+                diagnostics.iter().any(|diagnostic| diagnostic.severity == Severity::Error),
+                "{requires_python:?}: {diagnostics:?}"
+            );
+        }
     }
 
     #[test]
