@@ -1025,16 +1025,53 @@ fn diff_api_surfaces_reports_py_typed_metadata_regression() {
     remove_temp_project_dir(&project_dir);
 
     assert_eq!(report.removed.len(), 1);
-    assert_eq!(report.removed[0].module, "__typing_metadata__");
+    assert_eq!(report.removed[0].module, "__typing_metadata__.app");
     assert_eq!(report.removed[0].symbol, "py.typed");
     assert_eq!(report.removed[0].classification, "runtime-breaking signal");
     assert_eq!(
         report.release_notes,
         vec![String::from(
-            "Runtime typing metadata changed: `py.typed` was removed; downstream tools may no longer treat the package as typed."
+            "Runtime typing metadata changed: `py.typed` was removed for package `app`; downstream tools may no longer treat the package as typed."
         )]
     );
     assert_eq!(report.semver_recommendation, "major");
+}
+
+#[test]
+fn diff_api_surfaces_tracks_py_typed_per_package_and_mode() {
+    let project_dir = temp_project_dir("diff_api_surfaces_tracks_py_typed_per_package_and_mode");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        for root in [&old_dir, &new_dir] {
+            for package in ["a", "b"] {
+                fs::create_dir_all(root.join(package)).expect("package should be created");
+                fs::write(root.join(package).join("__init__.pyi"), "stable: int\n")
+                    .expect("stub should be written");
+            }
+        }
+        fs::write(old_dir.join("a/py.typed"), "").expect("old a marker should be written");
+        fs::write(old_dir.join("b/py.typed"), "").expect("old b marker should be written");
+        fs::write(new_dir.join("b/py.typed"), "partial\n").expect("new b marker should be written");
+        fs::create_dir_all(old_dir.join("demo.dist-info"))
+            .expect("dist-info directory should be created");
+        fs::write(old_dir.join("demo.dist-info/py.typed"), "")
+            .expect("false marker should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should compare package-specific marker state")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.removed.len(), 1);
+    assert_eq!(report.removed[0].module, "__typing_metadata__.a");
+    assert_eq!(report.removed[0].symbol, "py.typed");
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].module, "__typing_metadata__.b");
+    assert_eq!(report.changed[0].old_signature.as_deref(), Some("py.typed: complete"));
+    assert_eq!(report.changed[0].new_signature.as_deref(), Some("py.typed: partial"));
+    assert_eq!(report.changed[0].classification, "runtime-breaking signal");
+    assert!(report.added.is_empty());
 }
 
 #[test]

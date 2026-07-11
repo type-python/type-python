@@ -192,6 +192,9 @@ fn classify_changed_symbol(old_symbol: &PublicSymbol, new_symbol: &PublicSymbol)
     if old_symbol.kind != new_symbol.kind {
         return String::from("unknown risk");
     }
+    if old_symbol.kind == "metadata" {
+        return String::from("runtime-breaking signal");
+    }
     if matches!(old_symbol.kind.as_str(), "function" | "method" | "property")
         && let (Some(old), Some(new)) = (
             callable_dynamic_positions(&old_symbol.signature),
@@ -306,10 +309,12 @@ fn release_note_snippets(
 }
 
 fn release_note_for_removed(change: &ApiSurfaceChange) -> String {
-    if change.kind == "metadata" && change.module == TYPING_METADATA_MODULE {
+    if change.kind == "metadata" && is_typing_metadata_module(&change.module) {
+        let package = typing_metadata_package(&change.module);
         return format!(
-            "Runtime typing metadata changed: `{}` was removed; downstream tools may no longer treat the package as typed.",
-            change.symbol
+            "Runtime typing metadata changed: `{}` was removed{}; downstream tools may no longer treat the package as typed.",
+            change.symbol,
+            package.map_or_else(String::new, |package| format!(" for package `{package}`"))
         );
     }
     format!(
@@ -319,6 +324,16 @@ fn release_note_for_removed(change: &ApiSurfaceChange) -> String {
 }
 
 fn release_note_for_changed(change: &ApiSurfaceChange) -> String {
+    if change.kind == "metadata" && is_typing_metadata_module(&change.module) {
+        let package = typing_metadata_package(&change.module);
+        return format!(
+            "Runtime typing metadata changed: `{}`{} changed from `{}` to `{}`.",
+            change.symbol,
+            package.map_or_else(String::new, |package| format!(" for package `{package}`")),
+            change.old_signature.as_deref().unwrap_or("?"),
+            change.new_signature.as_deref().unwrap_or("?"),
+        );
+    }
     format!(
         "Review required: changed {} `{}` in module `{}` from `{}` to `{}`.",
         change.kind,
@@ -327,6 +342,15 @@ fn release_note_for_changed(change: &ApiSurfaceChange) -> String {
         change.old_signature.as_deref().unwrap_or("?"),
         change.new_signature.as_deref().unwrap_or("?")
     )
+}
+
+fn is_typing_metadata_module(module: &str) -> bool {
+    module == TYPING_METADATA_MODULE
+        || module.strip_prefix(TYPING_METADATA_MODULE).is_some_and(|suffix| suffix.starts_with('.'))
+}
+
+fn typing_metadata_package(module: &str) -> Option<&str> {
+    module.strip_prefix(TYPING_METADATA_MODULE)?.strip_prefix('.')
 }
 
 fn release_note_for_added(change: &ApiSurfaceChange) -> String {
@@ -392,8 +416,8 @@ fn collect_surface(root: &Path) -> Result<BTreeMap<String, BTreeMap<String, Publ
             symbols,
         )?;
     }
-    if contains_py_typed_marker(root)? {
-        insert_py_typed_marker(&mut modules);
+    for (package, signature) in collect_directory_py_typed_markers(root)? {
+        insert_py_typed_marker(&mut modules, &package, signature);
     }
     Ok(modules)
 }
@@ -411,6 +435,7 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
     let mut modules = BTreeMap::new();
     let mut module_origins = BTreeMap::new();
     let mut typed_roots = Vec::new();
+    let mut typed_markers = Vec::new();
     let mut sources = Vec::new();
     let mut member_paths = ArchiveMemberPaths::new(kind);
     for index in 0..archive.len() {
@@ -427,7 +452,13 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
         let zip_file_type = file.unix_mode().map(|mode| mode & 0o170000).unwrap_or(0);
         let is_regular_file = zip_file_type == 0 || zip_file_type == 0o100000;
         if is_regular_file && let Some(typed_root) = archive_typed_root(&entry_name) {
-            insert_py_typed_marker(&mut modules);
+            budget
+                .register_payload(&entry_name, declared_bytes, Some(file.compressed_size()))
+                .map_err(anyhow::Error::msg)?;
+            let bytes = budget
+                .read_entry(&mut file, &entry_name, declared_bytes)
+                .map_err(anyhow::Error::msg)?;
+            typed_markers.push((typed_root.clone(), py_typed_signature(&bytes)?));
             typed_roots.push(typed_root);
             continue;
         }
@@ -459,6 +490,10 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
             || archive_entry_is_under_typed_root(entry_name, &typed_roots)
     });
     let strip_sdist_src = kind == ArchivePathKind::Sdist && sdist_sources_use_src_layout(&sources);
+    for (typed_root, signature) in typed_markers {
+        let package = archive_package_name(&typed_root, kind, strip_sdist_src);
+        insert_py_typed_marker(&mut modules, &package, signature);
+    }
     for (entry_name, source, source_kind) in sources {
         let module = module_name_from_archive_entry(&entry_name, kind, strip_sdist_src);
         let symbols = public_symbols(&source, source_kind).with_context(|| {
@@ -486,6 +521,7 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
     let mut modules = BTreeMap::new();
     let mut module_origins = BTreeMap::new();
     let mut typed_roots = Vec::new();
+    let mut typed_markers = Vec::new();
     let mut sources = Vec::new();
     let mut member_paths = ArchiveMemberPaths::new(ArchivePathKind::Sdist);
     for entry in archive
@@ -508,7 +544,10 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
             continue;
         }
         if let Some(typed_root) = archive_typed_root(&entry_path) {
-            insert_py_typed_marker(&mut modules);
+            let bytes = budget
+                .read_entry(&mut entry, &entry_path, declared_bytes)
+                .map_err(anyhow::Error::msg)?;
+            typed_markers.push((typed_root.clone(), py_typed_signature(&bytes)?));
             typed_roots.push(typed_root);
             continue;
         }
@@ -535,6 +574,10 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
             || archive_entry_is_under_typed_root(entry_path, &typed_roots)
     });
     let strip_sdist_src = sdist_sources_use_src_layout(&sources);
+    for (typed_root, signature) in typed_markers {
+        let package = archive_package_name(&typed_root, ArchivePathKind::Sdist, strip_sdist_src);
+        insert_py_typed_marker(&mut modules, &package, signature);
+    }
     for (entry_path, source, source_kind) in sources {
         let module =
             module_name_from_archive_entry(&entry_path, ArchivePathKind::Sdist, strip_sdist_src);
@@ -600,11 +643,30 @@ fn archive_entry_is_under_typed_root(entry: &str, roots: &[String]) -> bool {
     })
 }
 
-fn contains_py_typed_marker(root: &Path) -> Result<bool> {
+fn collect_directory_py_typed_markers(root: &Path) -> Result<Vec<(String, String)>> {
     if root.is_file() {
-        return Ok(root.file_name().and_then(|name| name.to_str()) == Some("py.typed"));
+        if root.file_name().and_then(|name| name.to_str()) != Some("py.typed") {
+            return Ok(Vec::new());
+        }
+        let signature = py_typed_signature(
+            &fs::read(root)
+                .with_context(|| format!("unable to read package marker {}", root.display()))?,
+        )?;
+        return Ok(vec![(String::new(), signature)]);
     }
-    for entry in fs::read_dir(root).with_context(|| format!("unable to read {}", root.display()))? {
+    let mut markers = Vec::new();
+    collect_directory_py_typed_markers_from(root, root, &mut markers)?;
+    Ok(markers)
+}
+
+fn collect_directory_py_typed_markers_from(
+    root: &Path,
+    directory: &Path,
+    markers: &mut Vec<(String, String)>,
+) -> Result<()> {
+    for entry in fs::read_dir(directory)
+        .with_context(|| format!("unable to read {}", directory.display()))?
+    {
         let entry = entry?;
         let file_type = entry
             .file_type()
@@ -614,26 +676,57 @@ fn contains_py_typed_marker(root: &Path) -> Result<bool> {
         }
         let path = entry.path();
         if file_type.is_dir() {
-            if contains_py_typed_marker(&path)? {
-                return Ok(true);
+            if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".dist-info"))
+            {
+                continue;
             }
+            collect_directory_py_typed_markers_from(root, &path, markers)?;
         } else if file_type.is_file()
             && path.file_name().and_then(|name| name.to_str()) == Some("py.typed")
         {
-            return Ok(true);
+            let parent = path.parent().unwrap_or(root);
+            let relative = parent.strip_prefix(root).with_context(|| {
+                format!("unable to identify package marker root for {}", path.display())
+            })?;
+            let package = relative
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(".");
+            let signature =
+                py_typed_signature(&fs::read(&path).with_context(|| {
+                    format!("unable to read package marker {}", path.display())
+                })?)?;
+            markers.push((package, signature));
         }
     }
-    Ok(false)
+    Ok(())
 }
 
-fn insert_py_typed_marker(modules: &mut BTreeMap<String, BTreeMap<String, PublicSymbol>>) {
-    modules.entry(String::from(TYPING_METADATA_MODULE)).or_default().insert(
+fn insert_py_typed_marker(
+    modules: &mut BTreeMap<String, BTreeMap<String, PublicSymbol>>,
+    package: &str,
+    signature: String,
+) {
+    let module = if package.is_empty() {
+        String::from(TYPING_METADATA_MODULE)
+    } else {
+        format!("{TYPING_METADATA_MODULE}.{package}")
+    };
+    modules.entry(module).or_default().insert(
         String::from(PY_TYPED_SYMBOL),
-        PublicSymbol {
-            kind: String::from("metadata"),
-            signature: String::from("py.typed: present"),
-        },
+        PublicSymbol { kind: String::from("metadata"), signature },
     );
+}
+
+fn py_typed_signature(contents: &[u8]) -> Result<String> {
+    let rendered = std::str::from_utf8(contents).context("py.typed marker is not valid UTF-8")?;
+    let mode =
+        if rendered.lines().any(|line| line.trim() == "partial") { "partial" } else { "complete" };
+    Ok(format!("py.typed: {mode}"))
 }
 
 fn is_zip_artifact(path: &Path) -> bool {
@@ -653,6 +746,13 @@ fn sdist_sources_use_src_layout(sources: &[(String, String, SurfaceSourceKind)])
                 && components.next() == Some("src")
                 && components.next().is_some()
         })
+}
+
+fn archive_package_name(root: &str, kind: ArchivePathKind, strip_sdist_src: bool) -> String {
+    let synthetic_init =
+        if root.is_empty() { String::from("__init__.pyi") } else { format!("{root}/__init__.pyi") };
+    let module = module_name_from_archive_entry(&synthetic_init, kind, strip_sdist_src);
+    if module == "__init__" { String::new() } else { module }
 }
 
 fn module_name_from_archive_entry(
