@@ -382,6 +382,40 @@ fn diff_api_surfaces_does_not_follow_nested_symlinks() {
 }
 
 #[test]
+fn diff_api_surfaces_rejects_conflicting_module_layouts() {
+    let project_dir = temp_project_dir("diff_api_surfaces_rejects_conflicting_module_layouts");
+    let (directory_error, archive_error) = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(old_dir.join("pkg")).expect("old package should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(old_dir.join("pkg.pyi"), "file_api: int\n")
+            .expect("module stub should be written");
+        fs::write(old_dir.join("pkg/__init__.pyi"), "package_api: int\n")
+            .expect("package stub should be written");
+        let directory_error = diff_api_surfaces(&old_dir, &new_dir)
+            .expect_err("module/package collision should be rejected")
+            .to_string();
+
+        let old_wheel = project_dir.join("demo-0.1.0-py3-none-any.whl");
+        write_zip_archive(
+            &old_wheel,
+            &[("pkg.pyi", "file_api: int\n"), ("pkg/__init__.pyi", "package_api: int\n")],
+        );
+        let archive_error = diff_api_surfaces(&old_wheel, &new_dir)
+            .expect_err("archive module/package collision should be rejected")
+            .to_string();
+        (directory_error, archive_error)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    for error in [directory_error, archive_error] {
+        assert!(error.contains("conflicting API surface sources"), "{error}");
+        assert!(error.contains("module `pkg`"), "{error}");
+    }
+}
+
+#[test]
 fn diff_api_surfaces_canonicalizes_multiline_overload_signatures() {
     let project_dir =
         temp_project_dir("diff_api_surfaces_canonicalizes_multiline_overload_signatures");

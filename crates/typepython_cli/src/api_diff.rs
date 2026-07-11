@@ -374,18 +374,23 @@ fn collect_surface(root: &Path) -> Result<BTreeMap<String, BTreeMap<String, Publ
         .then_with(|| left.cmp(right))
     });
     let mut modules = BTreeMap::new();
+    let mut module_origins = BTreeMap::new();
     for path in files {
         let module = module_name(root, &path)?;
         let source = fs::read_to_string(&path)
             .with_context(|| format!("unable to read {}", path.display()))?;
         let kind = SurfaceSourceKind::from_path(&path)
             .context("unable to classify public API surface source")?;
-        modules.insert(
+        let symbols = public_symbols(&source, kind)
+            .with_context(|| format!("unable to parse public API surface {}", path.display()))?;
+        insert_surface_module(
+            &mut modules,
+            &mut module_origins,
             module,
-            public_symbols(&source, kind).with_context(|| {
-                format!("unable to parse public API surface {}", path.display())
-            })?,
-        );
+            path.with_extension("").display().to_string(),
+            path.display().to_string(),
+            symbols,
+        )?;
     }
     if contains_py_typed_marker(root)? {
         insert_py_typed_marker(&mut modules);
@@ -404,6 +409,7 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
     let mut archive = ZipArchive::new(file)
         .with_context(|| format!("unable to read zip artifact {}", path.display()))?;
     let mut modules = BTreeMap::new();
+    let mut module_origins = BTreeMap::new();
     let mut typed_roots = Vec::new();
     let mut sources = Vec::new();
     let mut member_paths = ArchiveMemberPaths::new(kind);
@@ -454,15 +460,18 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
         {
             continue;
         }
-        modules.insert(
-            module_name_from_archive_entry(&entry_name),
-            public_symbols(&source, kind).with_context(|| {
-                format!(
-                    "unable to parse public API surface entry {entry_name} in {}",
-                    path.display()
-                )
-            })?,
-        );
+        let module = module_name_from_archive_entry(&entry_name);
+        let symbols = public_symbols(&source, kind).with_context(|| {
+            format!("unable to parse public API surface entry {entry_name} in {}", path.display())
+        })?;
+        insert_surface_module(
+            &mut modules,
+            &mut module_origins,
+            module,
+            Path::new(&entry_name).with_extension("").display().to_string(),
+            entry_name,
+            symbols,
+        )?;
     }
     Ok(modules)
 }
@@ -475,6 +484,7 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
     let decoded = BoundedArchiveReader::tar_stream(decoder, kind);
     let mut archive = TarArchive::new(decoded);
     let mut modules = BTreeMap::new();
+    let mut module_origins = BTreeMap::new();
     let mut typed_roots = Vec::new();
     let mut sources = Vec::new();
     let mut member_paths = ArchiveMemberPaths::new(ArchivePathKind::Sdist);
@@ -526,17 +536,40 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
         {
             continue;
         }
-        modules.insert(
-            module_name_from_archive_entry(&entry_path),
-            public_symbols(&source, kind).with_context(|| {
-                format!(
-                    "unable to parse public API surface entry {entry_path} in {}",
-                    path.display()
-                )
-            })?,
-        );
+        let module = module_name_from_archive_entry(&entry_path);
+        let symbols = public_symbols(&source, kind).with_context(|| {
+            format!("unable to parse public API surface entry {entry_path} in {}", path.display())
+        })?;
+        insert_surface_module(
+            &mut modules,
+            &mut module_origins,
+            module,
+            Path::new(&entry_path).with_extension("").display().to_string(),
+            entry_path,
+            symbols,
+        )?;
     }
     Ok(modules)
+}
+
+fn insert_surface_module(
+    modules: &mut BTreeMap<String, BTreeMap<String, PublicSymbol>>,
+    origins: &mut BTreeMap<String, (String, String)>,
+    module: String,
+    physical_identity: String,
+    source_label: String,
+    symbols: BTreeMap<String, PublicSymbol>,
+) -> Result<()> {
+    if let Some((existing_identity, existing_label)) = origins.get(&module)
+        && existing_identity != &physical_identity
+    {
+        anyhow::bail!(
+            "conflicting API surface sources `{existing_label}` and `{source_label}` both map to module `{module}`"
+        );
+    }
+    origins.insert(module.clone(), (physical_identity, source_label));
+    modules.insert(module, symbols);
+    Ok(())
 }
 
 fn surface_source_kind_from_archive_entry(entry: &str) -> Option<SurfaceSourceKind> {
