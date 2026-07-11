@@ -82,6 +82,7 @@ def audit_source(source: str, *, filename: str = "<source>") -> AnnotationAudit:
     tree = ast.parse(source, filename=filename)
     visitor = _AnnotationAuditVisitor(
         future_annotations=_uses_future_annotations(tree),
+        source=source,
     )
     visitor.visit(tree)
     return AnnotationAudit(
@@ -242,10 +243,11 @@ def _legacy_unwrap_callable(obj: Any) -> Any:
 
 
 class _AnnotationAuditVisitor(ast.NodeVisitor):
-    def __init__(self, *, future_annotations: bool) -> None:
+    def __init__(self, *, future_annotations: bool, source: str) -> None:
         self.consumers: set[AnnotationConsumer] = set()
         self.findings: list[AnnotationAuditFinding] = []
         self._future_annotations = future_annotations
+        self._source_lines = source.splitlines()
         self._scopes: list[_AuditScope] = []
 
     def visit_Module(self, node: ast.Module) -> None:
@@ -772,7 +774,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                             "reintroduce import cycles"
                         ),
                         line=annotation.lineno,
-                        column=annotation.col_offset + 1,
+                        column=self._scalar_column(annotation),
                     )
                 )
 
@@ -791,9 +793,19 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                             "annotationlib.get_annotations"
                         ),
                         line=annotation.lineno,
-                        column=annotation.col_offset + 1,
+                        column=self._scalar_column(annotation),
                     )
                 )
+
+    def _scalar_column(self, node: ast.expr) -> int:
+        if not 1 <= node.lineno <= len(self._source_lines):
+            return node.col_offset + 1
+        line_bytes = self._source_lines[node.lineno - 1].encode("utf-8")
+        try:
+            prefix = line_bytes[: node.col_offset].decode("utf-8")
+        except UnicodeDecodeError:
+            return node.col_offset + 1
+        return len(prefix) + 1
 
     def _is_unbound_type_only_name(self, name: str) -> bool:
         for scope in reversed(self._scopes):

@@ -166,6 +166,19 @@ class AnnotationCompatTests(unittest.TestCase):
         self.assertEqual({finding.code for finding in audit.findings}, {"TPY-A001"})
         self.assertIn("local scope", audit.findings[0].message)
 
+    def test_audit_source_reports_unicode_scalar_columns(self) -> None:
+        audit = annotation_compat.audit_source(
+            "def outer():\n"
+            "    class Local:\n"
+            "        pass\n"
+            '    def build(参数: "Local") -> None:\n'
+            "        return None\n"
+        )
+
+        finding = next(finding for finding in audit.findings if finding.code == "TPY-A001")
+        self.assertEqual(finding.line, 4)
+        self.assertEqual(finding.column, 19)
+
     def test_audit_source_flags_class_locals_in_direct_method_annotations(self) -> None:
         audit = annotation_compat.audit_source(
             "class Container:\n"
