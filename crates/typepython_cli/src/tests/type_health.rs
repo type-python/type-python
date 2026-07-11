@@ -505,6 +505,77 @@ class User: ...
 }
 
 #[test]
+fn type_health_accepts_public_typing_extensions_symbols_across_targets() {
+    let source = r#"from typing_extensions import *
+from typing_extensions import (
+    Annotated,
+    LiteralString as StringLiteral,
+    Self,
+    Required as RequiredKey,
+    NotRequired,
+    Unpack as UnpackType,
+    TypeVarTuple,
+    dataclass_transform as transform,
+    override,
+    deprecated,
+    ReadOnly,
+    TypeIs,
+    NoDefault,
+    TypeAliasType,
+    TypeForm,
+    NoExtraItems,
+)
+"#;
+
+    for target in [
+        typepython_target::PythonTarget::PYTHON_3_10,
+        typepython_target::PythonTarget::PYTHON_3_11,
+        typepython_target::PythonTarget::PYTHON_3_12,
+        typepython_target::PythonTarget::PYTHON_3_13,
+        typepython_target::PythonTarget::PYTHON_3_14,
+    ] {
+        let package = type_health_for_stub_target(
+            &format!("type_health_accepts_typing_extensions_{}", target.minor),
+            source,
+            target,
+        );
+        assert_eq!(
+            package.unsupported_typing_extensions_imports, 0,
+            "public backports should be accepted for Python {target}"
+        );
+        assert_eq!(package.precision_debt, 0, "unexpected debt for Python {target}");
+    }
+}
+
+#[test]
+fn type_health_rejects_unknown_typing_extensions_symbols_across_targets() {
+    let source = r#"from typing_extensions import (
+    ExperimentalFeature as Feature,
+    _SpecialForm as InternalForm,
+)
+"#;
+
+    for target in [
+        typepython_target::PythonTarget::PYTHON_3_10,
+        typepython_target::PythonTarget::PYTHON_3_11,
+        typepython_target::PythonTarget::PYTHON_3_12,
+        typepython_target::PythonTarget::PYTHON_3_13,
+        typepython_target::PythonTarget::PYTHON_3_14,
+    ] {
+        let package = type_health_for_stub_target(
+            &format!("type_health_rejects_typing_extensions_{}", target.minor),
+            source,
+            target,
+        );
+        assert_eq!(
+            package.unsupported_typing_extensions_imports, 2,
+            "unknown and private symbols should remain debt for Python {target}"
+        );
+        assert_eq!(package.precision_debt, 2, "unexpected debt for Python {target}");
+    }
+}
+
+#[test]
 fn type_health_ast_groups_overload_fallbacks_by_name_and_scope() {
     let package = type_health_for_stub(
         "type_health_ast_groups_overload_fallbacks",
@@ -634,22 +705,26 @@ fn run_type_health_writes_lock_and_enforces_threshold() {
 }
 
 fn type_health_for_stub(test_name: &str, source: &str) -> crate::type_health::TypePackageHealth {
+    type_health_for_stub_target(test_name, source, typepython_target::PythonTarget::default())
+}
+
+fn type_health_for_stub_target(
+    test_name: &str,
+    source: &str,
+    target_python: typepython_target::PythonTarget,
+) -> crate::type_health::TypePackageHealth {
     let project_dir = temp_project_dir(test_name);
     let package = {
         fs::create_dir_all(project_dir.join("site/demo-stubs/demo"))
             .expect("stub package should exist");
         fs::write(project_dir.join("site/demo-stubs/demo/__init__.pyi"), source)
             .expect("stub should be written");
-        build_type_health_report_for_target(
-            &project_dir,
-            &[String::from("site")],
-            typepython_target::PythonTarget::default(),
-        )
-        .expect("type-health report should build")
-        .packages
-        .into_iter()
-        .find(|candidate| candidate.name == "demo" && candidate.is_stub_only)
-        .expect("stub package should be reported")
+        build_type_health_report_for_target(&project_dir, &[String::from("site")], target_python)
+            .expect("type-health report should build")
+            .packages
+            .into_iter()
+            .find(|candidate| candidate.name == "demo" && candidate.is_stub_only)
+            .expect("stub package should be reported")
     };
     remove_temp_project_dir(&project_dir);
     package

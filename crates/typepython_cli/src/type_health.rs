@@ -4,6 +4,7 @@ use std::{
     path::Path,
     process::Command as ProcessCommand,
     process::ExitCode,
+    sync::OnceLock,
 };
 
 use anyhow::{Context, Result};
@@ -398,7 +399,11 @@ fn collect_public_any_counts(
         fs::read_to_string(path).with_context(|| format!("unable to read {}", path.display()))?;
     let parsed = parse_module(&source)
         .with_context(|| format!("unable to parse stub syntax in {}", path.display()))?;
-    let mut import_counter = TypingExtensionsImportCounter { target_python, count: 0 };
+    let mut import_counter = TypingExtensionsImportCounter {
+        target_python,
+        public_symbols: typing_extensions_public_symbols()?,
+        count: 0,
+    };
     import_counter.visit_body(parsed.suite());
     counts.unsupported_typing_extensions_imports += import_counter.count;
 
@@ -408,12 +413,13 @@ fn collect_public_any_counts(
     Ok(())
 }
 
-struct TypingExtensionsImportCounter {
+struct TypingExtensionsImportCounter<'symbols> {
     target_python: PythonTarget,
+    public_symbols: &'symbols BTreeSet<String>,
     count: usize,
 }
 
-impl<'ast> Visitor<'ast> for TypingExtensionsImportCounter {
+impl<'ast> Visitor<'ast> for TypingExtensionsImportCounter<'_> {
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
         if let Stmt::ImportFrom(import) = statement
             && import.level == 0
@@ -423,7 +429,12 @@ impl<'ast> Visitor<'ast> for TypingExtensionsImportCounter {
                 .names
                 .iter()
                 .filter(|alias| {
-                    !is_known_typing_extensions_symbol(alias.name.as_str(), self.target_python)
+                    alias.name.as_str() != "*"
+                        && !is_known_typing_extensions_symbol(
+                            alias.name.as_str(),
+                            self.target_python,
+                            self.public_symbols,
+                        )
                 })
                 .count();
         }
@@ -431,29 +442,117 @@ impl<'ast> Visitor<'ast> for TypingExtensionsImportCounter {
     }
 }
 
-fn is_known_typing_extensions_symbol(symbol: &str, target_python: PythonTarget) -> bool {
-    target_python.stdlib_owner(symbol).is_some()
-        || matches!(
-            symbol,
-            "Any"
-                | "Callable"
-                | "ClassVar"
-                | "Final"
-                | "Generic"
-                | "Literal"
-                | "Never"
-                | "NewType"
-                | "NoReturn"
-                | "Optional"
-                | "ParamSpec"
-                | "Protocol"
-                | "TypeAlias"
-                | "TypeGuard"
-                | "TypeVar"
-                | "TypedDict"
-                | "Union"
-                | "overload"
+fn is_known_typing_extensions_symbol(
+    symbol: &str,
+    _target_python: PythonTarget,
+    public_symbols: &BTreeSet<String>,
+) -> bool {
+    // `stdlib_owner` describes where a target Python first provides a typing feature. It is not a
+    // removal schedule for the compatibility module: typing_extensions continues to re-export
+    // forms such as Self after their preferred owner moves to typing. Its bundled public surface is
+    // therefore the stable source of truth across supported targets.
+    public_symbols.contains(symbol)
+}
+
+fn typing_extensions_public_symbols() -> Result<&'static BTreeSet<String>> {
+    static PUBLIC_SYMBOLS: OnceLock<std::result::Result<BTreeSet<String>, String>> =
+        OnceLock::new();
+    match PUBLIC_SYMBOLS.get_or_init(|| {
+        parse_typing_extensions_public_symbols(include_str!(
+            "../../../stdlib/typing_extensions.pyi"
+        ))
+        .map_err(|error| format!("{error:#}"))
+    }) {
+        Ok(symbols) => Ok(symbols),
+        Err(error) => {
+            anyhow::bail!("unable to load bundled typing_extensions public symbols: {error}")
+        }
+    }
+}
+
+fn parse_typing_extensions_public_symbols(source: &str) -> Result<BTreeSet<String>> {
+    let parsed = parse_module(source).context("unable to parse bundled typing_extensions.pyi")?;
+    let export_values = parsed
+        .suite()
+        .iter()
+        .filter_map(|statement| match statement {
+            Stmt::Assign(assign)
+                if assign.targets.iter().any(
+                    |target| matches!(target, Expr::Name(name) if name.id.as_str() == "__all__"),
+                ) =>
+            {
+                Some(assign.value.as_ref())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let [export_value] = export_values.as_slice() else {
+        anyhow::bail!(
+            "bundled typing_extensions.pyi must contain exactly one static __all__ assignment, found {}",
+            export_values.len()
+        );
+    };
+    let Expr::List(exports) = export_value else {
+        anyhow::bail!("bundled typing_extensions.pyi must define __all__ as a list");
+    };
+    let symbols = exports
+        .elts
+        .iter()
+        .map(|element| match element {
+            Expr::StringLiteral(symbol) => Some(symbol.value.to_str().to_owned()),
+            _ => None,
+        })
+        .collect::<Option<BTreeSet<_>>>()
+        .context("bundled typing_extensions.pyi __all__ must contain only string literals")?;
+    if symbols.len() != exports.elts.len() || symbols.is_empty() {
+        anyhow::bail!("bundled typing_extensions.pyi __all__ must be non-empty and unique");
+    }
+    Ok(symbols)
+}
+
+#[cfg(test)]
+mod typing_extensions_catalog_tests {
+    use super::parse_typing_extensions_public_symbols;
+
+    #[test]
+    fn rejects_missing_all_assignment() {
+        let error = parse_typing_extensions_public_symbols("Self: object\n")
+            .expect_err("missing __all__ should be rejected")
+            .to_string();
+
+        assert!(error.contains("exactly one static __all__ assignment"), "{error}");
+        assert!(error.contains("found 0"), "{error}");
+    }
+
+    #[test]
+    fn rejects_multiple_all_assignments() {
+        let error = parse_typing_extensions_public_symbols(
+            "__all__ = [\"Self\"]\n__all__ = [\"Required\"]\n",
         )
+        .expect_err("multiple __all__ assignments should be rejected")
+        .to_string();
+
+        assert!(error.contains("exactly one static __all__ assignment"), "{error}");
+        assert!(error.contains("found 2"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_string_all_members() {
+        let error = parse_typing_extensions_public_symbols("__all__ = [\"Self\", 1]\n")
+            .expect_err("non-string __all__ members should be rejected")
+            .to_string();
+
+        assert!(error.contains("only string literals"), "{error}");
+    }
+
+    #[test]
+    fn rejects_duplicate_all_members() {
+        let error = parse_typing_extensions_public_symbols("__all__ = [\"Self\", \"Self\"]\n")
+            .expect_err("duplicate __all__ members should be rejected")
+            .to_string();
+
+        assert!(error.contains("non-empty and unique"), "{error}");
+    }
 }
 
 #[derive(Debug, Clone)]

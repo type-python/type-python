@@ -458,7 +458,7 @@ typepython api-diff dist/old-stubs dist/new-stubs --format json
 
 ### `typepython type-health`
 
-Inspect configured dependency/type roots for PEP 561 typing metadata and produce a typing-supply-chain score. The prototype scans `resolution.type_roots`, detects `py.typed`, `*-stubs` packages, partial stub markers, public `.pyi` functions returning `Any`, overloaded `.pyi` fallbacks returning `Any`, public `.pyi` attributes annotated as `Any`, public `.pyi` attributes without annotations, unrecognized `typing_extensions` imports for the configured target model, runtime/stub distribution version mismatches, and can write `.typepython/type-lock.toml` for review. The score averages discovered package and module typing units and applies a capped penalty for precision-debt signals so `--fail-under` can catch degraded stubs, not just missing `py.typed` markers. The lock records the configured target and analysis Python versions, bundled typeshed commit, observed `typing_extensions` version, default checker versions when installed, and per-unit typing metadata.
+Inspect configured dependency/type roots for PEP 561 typing metadata and produce a typing-supply-chain score. The prototype scans `resolution.type_roots`, detects `py.typed`, `*-stubs` packages, partial stub markers, public `.pyi` functions returning `Any`, overloaded `.pyi` fallbacks returning `Any`, public `.pyi` attributes annotated as `Any`, public `.pyi` attributes without annotations, imports absent from the bundled `typing_extensions` public surface, runtime/stub distribution version mismatches, and can write `.typepython/type-lock.toml` for review. The score averages discovered package and module typing units and applies a capped penalty for precision-debt signals so `--fail-under` can catch degraded stubs, not just missing `py.typed` markers. The lock records the configured target and analysis Python versions, bundled typeshed commit, observed `typing_extensions` version, default checker versions when installed, and per-unit typing metadata.
 
 A `py.typed` marker must itself be a regular UTF-8 file. Directories, special files, and symbolic
 links are not accepted, and TypePython does not follow a symbolic link to read a marker target.
@@ -476,6 +476,15 @@ markers belong to packages, and `is_stub_only` is true to mean that the typing u
 surface is a stub. The latter does not assert that the installed distribution has no runtime code:
 an adjacent `<module>.py` is folded into the same inventory unit, and matching distribution
 metadata is still reported when available.
+
+`typing_extensions` symbol recognition comes from the public `__all__` in TypePython's bundled
+typeshed-derived `typing_extensions.pyi`, rather than a handwritten subset. A feature moving to
+`typing` or another standard-library owner in a newer Python target does not make its compatibility
+backport invalid, so the same public import remains recognized from Python 3.10 through 3.14.
+Parenthesized imports and aliases are checked by their original exported name, while a wildcard
+import introduces no unknown-symbol debt. Names outside the bundled public surface, including
+private implementation names, remain conservatively unsupported until the bundled snapshot is
+updated.
 
 Public precision debt is derived from the parsed stub AST. Module declarations and public members of
 public classes are counted; private class subtrees, function bodies, local declarations, and nested
