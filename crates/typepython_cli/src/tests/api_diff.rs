@@ -829,6 +829,120 @@ fn diff_api_surfaces_uses_static_all_for_private_and_reexported_names() {
 }
 
 #[test]
+fn diff_api_surfaces_extracts_guarded_definitions() {
+    let project_dir = temp_project_dir("diff_api_surfaces_extracts_guarded_definitions");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "if True:\n",
+                "    def active() -> int: ...\n",
+                "if False:\n",
+                "    def inactive() -> int: ...\n",
+                "if FLAG:\n",
+                "    def conditional() -> int: ...\n",
+                "try:\n",
+                "    def guarded() -> int: ...\n",
+                "except ImportError:\n",
+                "    def fallback() -> str: ...\n",
+                "class Client:\n",
+                "    if FLAG:\n",
+                "        def branch(self) -> int: ...\n",
+                "    else:\n",
+                "        def branch(self) -> str: ...\n",
+                "    try:\n",
+                "        value: int\n",
+                "    except ImportError:\n",
+                "        value: str\n",
+            ),
+        )
+        .expect("old stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should retain guarded definitions")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let removed =
+        report.removed.iter().map(|change| change.symbol.as_str()).collect::<BTreeSet<_>>();
+    assert_eq!(
+        removed,
+        BTreeSet::from([
+            "Client",
+            "Client.branch",
+            "Client.value",
+            "active",
+            "conditional",
+            "fallback",
+            "guarded",
+        ])
+    );
+    assert!(!removed.contains("inactive"));
+}
+
+#[test]
+fn diff_api_surfaces_compares_all_conditional_variants() {
+    let project_dir = temp_project_dir("diff_api_surfaces_compares_all_conditional_variants");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "if FLAG:\n",
+                "    def choose() -> int: ...\n",
+                "else:\n",
+                "    def choose() -> str: ...\n",
+                "class Client:\n",
+                "    if FLAG:\n",
+                "        def choose(self) -> int: ...\n",
+                "    else:\n",
+                "        def choose(self) -> str: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "if FLAG:\n",
+                "    def choose() -> int: ...\n",
+                "else:\n",
+                "    def choose() -> bytes: ...\n",
+                "class Client:\n",
+                "    if FLAG:\n",
+                "        def choose(self) -> int: ...\n",
+                "    else:\n",
+                "        def choose(self) -> bytes: ...\n",
+            ),
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should compare every conditional branch")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.changed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["Client.choose", "choose"]
+    );
+    assert!(report.changed.iter().all(|change| {
+        change
+            .old_signature
+            .as_deref()
+            .is_some_and(|signature| signature.contains("-> int") && signature.contains("-> str"))
+            && change.new_signature.as_deref().is_some_and(|signature| {
+                signature.contains("-> int") && signature.contains("-> bytes")
+            })
+    }));
+}
+
+#[test]
 fn diff_api_surfaces_tracks_stub_and_runtime_reexports() {
     let project_dir = temp_project_dir("diff_api_surfaces_tracks_stub_and_runtime_reexports");
     let (stub_report, runtime_report) = {

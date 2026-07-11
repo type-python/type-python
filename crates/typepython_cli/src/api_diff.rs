@@ -1002,9 +1002,145 @@ impl PythonSurfaceExtractor<'_> {
                 }
                 Stmt::Import(import) => self.insert_imports(import),
                 Stmt::ImportFrom(import) => self.insert_from_imports(import),
+                Stmt::If(if_statement) => self.extract_if_statement(if_statement),
+                Stmt::Try(try_statement) => self.extract_try_statement(try_statement),
                 _ => {}
             }
             self.overload_bindings.record_statement(statement, None);
+        }
+    }
+
+    fn extract_if_statement(&mut self, statement: &ruff_python_ast::StmtIf) {
+        let mut candidates =
+            vec![(Some(statement.test.as_ref()), statement.body.as_slice(), String::from("if"))];
+        candidates.extend(statement.elif_else_clauses.iter().enumerate().map(|(index, clause)| {
+            (
+                clause.test.as_ref(),
+                clause.body.as_slice(),
+                if clause.test.is_some() {
+                    format!("elif {}", index + 1)
+                } else {
+                    String::from("else")
+                },
+            )
+        }));
+
+        let mut branches = Vec::new();
+        let mut exhaustive = false;
+        for (test, body, label) in candidates {
+            match test.and_then(literal_boolean_value) {
+                Some(false) => continue,
+                Some(true) => {
+                    if branches.is_empty() {
+                        self.extract_module(body);
+                        return;
+                    }
+                    branches.push((label, self.extract_module_branch(&[body])));
+                    exhaustive = true;
+                    break;
+                }
+                None if test.is_none() => {
+                    if branches.is_empty() {
+                        self.extract_module(body);
+                        return;
+                    }
+                    branches.push((label, self.extract_module_branch(&[body])));
+                    exhaustive = true;
+                    break;
+                }
+                None => branches.push((label, self.extract_module_branch(&[body]))),
+            }
+        }
+        if !branches.is_empty() {
+            self.merge_conditional_symbols(branches, !exhaustive);
+        }
+    }
+
+    fn extract_try_statement(&mut self, statement: &ruff_python_ast::StmtTry) {
+        if statement.handlers.is_empty() {
+            self.extract_module(&statement.body);
+            self.extract_module(&statement.orelse);
+        } else {
+            let mut branches = vec![(
+                String::from("try"),
+                self.extract_module_branch(&[
+                    statement.body.as_slice(),
+                    statement.orelse.as_slice(),
+                ]),
+            )];
+            for (index, handler) in statement.handlers.iter().enumerate() {
+                let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                branches.push((
+                    format!("except {}", index + 1),
+                    self.extract_module_branch(&[handler.body.as_slice()]),
+                ));
+            }
+            self.merge_conditional_symbols(branches, false);
+        }
+        self.extract_module(&statement.finalbody);
+    }
+
+    fn extract_module_branch(&self, suites: &[&[Stmt]]) -> BTreeMap<String, PublicSymbol> {
+        let mut branch = PythonSurfaceExtractor {
+            source: self.source,
+            tokens: self.tokens,
+            explicit_exports: self.explicit_exports,
+            source_kind: self.source_kind,
+            symbols: BTreeMap::new(),
+            overloads: BTreeSet::new(),
+            overload_bindings: self.overload_bindings.clone(),
+            grouped_signatures: BTreeMap::new(),
+        };
+        for suite in suites {
+            branch.extract_module(suite);
+        }
+        branch.symbols
+    }
+
+    fn merge_conditional_symbols(
+        &mut self,
+        branches: Vec<(String, BTreeMap<String, PublicSymbol>)>,
+        include_base_fallback: bool,
+    ) {
+        let base = self.symbols.clone();
+        let keys = branches
+            .iter()
+            .flat_map(|(_, symbols)| symbols.keys().cloned())
+            .collect::<BTreeSet<_>>();
+        for key in keys {
+            let mut variants = branches
+                .iter()
+                .map(|(label, symbols)| {
+                    (label.clone(), symbols.get(&key).or_else(|| base.get(&key)).cloned())
+                })
+                .collect::<Vec<_>>();
+            if include_base_fallback {
+                variants.push((String::from("otherwise"), base.get(&key).cloned()));
+            }
+            let present =
+                variants.iter().filter_map(|(_, symbol)| symbol.as_ref()).collect::<Vec<_>>();
+            if !present.is_empty()
+                && present.len() == variants.len()
+                && present.windows(2).all(|pair| pair[0] == pair[1])
+            {
+                self.symbols.insert(key, (*present[0]).clone());
+                continue;
+            }
+            let kind = present.first().map_or("conditional", |symbol| symbol.kind.as_str());
+            let kind = if present.iter().all(|symbol| symbol.kind == kind) {
+                kind.to_owned()
+            } else {
+                String::from("conditional")
+            };
+            let signature = variants
+                .into_iter()
+                .map(|(label, symbol)| match symbol {
+                    Some(symbol) => format!("[{label}]\n{}", symbol.signature),
+                    None => format!("[{label}]\n<absent>"),
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            self.symbols.insert(key, PublicSymbol { kind, signature });
         }
     }
 
@@ -1019,7 +1155,16 @@ impl PythonSurfaceExtractor<'_> {
             .insert(key.to_owned(), PublicSymbol { kind: String::from("class"), signature });
 
         let mut class_overload_bindings = OverloadBindings::default();
-        for statement in &class_def.body {
+        self.extract_class_suite(key, &class_def.body, &mut class_overload_bindings);
+    }
+
+    fn extract_class_suite(
+        &mut self,
+        key: &str,
+        suite: &[Stmt],
+        class_overload_bindings: &mut OverloadBindings,
+    ) {
+        for statement in suite {
             match statement {
                 Stmt::FunctionDef(function) if public_member_name(function.name.as_str()) => {
                     let member_key = format!("{key}.{}", function.name.as_str());
@@ -1028,7 +1173,7 @@ impl PythonSurfaceExtractor<'_> {
                         &member_key,
                         function,
                         kind,
-                        Some(&class_overload_bindings),
+                        Some(class_overload_bindings),
                     );
                     self.insert_instance_attributes(key, function);
                 }
@@ -1081,10 +1226,132 @@ impl PythonSurfaceExtractor<'_> {
                         );
                     }
                 }
+                Stmt::If(if_statement) => {
+                    self.extract_class_if_statement(key, if_statement, class_overload_bindings);
+                }
+                Stmt::Try(try_statement) => {
+                    self.extract_class_try_statement(key, try_statement, class_overload_bindings);
+                }
                 _ => {}
             }
             class_overload_bindings.record_statement(statement, Some(&self.overload_bindings));
         }
+    }
+
+    fn extract_class_if_statement(
+        &mut self,
+        key: &str,
+        statement: &ruff_python_ast::StmtIf,
+        bindings: &OverloadBindings,
+    ) {
+        if literal_boolean_value(statement.test.as_ref()) == Some(true) {
+            let mut bindings = bindings.clone();
+            self.extract_class_suite(key, &statement.body, &mut bindings);
+            return;
+        }
+        let mut branches = Vec::new();
+        if literal_boolean_value(statement.test.as_ref()) != Some(false) {
+            branches.push((
+                String::from("if"),
+                self.extract_class_branch(key, &[statement.body.as_slice()], bindings),
+            ));
+        }
+        let mut exhaustive = false;
+        for (index, clause) in statement.elif_else_clauses.iter().enumerate() {
+            match clause.test.as_ref() {
+                None => {
+                    if branches.is_empty() {
+                        let mut bindings = bindings.clone();
+                        self.extract_class_suite(key, &clause.body, &mut bindings);
+                        return;
+                    }
+                    branches.push((
+                        String::from("else"),
+                        self.extract_class_branch(key, &[clause.body.as_slice()], bindings),
+                    ));
+                    exhaustive = true;
+                    break;
+                }
+                Some(test) => match literal_boolean_value(test) {
+                    Some(false) => continue,
+                    Some(true) => {
+                        if branches.is_empty() {
+                            let mut bindings = bindings.clone();
+                            self.extract_class_suite(key, &clause.body, &mut bindings);
+                            return;
+                        }
+                        branches.push((
+                            format!("elif {}", index + 1),
+                            self.extract_class_branch(key, &[clause.body.as_slice()], bindings),
+                        ));
+                        exhaustive = true;
+                        break;
+                    }
+                    None => branches.push((
+                        format!("elif {}", index + 1),
+                        self.extract_class_branch(key, &[clause.body.as_slice()], bindings),
+                    )),
+                },
+            }
+        }
+        if !branches.is_empty() {
+            self.merge_conditional_symbols(branches, !exhaustive);
+        }
+    }
+
+    fn extract_class_try_statement(
+        &mut self,
+        key: &str,
+        statement: &ruff_python_ast::StmtTry,
+        bindings: &OverloadBindings,
+    ) {
+        if statement.handlers.is_empty() {
+            let mut branch_bindings = bindings.clone();
+            self.extract_class_suite(key, &statement.body, &mut branch_bindings);
+            self.extract_class_suite(key, &statement.orelse, &mut branch_bindings);
+        } else {
+            let mut branches = vec![(
+                String::from("try"),
+                self.extract_class_branch(
+                    key,
+                    &[statement.body.as_slice(), statement.orelse.as_slice()],
+                    bindings,
+                ),
+            )];
+            for (index, handler) in statement.handlers.iter().enumerate() {
+                let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                branches.push((
+                    format!("except {}", index + 1),
+                    self.extract_class_branch(key, &[handler.body.as_slice()], bindings),
+                ));
+            }
+            self.merge_conditional_symbols(branches, false);
+        }
+        let mut final_bindings = bindings.clone();
+        self.extract_class_suite(key, &statement.finalbody, &mut final_bindings);
+    }
+
+    fn extract_class_branch(
+        &self,
+        key: &str,
+        suites: &[&[Stmt]],
+        bindings: &OverloadBindings,
+    ) -> BTreeMap<String, PublicSymbol> {
+        let mut branch = PythonSurfaceExtractor {
+            source: self.source,
+            tokens: self.tokens,
+            explicit_exports: self.explicit_exports,
+            source_kind: self.source_kind,
+            symbols: BTreeMap::new(),
+            overloads: BTreeSet::new(),
+            overload_bindings: self.overload_bindings.clone(),
+            grouped_signatures: BTreeMap::new(),
+        };
+        let mut bindings = bindings.clone();
+        for suite in suites {
+            branch.extract_class_suite(key, suite, &mut bindings);
+        }
+        branch.symbols
     }
 
     fn insert_function(
@@ -1256,7 +1523,7 @@ enum OverloadBinding {
     Other,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct OverloadBindings {
     names: BTreeMap<String, OverloadBinding>,
 }
@@ -1377,6 +1644,13 @@ impl OverloadBindings {
             }
             _ => {}
         }
+    }
+}
+
+fn literal_boolean_value(expression: &Expr) -> Option<bool> {
+    match expression {
+        Expr::BooleanLiteral(boolean) => Some(boolean.value),
+        _ => None,
     }
 }
 
