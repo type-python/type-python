@@ -1,5 +1,44 @@
 use super::*;
 
+const STRICT_ADAPTER_MANIFEST: &str = r#"[adapter]
+name = "strict-adapter"
+version = "0.1.0"
+framework = "strict.framework"
+typepython_min = "0.3.0"
+python_targets = ["3.12"]
+stability = "prototype"
+
+[[transforms]]
+provider = "strict.framework.Model"
+kind = "base_class"
+target = "class"
+capabilities = ["field_collection", "constructor_generation", "alias_handling", "required_optional_fields", "readonly_fields"]
+field_collector = "annotated_class_fields"
+constructor = "fields"
+alias = { source = "field_specifier", keyword = "alias", literal_only = true }
+default = { keyword = "default" }
+default_factory = { keyword = "default_factory" }
+frozen = { model_keyword = "frozen_default", field_keyword = "frozen" }
+fallback = "strict_diagnostic"
+
+[[transforms]]
+provider = "strict.framework.task"
+kind = "function_to_object_decorator"
+target = "function"
+capabilities = ["function_to_object_replacement", "generic_preservation", "effect_time"]
+replacement_type = "strict.framework.Task[P, R]"
+preserve_paramspec = true
+preserve_return_type = true
+fallback = "strict_diagnostic"
+
+[[golden_tests]]
+name = "fixture"
+input = "fixture.tpy"
+expected_py = "expected.py"
+expected_pyi = "expected.pyi"
+checkers = ["mypy"]
+"#;
+
 #[test]
 fn adapter_validate_command_parses_manifest_path() {
     let cli = Cli::parse_from([
@@ -34,7 +73,51 @@ fn run_adapter_validate_accepts_safe_manifest() {
         let manifest = project_dir.join("typepython-framework.toml");
         fs::write(
             &manifest,
-            "[adapter]\nname = \"toy-pydantic\"\nversion = \"0.1.0\"\nframework = \"toy.pydantic\"\ntypepython_min = \"0.3.0\"\npython_targets = [\"3.12\"]\nstability = \"prototype\"\n\n[[transforms]]\nprovider = \"toy.pydantic.BaseModel\"\nkind = \"base_class\"\ntarget = \"class\"\ncapabilities = [\"field_collection\", \"constructor_generation\", \"alias_handling\", \"required_optional_fields\"]\nfield_collector = \"annotated_class_fields\"\nconstructor = \"fields\"\nfallback = \"strict_diagnostic\"\n\n[[transforms]]\nprovider = \"toy.pydantic.remote_call\"\nkind = \"function_decorator\"\ntarget = \"function\"\ncapabilities = [\"effect_io_net\", \"effect_time\"]\nfallback = \"strict_diagnostic\"\n\n[[golden_tests]]\nname = \"fixture\"\ninput = \"fixture.tpy\"\nexpected_py = \"expected/app/__init__.py\"\nexpected_pyi = \"expected/app/__init__.pyi\"\ncheckers = [\"basedpyright\", \"mypy\", \"pyright\", \"ty\"]\n",
+            r#"[adapter]
+name = "toy-pydantic"
+version = "0.1.0"
+framework = "toy.pydantic"
+typepython_min = "0.3.0"
+python_targets = ["3.12"]
+stability = "prototype"
+
+[[transforms]]
+provider = "toy.pydantic.BaseModel"
+kind = "base_class"
+target = "class"
+capabilities = ["field_collection", "constructor_generation", "alias_handling", "required_optional_fields", "readonly_fields"]
+field_collector = "annotated_class_fields"
+constructor = "fields"
+alias = { source = "field_specifier", keyword = "validation_alias", literal_only = true }
+default = { keyword = "validation_default" }
+default_factory = { keyword = "validation_factory" }
+frozen = { model_keyword = "model_frozen", field_keyword = "field_frozen" }
+fallback = "strict_diagnostic"
+
+[[transforms]]
+provider = "toy.tasks.task"
+kind = "function_to_object_decorator"
+target = "function"
+capabilities = ["function_to_object_replacement", "generic_preservation"]
+replacement_type = "toy.tasks.Task[P, R]"
+preserve_paramspec = true
+preserve_return_type = true
+fallback = "strict_diagnostic"
+
+[[transforms]]
+provider = "toy.pydantic.remote_call"
+kind = "function_decorator"
+target = "function"
+capabilities = ["effect_io_net", "effect_time"]
+fallback = "strict_diagnostic"
+
+[[golden_tests]]
+name = "fixture"
+input = "fixture.tpy"
+expected_py = "expected/app/__init__.py"
+expected_pyi = "expected/app/__init__.pyi"
+checkers = ["basedpyright", "mypy", "pyright", "ty"]
+"#,
         )
         .expect("manifest should be written");
         run_adapter_validate(AdapterValidateArgs { manifest, format: OutputFormat::Json })
@@ -89,4 +172,214 @@ fn run_adapter_validate_rejects_unsafe_manifest_capabilities() {
         ExitCode::FAILURE,
         "TPY7003 adapter manifest diagnostics should reject unsafe capabilities",
     );
+}
+
+#[test]
+fn adapter_manifest_schema_rejects_unknown_fields_at_every_level() {
+    let cases = [
+        (
+            "manifest root",
+            STRICT_ADAPTER_MANIFEST.replacen("[adapter]", "root_typo = true\n\n[adapter]", 1),
+            "root_typo",
+        ),
+        (
+            "adapter metadata",
+            STRICT_ADAPTER_MANIFEST.replacen(
+                "stability = \"prototype\"",
+                "stability = \"prototype\"\nframework_verison = \"1\"",
+                1,
+            ),
+            "framework_verison",
+        ),
+        (
+            "transform",
+            STRICT_ADAPTER_MANIFEST.replacen(
+                "provider = \"strict.framework.Model\"",
+                "provider = \"strict.framework.Model\"\nprovidre = \"typo\"",
+                1,
+            ),
+            "providre",
+        ),
+        (
+            "alias mapping",
+            STRICT_ADAPTER_MANIFEST.replacen(
+                "literal_only = true }",
+                "literal_only = true, litteral_only = true }",
+                1,
+            ),
+            "litteral_only",
+        ),
+        (
+            "keyword mapping",
+            STRICT_ADAPTER_MANIFEST.replacen(
+                "default = { keyword = \"default\" }",
+                "default = { keyword = \"default\", source = \"runtime\" }",
+                1,
+            ),
+            "source",
+        ),
+        (
+            "frozen mapping",
+            STRICT_ADAPTER_MANIFEST.replacen(
+                "field_keyword = \"frozen\" }",
+                "field_keyword = \"frozen\", dynamic = true }",
+                1,
+            ),
+            "dynamic",
+        ),
+        (
+            "golden test",
+            STRICT_ADAPTER_MANIFEST.replacen(
+                "checkers = [\"mypy\"]",
+                "checkers = [\"mypy\"]\nchecker = \"pyright\"",
+                1,
+            ),
+            "checker",
+        ),
+    ];
+
+    for (label, manifest, unknown_field) in cases {
+        let diagnostics = crate::adapter::adapter_manifest_schema_diagnostics(manifest.as_str());
+        let rendered = diagnostics.as_text();
+        assert!(diagnostics.has_errors(), "{label} should fail: {rendered}");
+        assert!(rendered.contains("TPY7003"), "{label}: {rendered}");
+        assert!(rendered.contains("invalid TOML or schema"), "{label}: {rendered}");
+        assert!(rendered.contains(unknown_field), "{label}: {rendered}");
+    }
+}
+
+#[test]
+fn adapter_manifest_validates_documented_field_relationships() {
+    let cases = [
+        (
+            "dynamic alias",
+            STRICT_ADAPTER_MANIFEST.replacen("literal_only = true", "literal_only = false", 1),
+            "alias.literal_only must be true",
+        ),
+        (
+            "invalid keyword",
+            STRICT_ADAPTER_MANIFEST.replacen(
+                "keyword = \"default_factory\"",
+                "keyword = \"not-a-keyword\"",
+                1,
+            ),
+            "is not a valid Python identifier",
+        ),
+        (
+            "missing alias capability",
+            STRICT_ADAPTER_MANIFEST.replacen("\"alias_handling\", ", "", 1),
+            "field `alias` requires capability `alias_handling`",
+        ),
+        (
+            "missing replacement type",
+            STRICT_ADAPTER_MANIFEST.replacen(
+                "replacement_type = \"strict.framework.Task[P, R]\"\n",
+                "",
+                1,
+            ),
+            "must declare a replacement_type",
+        ),
+        (
+            "invalid replacement type",
+            STRICT_ADAPTER_MANIFEST.replacen(
+                "strict.framework.Task[P, R]",
+                "strict.framework.Task[P,",
+                1,
+            ),
+            "is not a valid TypePython type expression",
+        ),
+        (
+            "incomplete generic preservation",
+            STRICT_ADAPTER_MANIFEST.replacen(
+                "preserve_paramspec = true",
+                "preserve_paramspec = false",
+                1,
+            ),
+            "generic_preservation` requires preserve_paramspec = true",
+        ),
+        (
+            "class target mismatch",
+            STRICT_ADAPTER_MANIFEST.replacen("target = \"class\"", "target = \"function\"", 1),
+            "requires target `class`",
+        ),
+        (
+            "class capability on function transform",
+            STRICT_ADAPTER_MANIFEST.replacen(
+                "\"function_to_object_replacement\", \"generic_preservation\"",
+                "\"function_to_object_replacement\", \"generic_preservation\", \"field_collection\"",
+                1,
+            ),
+            "capability `field_collection` requires a class transform kind",
+        ),
+        (
+            "missing class collector",
+            STRICT_ADAPTER_MANIFEST.replacen(
+                "field_collector = \"annotated_class_fields\"\n",
+                "",
+                1,
+            ),
+            "must declare field_collector `annotated_class_fields`",
+        ),
+    ];
+
+    for (label, manifest, expected) in cases {
+        let rendered = adapter_validation_diagnostics(&manifest, None).as_text();
+        assert!(rendered.contains(expected), "{label}: {rendered}");
+    }
+}
+
+#[test]
+fn malformed_adapter_toml_is_a_structured_validation_failure() {
+    let malformed = "[adapter\nname = \"broken\"\n";
+    let diagnostics = crate::adapter::adapter_manifest_schema_diagnostics(malformed);
+    let rendered = diagnostics.as_text();
+    assert!(diagnostics.has_errors(), "{rendered}");
+    assert!(rendered.contains("TPY7003"), "{rendered}");
+    assert!(rendered.contains("invalid TOML or schema"), "{rendered}");
+
+    let project_dir = temp_project_dir("malformed_adapter_toml_is_structured");
+    let manifest = project_dir.join("typepython-framework.toml");
+    fs::write(&manifest, malformed).expect("malformed manifest should be written");
+    let result = run_adapter_validate(AdapterValidateArgs { manifest, format: OutputFormat::Json })
+        .expect("schema errors should render as validation diagnostics");
+    assert_eq!(result, ExitCode::FAILURE);
+
+    let invalid_utf8 = project_dir.join("invalid-utf8.toml");
+    fs::write(&invalid_utf8, [0xff, 0xfe]).expect("invalid UTF-8 manifest should be written");
+    let invalid_utf8_result = run_adapter_validate(AdapterValidateArgs {
+        manifest: invalid_utf8,
+        format: OutputFormat::Text,
+    })
+    .expect("invalid UTF-8 should render as a validation diagnostic");
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(invalid_utf8_result, ExitCode::FAILURE);
+}
+
+#[test]
+fn documented_adapter_toml_examples_match_the_strict_schema() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for relative_path in [
+        "docs/rfcs/framework-adapter-manifest.md",
+        "docs/examples/framework-adapters.md",
+        "docs/framework-adapters.md",
+    ] {
+        let contents = fs::read_to_string(repo_root.join(relative_path))
+            .expect("adapter documentation should be readable");
+        let snippets = contents
+            .split("```toml")
+            .skip(1)
+            .filter_map(|tail| tail.split("```").next())
+            .collect::<Vec<_>>();
+        assert!(!snippets.is_empty(), "{relative_path} should contain a TOML example");
+        for (index, snippet) in snippets.into_iter().enumerate() {
+            let diagnostics = crate::adapter::adapter_manifest_schema_diagnostics(snippet);
+            assert!(
+                diagnostics.is_empty(),
+                "{relative_path} TOML example {} violates the adapter schema: {}",
+                index + 1,
+                diagnostics.as_text()
+            );
+        }
+    }
 }

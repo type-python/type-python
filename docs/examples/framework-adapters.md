@@ -29,6 +29,10 @@ capabilities = [
 ]
 field_collector = "annotated_class_fields"
 constructor = "fields"
+alias = { source = "field_specifier", keyword = "alias", literal_only = true }
+default = { keyword = "default" }
+default_factory = { keyword = "default_factory" }
+frozen = { model_keyword = "frozen_default", field_keyword = "frozen" }
 fallback = "strict_diagnostic"
 
 [[golden_tests]]
@@ -42,6 +46,9 @@ checkers = ["mypy", "pyright", "ty"]
 This mirrors the Pydantic-like fixture: annotated fields become constructor parameters, string
 literal aliases become public constructor keywords, defaults/default factories make parameters
 optional, and statically known frozen metadata feeds mutation diagnostics.
+
+Adapter manifests use a closed schema. A misspelled key, an unknown inline-mapping field, or a
+future extension not documented by the manifest RFC fails validation instead of being ignored.
 
 ## Task queue
 

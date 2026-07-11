@@ -100,6 +100,35 @@ Every declared transform must lower to the existing framework transform metadata
 compiler cannot express a manifest feature through that model, the adapter is invalid rather than
 partially executed.
 
+### Strict schema contract
+
+The prototype schema is closed at every level. Unknown keys in the manifest root, `[adapter]`, a
+`[[transforms]]` or `[[golden_tests]]` table, or an inline mapping are validation errors; keys are
+never retained or silently ignored. This includes misspellings and proposed extension fields that
+have not been added to this RFC.
+
+Class transforms use these optional static keyword mappings:
+
+- `alias = { source, keyword, literal_only }` requires `alias_handling`, supports only
+  `source = "field_specifier"`, and requires `literal_only = true`.
+- `default = { keyword }` and `default_factory = { keyword }` require
+  `required_optional_fields`.
+- `frozen = { model_keyword, field_keyword }` requires `readonly_fields`.
+
+Mapping keywords may be framework-specific, but each must be a non-empty Python identifier. These
+mapping fields are valid only for class transforms. Class transforms must declare
+`field_collection` and `constructor_generation`, with
+`field_collector = "annotated_class_fields"` and `constructor = "fields"`.
+
+A `function_to_object_decorator` must declare `function_to_object_replacement` and a parseable
+`replacement_type`. When it declares `generic_preservation`, both `preserve_paramspec` and
+`preserve_return_type` must be present and true; those flags are invalid without that capability.
+Every transform must explicitly select `strict_diagnostic` or `non_strict_degrade` as its fallback.
+
+The compatibility discussion below calls for a future framework-version range, but this prototype
+does not yet define a manifest key for one. Authors must not invent such a key: the strict schema
+rejects it until its name and semantics are specified here.
+
 ## Safety rules
 
 - Adapter manifests are data, not code.
@@ -119,6 +148,10 @@ typepython adapter validate typepython-framework.toml
 The command should check schema validity, provider kinds, allowed capability combinations, local
 golden-test paths, downstream checker expectations, and compatibility metadata. It should reject
 unsafe declarations before a project build can consume them.
+
+Malformed TOML, missing required schema fields, type mismatches, and unknown fields are ordinary
+`TPY7003` validation failures. Text and JSON modes return exit status `1` with the normal diagnostic
+report instead of treating author-controlled schema errors as internal failures.
 
 ## Compatibility metadata
 

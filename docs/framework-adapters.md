@@ -124,6 +124,10 @@ capabilities = [
 ]
 field_collector = "annotated_class_fields"
 constructor = "fields"
+alias = { source = "field_specifier", keyword = "alias", literal_only = true }
+default = { keyword = "default" }
+default_factory = { keyword = "default_factory" }
+frozen = { model_keyword = "frozen_default", field_keyword = "frozen" }
 fallback = "strict_diagnostic"
 
 [[transforms]]
@@ -147,6 +151,10 @@ Run validation in text or JSON mode:
 typepython adapter validate typepython-framework.toml
 typepython adapter validate typepython-framework.toml --format json
 ```
+
+The manifest schema is closed: unknown or misspelled fields at any table or inline mapping are
+reported as `TPY7003`. Malformed TOML and schema type errors use the same structured validation
+report and exit status `1`; they are not silently ignored or reported as internal CLI failures.
 
 See [framework adapter examples](examples/framework-adapters.md) for validation-model, task queue,
 and toy ORM manifest sketches that use the same constrained metadata model.

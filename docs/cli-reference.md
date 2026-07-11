@@ -527,7 +527,7 @@ typepython adapter validate PATH [OPTIONS]
 | `PATH`             | Adapter manifest to validate        |
 | `--format FORMAT`  | Output format: `text` or `json`     |
 
-The validator accepts only the prototype-safe transform families described in the framework adapter manifest RFC: class decorator, base class, metaclass, function decorator, function-to-object decorator, field collection, constructor synthesis, descriptor-backed attributes, literal alias/default/frozen metadata mapping, taint facts, validator witnesses, and effect/capability facts. It rejects unsupported transform kinds, arbitrary runtime capabilities, missing compatibility metadata, and golden-test inputs that cannot be found locally.
+The validator accepts only the prototype-safe transform families described in the framework adapter manifest RFC: class decorator, base class, metaclass, function decorator, function-to-object decorator, field collection, constructor synthesis, descriptor-backed attributes, literal alias/default/frozen metadata mapping, taint facts, validator witnesses, and effect/capability facts. Its schema is closed at every table and inline mapping, so unknown or misspelled fields fail with `TPY7003` rather than being ignored. It also rejects unsupported transform kinds, invalid field/capability combinations, arbitrary runtime capabilities, missing compatibility metadata, invalid function-replacement type expressions, and golden-test inputs that cannot be found locally. Malformed TOML and schema errors use the normal text or JSON diagnostic report and exit status `1`.
 
 **Example:**
 
