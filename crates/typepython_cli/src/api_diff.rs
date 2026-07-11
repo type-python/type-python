@@ -210,18 +210,19 @@ fn classify_changed_symbol(old_symbol: &PublicSymbol, new_symbol: &PublicSymbol)
     if old_symbol.kind == "metadata" {
         return String::from("runtime-breaking signal");
     }
-    if matches!(old_symbol.kind.as_str(), "function" | "method" | "property")
-        && let (Some(old), Some(new)) = (
-            old_symbol
-                .dynamic_positions
-                .clone()
-                .or_else(|| callable_dynamic_positions(&old_symbol.signature)),
-            new_symbol
-                .dynamic_positions
-                .clone()
-                .or_else(|| callable_dynamic_positions(&new_symbol.signature)),
-        )
-    {
+    if matches!(
+        old_symbol.kind.as_str(),
+        "function" | "method" | "static method" | "class method" | "property"
+    ) && let (Some(old), Some(new)) = (
+        old_symbol
+            .dynamic_positions
+            .clone()
+            .or_else(|| callable_dynamic_positions(&old_symbol.signature)),
+        new_symbol
+            .dynamic_positions
+            .clone()
+            .or_else(|| callable_dynamic_positions(&new_symbol.signature)),
+    ) {
         let likely_breaking = (old.parameters && !new.parameters) || (!old.returns && new.returns);
         let likely_compatible =
             (!old.parameters && new.parameters) || (old.returns && !new.returns);
@@ -1222,6 +1223,7 @@ impl PythonSurfaceExtractor<'_> {
             self.tokens,
             &class_def.decorator_list,
             self.tokens.in_range(class_def.range),
+            None,
         );
         self.symbols.insert(key.to_owned(), PublicSymbol::new("class", signature));
 
@@ -1252,7 +1254,31 @@ impl PythonSurfaceExtractor<'_> {
                 Stmt::FunctionDef(function) if public_member_name(function.name.as_str()) => {
                     let member_key = format!("{key}.{}", function.name.as_str());
                     let is_property = property_name.is_some();
-                    let kind = if is_property { "property" } else { "method" };
+                    let method_binding = function
+                        .decorator_list
+                        .iter()
+                        .map(|decorator| {
+                            class_overload_bindings.expression_binding(
+                                &decorator.expression,
+                                Some(&self.overload_bindings),
+                            )
+                        })
+                        .find(|binding| {
+                            matches!(
+                                binding,
+                                OverloadBinding::ClassMethodDecorator
+                                    | OverloadBinding::StaticMethodDecorator
+                            )
+                        });
+                    let kind = if is_property {
+                        "property"
+                    } else {
+                        match method_binding {
+                            Some(OverloadBinding::ClassMethodDecorator) => "class method",
+                            Some(OverloadBinding::StaticMethodDecorator) => "static method",
+                            _ => "method",
+                        }
+                    };
                     self.insert_function(
                         &member_key,
                         function,
@@ -1471,11 +1497,34 @@ impl PythonSurfaceExtractor<'_> {
         local_overload_bindings: Option<&OverloadBindings>,
         is_grouped_property: bool,
     ) {
+        let canonical_decorators = function
+            .decorator_list
+            .iter()
+            .map(|decorator| {
+                let binding = local_overload_bindings.map_or_else(
+                    || self.overload_bindings.expression_binding(&decorator.expression, None),
+                    |local| {
+                        local.expression_binding(
+                            &decorator.expression,
+                            Some(&self.overload_bindings),
+                        )
+                    },
+                );
+                match binding {
+                    OverloadBinding::ClassMethodDecorator => Some("@classmethod"),
+                    OverloadBinding::Decorator => Some("@overload"),
+                    OverloadBinding::PropertyDecorator => Some("@property"),
+                    OverloadBinding::StaticMethodDecorator => Some("@staticmethod"),
+                    _ => None,
+                }
+            })
+            .collect::<Vec<_>>();
         let signature = decorated_header_signature(
             self.source,
             self.tokens,
             &function.decorator_list,
             self.tokens.in_range(function.range),
+            Some(&canonical_decorators),
         );
         let dynamic_positions = local_overload_bindings.map_or_else(
             || {
@@ -1897,11 +1946,19 @@ fn decorated_header_signature(
     tokens: &Tokens,
     decorators: &[ruff_python_ast::Decorator],
     header_and_body_tokens: &[Token],
+    canonical_decorators: Option<&[Option<&str>]>,
 ) -> String {
     decorators
         .iter()
-        .map(|decorator| {
-            canonical_tokens(source, tokens.in_range(decorator.range), TokenLimit::All)
+        .enumerate()
+        .map(|(index, decorator)| {
+            canonical_decorators
+                .and_then(|decorators| decorators.get(index))
+                .and_then(|decorator| *decorator)
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    canonical_tokens(source, tokens.in_range(decorator.range), TokenLimit::All)
+                })
         })
         .chain(std::iter::once(canonical_tokens(
             source,
@@ -2477,15 +2534,32 @@ fn insert_typepython_class_symbols(
                     symbols
                         .insert(key, typepython_callable_symbol("property", signatures.join("\n")));
                 } else {
-                    symbols.insert(key, typepython_callable_symbol("method", signature));
+                    symbols.insert(
+                        key,
+                        typepython_callable_symbol(typepython_method_kind(member), signature),
+                    );
                 }
             }
             typepython_syntax::ClassMemberKind::Overload => {
                 let signatures = overloads.entry(key.clone()).or_default();
                 signatures.push(format!("@overload\n{}", render_typepython_member(member)));
-                symbols.insert(key, typepython_callable_symbol("method", signatures.join("\n")));
+                symbols.insert(
+                    key,
+                    typepython_callable_symbol(
+                        typepython_method_kind(member),
+                        signatures.join("\n"),
+                    ),
+                );
             }
         }
+    }
+}
+
+fn typepython_method_kind(member: &typepython_syntax::ClassMember) -> &'static str {
+    match member.method_kind {
+        Some(typepython_syntax::MethodKind::Class) => "class method",
+        Some(typepython_syntax::MethodKind::Static) => "static method",
+        _ => "method",
     }
 }
 

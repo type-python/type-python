@@ -964,6 +964,88 @@ fn diff_api_surfaces_groups_only_bound_property_descriptors() {
 }
 
 #[test]
+fn diff_api_surfaces_normalizes_bound_method_decorators() {
+    let project_dir = temp_project_dir("diff_api_surfaces_normalizes_bound_method_decorators");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload as _ov\n",
+                "__all__ = [\"Alias\", \"Shadowed\", \"parse\"]\n",
+                "_sm = staticmethod\n",
+                "_cm = classmethod\n",
+                "_prop = property\n",
+                "class Alias:\n",
+                "    @_sm\n",
+                "    def build(value: int) -> int: ...\n",
+                "    @_cm\n",
+                "    def make(cls, value: int) -> Alias: ...\n",
+                "    @_prop\n",
+                "    def value(self) -> int: ...\n",
+                "def _identity(value): return value\n",
+                "staticmethod = _identity\n",
+                "classmethod = _identity\n",
+                "class Shadowed:\n",
+                "    @staticmethod\n",
+                "    def build(self, value: int) -> int: ...\n",
+                "    @classmethod\n",
+                "    def make(self, value: int) -> Shadowed: ...\n",
+                "@_ov\n",
+                "def parse(value: int) -> int: ...\n",
+                "@_ov\n",
+                "def parse(value: str) -> str: ...\n",
+            ),
+        )
+        .expect("old surface should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload\n",
+                "__all__ = [\"Alias\", \"Shadowed\", \"parse\"]\n",
+                "class Alias:\n",
+                "    @staticmethod\n",
+                "    def build(value: int) -> int: ...\n",
+                "    @classmethod\n",
+                "    def make(cls, value: int) -> Alias: ...\n",
+                "    @property\n",
+                "    def value(self) -> int: ...\n",
+                "class Shadowed:\n",
+                "    @staticmethod\n",
+                "    def build(self, value: int) -> int: ...\n",
+                "    @classmethod\n",
+                "    def make(self, value: int) -> Shadowed: ...\n",
+                "@overload\n",
+                "def parse(value: int) -> int: ...\n",
+                "@overload\n",
+                "def parse(value: str) -> str: ...\n",
+            ),
+        )
+        .expect("new surface should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should normalize semantic decorators")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let changed = report
+        .changed
+        .iter()
+        .map(|change| (change.symbol.as_str(), change))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        changed.keys().copied().collect::<Vec<_>>(),
+        vec!["Shadowed.build", "Shadowed.make"]
+    );
+    assert_eq!(changed["Shadowed.build"].kind, "static method");
+    assert_eq!(changed["Shadowed.make"].kind, "class method");
+    assert!(changed.values().all(|change| change.old_signature == change.new_signature));
+}
+
+#[test]
 fn diff_api_surfaces_uses_static_all_for_private_and_reexported_names() {
     let project_dir =
         temp_project_dir("diff_api_surfaces_uses_static_all_for_private_and_reexported_names");
