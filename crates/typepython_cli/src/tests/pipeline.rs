@@ -1219,6 +1219,20 @@ fn materialized_manifest_refuses_symlink_escape_during_cleanup() {
 }
 
 #[test]
+fn ensure_py_typed_marker_rejects_non_file_targets() {
+    let project_dir = temp_project_dir("ensure_py_typed_marker_rejects_non_file_targets");
+    let marker_path = project_dir.join("app/py.typed");
+    fs::create_dir_all(&marker_path).expect("directory marker should be created");
+
+    let error = ensure_py_typed_marker(&marker_path)
+        .expect_err("non-file marker target should be rejected")
+        .to_string();
+    remove_temp_project_dir(&project_dir);
+
+    assert!(error.contains("not a regular file"), "{error}");
+}
+
+#[test]
 fn run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed() {
     let project_dir =
         temp_project_dir("run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed");

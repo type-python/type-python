@@ -149,6 +149,37 @@ fn verify_build_artifacts_reports_missing_runtime_and_marker_files() {
 }
 
 #[test]
+fn verify_build_artifacts_rejects_non_file_package_marker() {
+    let project_dir = temp_project_dir("verify_build_artifacts_rejects_non_file_package_marker");
+    let rendered = {
+        let package_root = project_dir.join(".typepython/build/app");
+        fs::create_dir_all(package_root.join("py.typed"))
+            .expect("directory marker should be created");
+        fs::write(package_root.join("__init__.py"), "pass\n")
+            .expect("runtime artifact should be written");
+        fs::write(package_root.join("__init__.pyi"), "pass\n")
+            .expect("stub artifact should be written");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_build_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(package_root.join("__init__.py")),
+                stub_path: Some(package_root.join("__init__.pyi")),
+            }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("package marker"), "{rendered}");
+    assert!(rendered.contains("not a regular file"), "{rendered}");
+}
+
+#[test]
 fn run_verify_bootstraps_outputs_after_clean_project() {
     let project_dir = temp_project_dir("run_verify_bootstraps_outputs_after_clean_project");
     let result = {

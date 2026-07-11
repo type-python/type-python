@@ -719,11 +719,28 @@ pub(crate) fn verify_build_artifacts(
     if config.config.emit.write_py_typed {
         for package_root in py_typed_package_roots(&out_root, artifacts) {
             let marker_path = package_root.join("py.typed");
-            if !marker_path.exists() {
-                diagnostics.push(Diagnostic::error(
+            match fs::symlink_metadata(&marker_path) {
+                Ok(metadata) if metadata.file_type().is_file() => {}
+                Ok(_) => diagnostics.push(Diagnostic::error(
                     "TPY5003",
-                    format!("missing package marker `{}`", marker_path.display()),
-                ));
+                    format!(
+                        "package marker `{}` exists and is not a regular file",
+                        marker_path.display()
+                    ),
+                )),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY5003",
+                        format!("missing package marker `{}`", marker_path.display()),
+                    ));
+                }
+                Err(error) => diagnostics.push(Diagnostic::error(
+                    "TPY5003",
+                    format!(
+                        "unable to inspect package marker `{}`: {error}",
+                        marker_path.display()
+                    ),
+                )),
             }
         }
     }

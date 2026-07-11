@@ -467,10 +467,7 @@ pub(crate) fn materialize_build_outputs(
     if config.config.emit.write_py_typed {
         for package_root in py_typed_package_roots(&out_root, &snapshot.emit_plan) {
             let marker_path = package_root.join("py.typed");
-            if !marker_path.exists() {
-                fs::write(&marker_path, "").with_context(|| {
-                    format!("unable to write package marker {}", marker_path.display())
-                })?;
+            if ensure_py_typed_marker(&marker_path)? {
                 py_typed_written += 1;
             }
         }
@@ -503,6 +500,42 @@ pub(crate) fn materialize_build_outputs(
     notes.push(format!("recorded materialized build manifest at {}", manifest_path.display()));
     notes.push(format!("recorded effect metadata at {}", effect_metadata_path.display()));
     Ok(notes)
+}
+
+pub(crate) fn ensure_py_typed_marker(marker_path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(marker_path) {
+        Ok(metadata) if metadata.file_type().is_file() => return Ok(false),
+        Ok(_) => {
+            anyhow::bail!(
+                "package marker `{}` exists and is not a regular file",
+                marker_path.display()
+            );
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("unable to inspect package marker {}", marker_path.display())
+            });
+        }
+    }
+
+    match fs::OpenOptions::new().write(true).create_new(true).open(marker_path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            match fs::symlink_metadata(marker_path) {
+                Ok(metadata) if metadata.file_type().is_file() => Ok(false),
+                Ok(_) => anyhow::bail!(
+                    "package marker `{}` exists and is not a regular file",
+                    marker_path.display()
+                ),
+                Err(error) => Err(error).with_context(|| {
+                    format!("unable to inspect package marker {}", marker_path.display())
+                }),
+            }
+        }
+        Err(error) => Err(error)
+            .with_context(|| format!("unable to write package marker {}", marker_path.display())),
+    }
 }
 
 pub(crate) fn py_typed_package_roots(

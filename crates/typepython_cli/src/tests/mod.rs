@@ -14,9 +14,10 @@ pub(super) use super::migration::{
 };
 pub(super) use super::pipeline::{
     PipelineSnapshot, build_diagnostics, clean_project, compile_runtime_bytecode,
-    format_watch_rebuild_note, load_syntax_trees, materialize_build_outputs,
-    persist_pipeline_analysis_state, run_build_like_command, run_pipeline, run_with_pipeline,
-    should_emit_build_outputs, validated_clean_target, watch_targets, write_incremental_snapshot,
+    ensure_py_typed_marker, format_watch_rebuild_note, load_syntax_trees,
+    materialize_build_outputs, persist_pipeline_analysis_state, run_build_like_command,
+    run_pipeline, run_with_pipeline, should_emit_build_outputs, validated_clean_target,
+    watch_targets, write_incremental_snapshot,
 };
 pub(super) use super::type_health::{build_type_health_report_for_target, run_type_health};
 pub(super) use super::verification::inspect_supplied_archive_paths;
