@@ -736,25 +736,79 @@ pub(super) fn direct_source_function_type_diagnostics_in_scope_with_context(
         .into_iter()
         .flat_map(|result| result.diagnostics)
     }));
-    let resolved_keyword_arg_types = resolved_keyword_arg_semantic_types_in_scope_with_options(
+    // Argument flow narrowing depends on feature gates and source overrides stored on the
+    // authoritative checker context. Reconstructing a context from assignability options here
+    // would discard validator-witness semantics.
+    let keyword_arg_type_texts = call.keyword_arg_type_texts();
+    let resolved_keyword_arg_types = if call.keyword_arg_values.is_empty() {
+        keyword_arg_type_texts.iter().map(|ty| lower_type_text_or_name(ty)).collect::<Vec<_>>()
+    } else {
+        call.keyword_arg_values
+            .iter()
+            .enumerate()
+            .map(|(index, metadata)| {
+                resolve_direct_call_argument_semantic_type_with_context(
+                    context,
+                    node,
+                    nodes,
+                    scope_owner_name,
+                    scope_owner_type_name,
+                    call.line,
+                    metadata,
+                    expected_keyword_arg_types.get(index).and_then(|expected| expected.as_deref()),
+                    keyword_arg_type_texts.get(index).map(String::as_str),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let positional_arg_type_texts = call.positional_arg_type_texts();
+    let mut expanded_arg_types = if call.arg_values.is_empty() {
+        positional_arg_type_texts.iter().map(|ty| lower_type_text_or_name(ty)).collect::<Vec<_>>()
+    } else {
+        call.arg_values
+            .iter()
+            .enumerate()
+            .map(|(index, metadata)| {
+                resolve_direct_call_argument_semantic_type_with_context(
+                    context,
+                    node,
+                    nodes,
+                    scope_owner_name,
+                    scope_owner_type_name,
+                    call.line,
+                    metadata,
+                    expected_positional_arg_types.get(index).and_then(|expected| expected.as_deref()),
+                    positional_arg_type_texts.get(index).map(String::as_str),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    if expanded_arg_types.len() < call.arg_count {
+        expanded_arg_types.extend(std::iter::repeat_n(
+            SemanticType::Name(String::new()),
+            call.arg_count - expanded_arg_types.len(),
+        ));
+    }
+    let mut variadic_starred_types = Vec::new();
+    for expansion in resolved_starred_positional_expansions_in_scope_with_options(
         node,
         nodes,
         call,
-        &expected_keyword_arg_types,
         scope_owner_name,
         scope_owner_type_name,
         options,
-    );
-    let (expanded_arg_types, variadic_starred_types) =
-        expanded_positional_arg_semantic_types_in_scope_with_options(
-            node,
-            nodes,
-            call,
-            &expected_positional_arg_types,
-            scope_owner_name,
-            scope_owner_type_name,
-            options,
-        );
+    ) {
+        match expansion {
+            PositionalExpansion::Fixed(types) => expanded_arg_types.extend(
+                types
+                    .into_iter()
+                    .map(|ty| ty.unwrap_or_else(|| SemanticType::Name(String::new()))),
+            ),
+            PositionalExpansion::Variadic(element_type) => {
+                variadic_starred_types.push(element_type);
+            }
+        }
+    }
     let keyword_expansions = resolved_keyword_expansions_in_scope_with_context(
         context,
         node,
@@ -809,6 +863,60 @@ pub(super) fn direct_source_function_type_diagnostics_in_scope_with_context(
         &keyword_expansions,
     ));
     diagnostics
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_direct_call_argument_semantic_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+    fallback_type: Option<&str>,
+) -> SemanticType {
+    resolve_contextual_call_arg_semantic_type_in_scope_with_context(
+        context,
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        metadata,
+        expected,
+    )
+    .map(|result| result.actual_type)
+    .or_else(|| {
+        metadata.value_name.as_deref().and_then(|value_name| {
+            resolve_direct_name_reference_semantic_type_with_context(
+                context,
+                node,
+                nodes,
+                None,
+                None,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                value_name,
+            )
+        })
+    })
+    .or_else(|| {
+        resolve_direct_expression_semantic_type_from_metadata_with_options(
+            node,
+            nodes,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            metadata,
+            context.assignability_options(),
+        )
+    })
+    .or_else(|| fallback_type.map(lower_type_text_or_name))
+    .unwrap_or_else(|| SemanticType::Name(String::new()))
 }
 
 #[allow(dead_code)]

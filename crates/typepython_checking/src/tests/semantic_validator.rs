@@ -75,6 +75,56 @@ fn check_trust_metadata_decorator_produces_generated_witness() {
 }
 
 #[test]
+fn check_trust_metadata_narrows_direct_call_arguments() {
+    let result = check_validator_source(concat!(
+        "from typing import Callable\n\n",
+        "class User:\n",
+        "    name: str\n\n",
+        "def validator[T](target: type[T], trust: str):\n",
+        "    def wrap[**P](fn: Callable[P, bool]) -> Callable[P, bool]:\n",
+        "        return fn\n",
+        "    return wrap\n\n",
+        "@validator(User, trust=\"generated\")\n",
+        "def validate_user(value: unknown) -> bool:\n",
+        "    ...\n\n",
+        "def display_name(user: User) -> str:\n",
+        "    return user.name\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if validate_user(value):\n",
+        "        first = display_name(value)\n",
+        "        return display_name(user=value)\n",
+        "    return \"\"\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_direct_call_arguments_do_not_use_disabled_validator_witnesses() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Literal\n\n",
+        "class User:\n",
+        "    name: str\n\n",
+        "def validate_user(value: unknown) -> ValidatorWitness[User, Literal[\"trusted\"]]:\n",
+        "    ...\n\n",
+        "def display_name(user: User) -> str:\n",
+        "    return user.name\n\n",
+        "def handle(value: unknown) -> str:\n",
+        "    if validate_user(value):\n",
+        "        return display_name(value)\n",
+        "    return \"\"\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(result.diagnostics.has_errors(), "{rendered}");
+    assert!(
+        rendered.contains("call to `display_name`")
+            && rendered.contains("passes `unknown` where parameter expects `User`"),
+        "{rendered}"
+    );
+}
+
+#[test]
 fn check_trust_metadata_decorator_uses_source_overrides_without_backing_file() {
     let result = check_virtual_source_with_experimental_overrides(
         concat!(
