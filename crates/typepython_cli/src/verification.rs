@@ -861,7 +861,7 @@ pub(crate) fn verify_publication_metadata(
                 &metadata,
             )),
             Ok(None) => {}
-            Err(error) => diagnostics.push(Diagnostic::warning(
+            Err(error) => diagnostics.push(Diagnostic::error(
                 "TPY5003",
                 format!(
                     "unable to inspect packaging metadata in {} artifact `{}`: {error}",
@@ -1100,17 +1100,18 @@ fn supplied_archive_distribution_identity(
 fn parse_package_metadata_text(
     bytes: &[u8],
 ) -> std::result::Result<Option<PackageMetadata>, String> {
-    let rendered = String::from_utf8(bytes.to_vec())
-        .map_err(|error| format!("invalid UTF-8 metadata: {error}"))?;
-    let mut requires_python = None;
-    let mut requires_dist = Vec::new();
-    for line in rendered.lines() {
-        if let Some(value) = line.strip_prefix("Requires-Python:") {
-            requires_python = Some(value.trim().to_owned());
-        } else if let Some(value) = line.strip_prefix("Requires-Dist:") {
-            requires_dist.push(value.trim().to_owned());
+    let headers = metadata_headers(bytes)?;
+    let requires_python = match headers.get("requires-python").map(Vec::as_slice) {
+        None | Some([]) => None,
+        Some([value]) => Some(value.clone()),
+        Some(values) => {
+            return Err(format!(
+                "metadata contains {} `Requires-Python` headers; expected at most one",
+                values.len()
+            ));
         }
-    }
+    };
+    let requires_dist = headers.get("requires-dist").cloned().unwrap_or_default();
     Ok(Some(PackageMetadata { requires_python, requires_dist }))
 }
 
