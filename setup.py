@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import runpy
 import shutil
 import subprocess
+import sys
+from collections.abc import Callable
 from typing import cast
 
 from setuptools import Command, Distribution, setup
@@ -20,6 +23,10 @@ except ImportError:
 
 
 ROOT = pathlib.Path(__file__).resolve().parent
+macos_binary_platform_tag = cast(
+    Callable[..., str],
+    runpy.run_path(str(ROOT / "_typepython_build.py"))["macos_binary_platform_tag"],
+)
 
 
 class BinaryDistribution(Distribution):
@@ -105,15 +112,28 @@ cmdclass = cast(dict[str, type[Command]], {"build_py": build_py})
 if _bdist_wheel is not None:
 
     class bdist_wheel(_bdist_wheel):
+        _typepython_tag: tuple[str, str, str] | None = None
+
         def finalize_options(self) -> None:
             super().finalize_options()
             self.root_is_pure = False
 
         def get_tag(self) -> tuple[str, str, str]:
+            if self._typepython_tag is not None:
+                return self._typepython_tag
             _, _, plat = super().get_tag()
+            if sys.platform == "darwin":
+                binary = (
+                    pathlib.Path(self.bdist_dir) / "typepython" / "bin" / "typepython"
+                )
+                explicit = bool(getattr(self, "plat_name_supplied", False)) or (
+                    "_PYTHON_HOST_PLATFORM" in os.environ
+                )
+                plat = macos_binary_platform_tag(plat, binary=binary, explicit=explicit)
             # The bundled Rust CLI makes the wheel platform-specific, but the
             # Python wrapper itself is not tied to a single CPython minor/ABI.
-            return ("py3", "none", plat)
+            self._typepython_tag = ("py3", "none", plat)
+            return self._typepython_tag
 
     cmdclass["bdist_wheel"] = cast(type[Command], bdist_wheel)
 

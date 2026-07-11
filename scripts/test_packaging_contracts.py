@@ -6,6 +6,7 @@ import re
 import unittest
 from unittest import mock
 
+from _typepython_build import resolve_macos_platform_tag
 from typepython import _runner
 
 
@@ -17,6 +18,64 @@ def read_text(relative_path: str) -> str:
 
 
 class PackagingContractTests(unittest.TestCase):
+    def test_native_macos_wheel_tag_uses_actual_binary(self) -> None:
+        self.assertEqual(
+            resolve_macos_platform_tag(
+                "macosx_10_9_universal2",
+                actual_arches={"arm64"},
+                actual_minimum=(11, 0, 0),
+                explicit=False,
+            ),
+            "macosx_11_0_arm64",
+        )
+
+    def test_explicit_macos_wheel_tag_preserves_higher_requested_floor(self) -> None:
+        self.assertEqual(
+            resolve_macos_platform_tag(
+                "macosx_13_0_arm64",
+                actual_arches={"arm64"},
+                actual_minimum=(11, 0, 0),
+                explicit=True,
+            ),
+            "macosx_13_0_arm64",
+        )
+        self.assertEqual(
+            resolve_macos_platform_tag(
+                "macosx_10_9_x86_64",
+                actual_arches={"x86_64"},
+                actual_minimum=(10, 13, 0),
+                explicit=True,
+            ),
+            "macosx_10_13_x86_64",
+        )
+
+    def test_explicit_macos_wheel_tag_rejects_architecture_mismatches(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "requested x86_64"):
+            resolve_macos_platform_tag(
+                "macosx_10_13_x86_64",
+                actual_arches={"arm64"},
+                actual_minimum=(11, 0, 0),
+                explicit=True,
+            )
+        with self.assertRaisesRegex(RuntimeError, "universal2 requires both"):
+            resolve_macos_platform_tag(
+                "macosx_10_9_universal2",
+                actual_arches={"arm64"},
+                actual_minimum=(11, 0, 0),
+                explicit=True,
+            )
+
+    def test_explicit_universal2_tag_requires_both_binary_slices(self) -> None:
+        self.assertEqual(
+            resolve_macos_platform_tag(
+                "macosx_10_13_universal2",
+                actual_arches={"x86_64", "arm64"},
+                actual_minimum=(10, 12, 0),
+                explicit=True,
+            ),
+            "macosx_10_13_universal2",
+        )
+
     def test_runner_distinguishes_installed_package_missing_binary(self) -> None:
         with (
             mock.patch.dict(os.environ, {}, clear=True),
@@ -38,7 +97,9 @@ class PackagingContractTests(unittest.TestCase):
                 _runner._command()
 
     def test_runner_prefers_typepython_bin_override(self) -> None:
-        with mock.patch.dict(os.environ, {"TYPEPYTHON_BIN": "/opt/typepython/bin/typepython"}):
+        with mock.patch.dict(
+            os.environ, {"TYPEPYTHON_BIN": "/opt/typepython/bin/typepython"}
+        ):
             self.assertEqual(_runner._command(), ["/opt/typepython/bin/typepython"])
 
     def test_packaging_docs_and_build_contract_explain_wheel_strategy(self) -> None:
@@ -56,7 +117,8 @@ class PackagingContractTests(unittest.TestCase):
         pypi_readme = read_text("README-PyPI.md")
 
         self.assertRegex(pyproject, r'build = "cp312-\*"')
-        self.assertIn('return ("py3", "none", plat)', setup)
+        self.assertIn("macos_binary_platform_tag", setup)
+        self.assertIn('self._typepython_tag = ("py3", "none", plat)', setup)
         self.assertIn("Rust 1.94.0", setup)
         self.assertIn("prebuilt type-python wheel", setup)
         self.assertIn("_copy_bundled_stdlib", setup)
@@ -68,6 +130,7 @@ class PackagingContractTests(unittest.TestCase):
         self.assertTrue((REPO_ROOT / "typepython" / "py.typed").is_file())
         for graft in ("graft crates", "graft stdlib", "graft templates"):
             self.assertIn(graft, manifest)
+        self.assertIn("include _typepython_build.py", manifest)
 
         self.assertIn("sdist-smoke:", makefile)
         self.assertIn("sdist-smoke", makefile.split("beta-release-gate:", 1)[1])

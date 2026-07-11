@@ -5,6 +5,7 @@ include README.md
 include README-PyPI.md
 include pyproject.toml
 include setup.py
+include _typepython_build.py
 include rust-toolchain.toml
 include rustfmt.toml
 graft crates
