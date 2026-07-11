@@ -2975,7 +2975,7 @@ fn parse_extracts_direct_return_call_callee() {
         path: PathBuf::from("returns.py"),
         kind: SourceKind::Python,
         logical_module: String::new(),
-        text: String::from("def build() -> int:\n    return helper()\n"),
+        text: String::from("def build() -> int:\n    return helper(\"value\")\n"),
     });
 
     assert!(tree.diagnostics.is_empty());
@@ -3022,6 +3022,16 @@ fn parse_extracts_direct_return_call_callee() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                line: 2,
+            }),
+            SyntaxStatement::Call(CallStatement {
+                callee: String::from("helper"),
+                arg_count: 1,
+                arg_values: direct_expr_metadata_vec_from_type_texts(vec![String::from("str")]),
+                starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                keyword_names: Vec::new(),
+                keyword_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                keyword_expansion_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 line: 2,
             }),
         ]

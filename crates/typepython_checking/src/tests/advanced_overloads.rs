@@ -2757,3 +2757,53 @@ fn check_accepts_stub_only_overload_sets_in_pyi_modules() {
 
     assert!(result.diagnostics.is_empty());
 }
+
+#[test]
+fn check_selects_overload_for_direct_call_in_return_statement() {
+    let result = check_temp_typepython_source(concat!(
+        "overload def parse(value: int) -> int: ...\n",
+        "overload def parse(value: str) -> str: ...\n",
+        "def parse(value: int | str) -> int | str:\n",
+        "    return value\n\n",
+        "seed: int = parse(1)\n\n",
+        "def use() -> str:\n",
+        "    return parse(\"value\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_rejects_mismatched_overload_returned_direct_call() {
+    let result = check_temp_typepython_source(concat!(
+        "overload def parse(value: int) -> int: ...\n",
+        "overload def parse(value: str) -> str: ...\n",
+        "def parse(value: int | str) -> int | str:\n",
+        "    return value\n\n",
+        "def use() -> int:\n",
+        "    return parse(\"value\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(result.diagnostics.has_errors(), "{rendered}");
+    assert!(rendered.contains("returns `str` where `use` expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_validates_arguments_of_direct_call_in_return_statement() {
+    let result = check_temp_typepython_source(concat!(
+        "def takes(value: int) -> int:\n",
+        "    return value\n\n",
+        "def use() -> int:\n",
+        "    return takes(\"bad\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(result.diagnostics.has_errors(), "{rendered}");
+    assert!(
+        rendered.contains("call to `takes`")
+            && rendered.contains("passes `str` where parameter expects `int`"),
+        "{rendered}"
+    );
+}

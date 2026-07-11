@@ -1713,8 +1713,7 @@ pub(super) fn resolve_direct_callable_return_semantic_type_for_line_with_context
     let call = node
         .calls
         .iter()
-        .find(|call| call.callee == callee && call.line == line)
-        .or_else(|| node.calls.iter().find(|call| call.callee == callee))?;
+        .find(|call| call.callee == callee && call.line == line)?;
     let call_scope = context
         .load_direct_call_context_sites(node)
         .into_iter()

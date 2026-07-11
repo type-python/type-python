@@ -391,6 +391,10 @@ pub(in super::super) fn extract_supplemental_call_statement(
         Stmt::AnnAssign(assign) => {
             assign.value.as_deref().and_then(|value| extract_call_statement(source, value, line))
         }
+        Stmt::Return(return_stmt) => return_stmt
+            .value
+            .as_deref()
+            .and_then(|value| extract_call_statement(source, value, line)),
         _ => None,
     }
 }
