@@ -92,6 +92,31 @@ class QuickstartSmokeTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "CLI version mismatch"):
                 quickstart_smoke.assert_cli_version("/fake/typepython")
 
+    def test_assert_cli_version_accepts_pep440_normalized_prerelease(self) -> None:
+        result = mock.Mock(stdout="typepython 1.0.0-rc.1\n")
+        with (
+            mock.patch.object(
+                quickstart_smoke.importlib.metadata,
+                "version",
+                return_value="1.0.0rc1",
+            ),
+            mock.patch.object(quickstart_smoke.subprocess, "run", return_value=result),
+        ):
+            quickstart_smoke.assert_cli_version("/fake/typepython")
+
+    def test_assert_cli_version_rejects_unexpected_output_shape(self) -> None:
+        result = mock.Mock(stdout="version 1.0.0rc1\n")
+        with (
+            mock.patch.object(
+                quickstart_smoke.importlib.metadata,
+                "version",
+                return_value="1.0.0rc1",
+            ),
+            mock.patch.object(quickstart_smoke.subprocess, "run", return_value=result),
+        ):
+            with self.assertRaisesRegex(SystemExit, "CLI version mismatch"):
+                quickstart_smoke.assert_cli_version("/fake/typepython")
+
     def test_main_uses_resolved_entrypoint_for_full_smoke_flow(self) -> None:
         commands: list[tuple[list[str], pathlib.Path | None]] = []
         entrypoint = "/fake/typepython"

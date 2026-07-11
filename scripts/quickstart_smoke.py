@@ -4,6 +4,7 @@ import hashlib
 import importlib.metadata
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -87,10 +88,34 @@ def assert_cli_version(entrypoint: str) -> None:
         text=True,
     )
     actual = result.stdout.strip()
-    if actual != f"typepython {expected}":
+    prefix = "typepython "
+    actual_version = actual.removeprefix(prefix) if actual.startswith(prefix) else None
+    if actual_version is None or version_identity(actual_version) != version_identity(expected):
         raise SystemExit(
             f"installed wheel CLI version mismatch: expected typepython {expected}, got {actual}"
         )
+
+
+def version_identity(value: str) -> tuple[tuple[int, ...], str]:
+    match = re.fullmatch(r"v?(\d+(?:\.\d+)*)(.*)", value.strip(), flags=re.IGNORECASE)
+    if match is None:
+        return ((), value.strip().lower())
+    release = [int(part) for part in match.group(1).split(".")]
+    while len(release) > 1 and release[-1] == 0:
+        release.pop()
+    suffix = re.sub(r"[-_.]", "", match.group(2).lower())
+    for spelling, canonical in (
+        ("preview", "rc"),
+        ("alpha", "a"),
+        ("beta", "b"),
+        ("pre", "rc"),
+    ):
+        if suffix.startswith(spelling):
+            suffix = canonical + suffix[len(spelling) :]
+            break
+    if suffix.isdigit():
+        suffix = f"post{suffix}"
+    return (tuple(release), suffix)
 
 
 def main() -> None:
