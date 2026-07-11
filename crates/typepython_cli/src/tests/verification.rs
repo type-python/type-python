@@ -4464,6 +4464,48 @@ fn run_verify_api_diff_fails_on_public_surface_regression() {
 }
 
 #[test]
+fn run_verify_api_diff_allows_likely_compatible_surface_change() {
+    let project_dir =
+        temp_project_dir("run_verify_api_diff_allows_likely_compatible_surface_change");
+    let verify_result = {
+        let old_surface = project_dir.join("old");
+        fs::create_dir_all(old_surface.join("app")).expect("old surface should exist");
+        fs::write(
+            old_surface.join("app/__init__.pyi"),
+            "from typing import Any\ndef load() -> Any: ...\n",
+        )
+        .expect("old stub should be written");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("config should be written");
+        fs::create_dir_all(project_dir.join("src/app")).expect("source package should exist");
+        fs::write(
+            project_dir.join("src/app/__init__.tpy"),
+            "def load() -> str:\n    return \"ready\"\n",
+        )
+        .expect("source file should be written");
+
+        run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+            api_diff_old: Some(old_surface),
+            checkers: Vec::new(),
+            checker_preset: None,
+            checker_allowlist: None,
+            unsafe_runtime_imports: false,
+            publication_type_health: false,
+        })
+        .expect("verify should run")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(verify_result, ExitCode::SUCCESS);
+}
+
+#[test]
 fn publication_type_health_diagnostics_fail_for_untyped_packages() {
     let project_dir = temp_project_dir("publication_type_health_diagnostics_fail");
     let diagnostics = {

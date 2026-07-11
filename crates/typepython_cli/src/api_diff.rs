@@ -110,11 +110,7 @@ pub(crate) fn api_surface_diff_diagnostics(report: &ApiSurfaceDiffReport) -> Dia
     for change in report.removed.iter().chain(report.changed.iter()) {
         diagnostics.push(Diagnostic {
             code: String::from("TPY7001"),
-            severity: if change.classification == "likely type-compatible" {
-                Severity::Warning
-            } else {
-                Severity::Error
-            },
+            severity: api_surface_change_severity(change),
             message: format!(
                 "public API surface {}: {}.{} ({})",
                 change.classification, change.module, change.symbol, change.kind
@@ -127,7 +123,7 @@ pub(crate) fn api_surface_diff_diagnostics(report: &ApiSurfaceDiffReport) -> Dia
     for change in &report.added {
         diagnostics.push(Diagnostic {
             code: String::from("TPY7001"),
-            severity: Severity::Note,
+            severity: api_surface_change_severity(change),
             message: format!(
                 "public API surface added: {}.{} ({})",
                 change.module, change.symbol, change.kind
@@ -138,6 +134,14 @@ pub(crate) fn api_surface_diff_diagnostics(report: &ApiSurfaceDiffReport) -> Dia
         });
     }
     diagnostics
+}
+
+fn api_surface_change_severity(change: &ApiSurfaceChange) -> Severity {
+    match change.classification.as_str() {
+        "source-compatible" => Severity::Note,
+        "likely type-compatible" => Severity::Warning,
+        _ => Severity::Error,
+    }
 }
 
 pub(crate) fn diff_api_surfaces(old: &Path, new: &Path) -> Result<ApiSurfaceDiffReport> {

@@ -92,6 +92,12 @@ Diagnostic fields:
 Suggestion fields are `message`, `span`, `replacement`, and `applicability`
 (`machineApplicable` or `maybeIncorrect`).
 
+## API diff summary
+
+For `typepython api-diff`, `summary` contains `added`, `removed`, and `changed` arrays plus `semver_recommendation` (`major`, `minor`, or `patch`). Every change includes `module`, `symbol`, `kind`, optional old/new signatures, and one of these classification strings: `source-compatible`, `likely type-compatible`, `likely type-breaking`, `unknown risk`, or `runtime-breaking signal`.
+
+The matching `TPY7001` diagnostic is a note for `source-compatible`, a warning for `likely type-compatible`, and an error for every other classification. Consequently, notes and warnings do not make `api-diff` fail, while any error produces a non-zero exit status.
+
 ## Versioning Rules
 
 Schema version `1` allows additive fields. A future schema version is required

@@ -2,7 +2,7 @@
 
 This generated report maps every documented `TPYxxxx` diagnostic code to implementation files and Rust test files that mention the code. It is a traceability audit: `needs-test` means the code is emitted by implementation code but no Rust test currently names that diagnostic code directly.
 
-Tracked codes: 43 (43 covered, 0 need tests, 0 reserved).
+Tracked codes: 44 (44 covered, 0 need tests, 0 reserved).
 
 | Code | Severity | Status | Description | Implementation evidence | Test evidence |
 | ---- | -------- | ------ | ----------- | ----------------------- | ------------- |
@@ -42,10 +42,11 @@ Tracked codes: 43 (43 covered, 0 need tests, 0 reserved).
 | `TPY4028` | error | covered | Tainted source result reaches a sink without a sanitizer | `crates/typepython_checking/src/effects.rs` | `crates/typepython_checking/src/tests/semantic.rs`<br>`crates/typepython_checking/src/tests/semantic_taint.rs` |
 | `TPY4029` | error | covered | Implicit Core v1 parameter fallback to `dynamic` while `typing.no_implicit_dynamic` is enabled | `crates/typepython_checking/src/semantic.rs` | `crates/typepython_checking/src/tests/production_defaults.rs`<br>`crates/typepython_checking/src/tests/semantic.rs` |
 | `TPY4101` | warning/error | covered | Use of deprecated declaration | `crates/typepython_checking/src/calls/reporting.rs` | `crates/typepython_checking/src/tests/advanced.rs` |
-| `TPY7003` | error | covered | Framework adapter manifest is invalid | `crates/typepython_cli/src/adapter.rs` | `crates/typepython_cli/src/tests/adapter.rs` |
 | `TPY5001` | error | covered | Stub (`.pyi`) generation failure | `crates/typepython_cli/src/pipeline.rs`<br>`crates/typepython_emit/src/runtime.rs` | `crates/typepython_emit/src/tests.rs` |
 | `TPY5002` | error | covered | Best-effort emit was disabled by `no_emit_on_error = true` after semantic errors were reported | `crates/typepython_cli/src/pipeline.rs` | `crates/typepython_cli/src/tests/pipeline.rs` |
 | `TPY5003` | error | covered | Verify failure for emitted artifacts or unsupported runtime-validator annotations | `crates/typepython_cli/src/verification.rs`<br>`crates/typepython_emit/src/runtime.rs` | `crates/typepython_cli/src/tests/verification.rs`<br>`crates/typepython_emit/src/tests.rs` |
 | `TPY6001` | error | covered | Incremental snapshot is incompatible or corrupt | `crates/typepython_cli/src/migration.rs`<br>`crates/typepython_cli/src/verification.rs` | `crates/typepython_cli/src/tests/verification.rs` |
 | `TPY6002` | error | covered | LSP document protocol error (invalid request, malformed JSON-RPC) | `crates/typepython_cli/src/migration.rs`<br>`crates/typepython_lsp/src/analysis.rs`<br>`crates/typepython_lsp/src/requests/protocol.rs`<br>`crates/typepython_lsp/src/server.rs` | `crates/typepython_lsp/src/tests.rs` |
 | `TPY6003` | error | covered | LSP formatter backend startup or execution failure | `crates/typepython_lsp/src/analysis.rs`<br>`crates/typepython_lsp/src/formatting.rs` | `crates/typepython_lsp/src/tests.rs` |
+| `TPY7001` | note/warning/error | covered | Public typing API surface drift; severity follows the API-diff compatibility classification | `crates/typepython_cli/src/api_diff.rs` | `crates/typepython_cli/src/tests/api_diff.rs` |
+| `TPY7003` | error | covered | Framework adapter manifest is invalid | `crates/typepython_cli/src/adapter.rs` | `crates/typepython_cli/src/tests/adapter.rs` |

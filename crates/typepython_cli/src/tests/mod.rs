@@ -1,5 +1,5 @@
 pub(super) use super::adapter::run_adapter_validate;
-pub(super) use super::api_diff::{diff_api_surfaces, run_api_diff};
+pub(super) use super::api_diff::{api_surface_diff_diagnostics, diff_api_surfaces, run_api_diff};
 pub(super) use super::compat::{compat_checker_allowlist, expand_compat_profile, run_compat};
 pub(super) use super::discovery::{
     ExternalSupportRoot, bundled_stdlib_snapshot_identity_for_root,
@@ -58,7 +58,7 @@ pub(super) use std::{
 pub(super) use typepython_binding::bind;
 pub(super) use typepython_checking::check as check_graph;
 pub(super) use typepython_config::load;
-pub(super) use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
+pub(super) use typepython_diagnostics::{Diagnostic, DiagnosticReport, Severity, Span};
 pub(super) use typepython_emit::{EmitArtifact, write_runtime_outputs};
 pub(super) use typepython_graph::build as build_graph;
 pub(super) use typepython_incremental::IncrementalState;

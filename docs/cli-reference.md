@@ -400,9 +400,12 @@ typepython api-diff <old> <new> [OPTIONS]
 The report classifies:
 
 - removed public symbols as `likely type-breaking`
-- changed public signatures as `unknown risk`
+- callable changes that move an `Any` boundary according to parameter/return variance as `likely type-compatible` or `likely type-breaking`
+- other changed public signatures as `unknown risk`
 - added public symbols as `source-compatible`
 - removed `py.typed` metadata as a `runtime-breaking signal`
+
+`source-compatible` additions emit notes, `likely type-compatible` changes emit warnings, and all other removals or changes emit errors. The command exits successfully when the report contains only notes and warnings, and exits with failure when any error is present.
 
 Both text and JSON output include release-note snippets derived from the same changes, so maintainers can review copy-ready summaries such as removed symbols, changed signatures, added public APIs, and `py.typed` metadata regressions without reading raw stubs.
 

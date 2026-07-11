@@ -1802,3 +1802,71 @@ fn run_api_diff_fails_for_likely_breaking_changes() {
 
     assert_eq!(result, ExitCode::FAILURE);
 }
+
+#[test]
+fn api_diff_diagnostic_severity_matches_change_classification() {
+    let project_dir = temp_project_dir("api_diff_diagnostic_severity_matches_classification");
+    let diagnostics = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import Any\n",
+                "def removed() -> int: ...\n",
+                "def compatible() -> Any: ...\n",
+                "UNKNOWN: int\n",
+            ),
+        )
+        .expect("old surface should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "def compatible() -> str: ...\n",
+                "UNKNOWN: str\n",
+                "def added() -> int: ...\n",
+            ),
+        )
+        .expect("new surface should be written");
+        let report = diff_api_surfaces(&old_dir, &new_dir).expect("api diff should succeed");
+        api_surface_diff_diagnostics(&report)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(diagnostics.diagnostics.iter().all(|diagnostic| diagnostic.code == "TPY7001"));
+    let severity_for = |symbol: &str| {
+        diagnostics
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains(&format!("app.{symbol} ")))
+            .map(|diagnostic| diagnostic.severity)
+            .expect("symbol should have an API diff diagnostic")
+    };
+    assert_eq!(severity_for("removed"), Severity::Error);
+    assert_eq!(severity_for("compatible"), Severity::Warning);
+    assert_eq!(severity_for("UNKNOWN"), Severity::Error);
+    assert_eq!(severity_for("added"), Severity::Note);
+}
+
+#[test]
+fn run_api_diff_succeeds_for_likely_compatible_changes() {
+    let project_dir = temp_project_dir("run_api_diff_succeeds_for_compatible_changes");
+    let result = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(old_dir.join("app.pyi"), "from typing import Any\ndef load() -> Any: ...\n")
+            .expect("old surface should be written");
+        fs::write(new_dir.join("app.pyi"), "def load() -> str: ...\n")
+            .expect("new surface should be written");
+
+        run_api_diff(ApiDiffArgs { old: old_dir, new: new_dir, format: super::OutputFormat::Json })
+            .expect("api diff should run")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(result, ExitCode::SUCCESS);
+}

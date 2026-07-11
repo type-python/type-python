@@ -134,7 +134,6 @@ This is the largest category, covering all type checking rules.
 | `TPY4028` | error         | Tainted source result reaches a sink without a sanitizer                                                          |
 | `TPY4029` | error         | Implicit Core v1 parameter fallback to `dynamic` while `typing.no_implicit_dynamic` is enabled                    |
 | `TPY4101` | warning/error | Use of deprecated declaration                                                                                      |
-| `TPY7003` | error         | Framework adapter manifest is invalid                                                                             |
 
 #### TPY4001 -- Type mismatch
 
@@ -424,6 +423,17 @@ TPY5002  error  emit blocked by `emit.no_emit_on_error` for /path/to/project
 | `TPY6001` | error    | Incremental snapshot is incompatible or corrupt                   |
 | `TPY6002` | error    | LSP document protocol error (invalid request, malformed JSON-RPC) |
 | `TPY6003` | error    | LSP formatter backend startup or execution failure                |
+
+---
+
+### TPY7xxx -- API and Adapter Validation
+
+| Code      | Severity          | Description                                                                                   |
+| --------- | ----------------- | --------------------------------------------------------------------------------------------- |
+| `TPY7001` | note/warning/error | Public typing API surface drift; severity follows the API-diff compatibility classification |
+| `TPY7003` | error             | Framework adapter manifest is invalid                                                        |
+
+`TPY7001` is a note for source-compatible additions, a warning for likely type-compatible changes, and an error for removals, unknown-risk changes, likely type-breaking changes, or runtime-breaking metadata signals.
 
 ---
 
