@@ -901,6 +901,256 @@ fn check_propagates_generic_owner_arguments_into_method_returns() {
 }
 
 #[test]
+fn check_propagates_specialized_generic_base_arguments_into_inherited_members() {
+    let diagnostics = check_temp_typepython_source(concat!(
+        "class Base[T]:\n",
+        "    value: T\n",
+        "    def get(self) -> T:\n",
+        "        return self.value\n\n",
+        "    def put(self, value: T) -> None:\n",
+        "        self.value = value\n\n",
+        "class Child(Base[int]):\n",
+        "    pass\n\n",
+        "def read(child: Child) -> int:\n",
+        "    return child.value\n\n",
+        "def call(child: Child) -> int:\n",
+        "    return child.get()\n\n",
+        "def write(child: Child) -> None:\n",
+        "    child.value = 1\n",
+        "    child.put(1)\n",
+    ))
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+#[test]
+fn check_rejects_incompatible_inherited_members_from_specialized_generic_base() {
+    let diagnostics = check_temp_typepython_source(concat!(
+        "class Base[T]:\n",
+        "    value: T\n",
+        "    def get(self) -> T:\n",
+        "        return self.value\n\n",
+        "    def put(self, value: T) -> None:\n",
+        "        self.value = value\n\n",
+        "class Child(Base[int]):\n",
+        "    pass\n\n",
+        "def read(child: Child) -> str:\n",
+        "    return child.value\n\n",
+        "def call(child: Child) -> str:\n",
+        "    return child.get()\n\n",
+        "def write(child: Child) -> None:\n",
+        "    child.value = \"wrong\"\n",
+        "    child.put(\"wrong\")\n",
+    ))
+    .diagnostics;
+
+    let rendered = diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 4, "{rendered}");
+    assert!(rendered.contains("expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_propagates_specialized_generic_base_arguments_across_multiple_hops() {
+    let diagnostics = check_temp_typepython_source(concat!(
+        "class Base[T]:\n",
+        "    value: T\n",
+        "    def get(self) -> T:\n",
+        "        return self.value\n\n",
+        "    def put(self, value: T) -> None:\n",
+        "        self.value = value\n\n",
+        "class Middle[U](Base[list[U]]):\n",
+        "    pass\n\n",
+        "class Child(Middle[int]):\n",
+        "    pass\n\n",
+        "def read(child: Child) -> list[int]:\n",
+        "    return child.value\n\n",
+        "def call(child: Child) -> list[int]:\n",
+        "    return child.get()\n\n",
+        "def write(child: Child) -> None:\n",
+        "    child.value = [1]\n",
+        "    child.put([1])\n",
+    ))
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+#[test]
+fn check_rejects_incompatible_specialized_generic_base_members_across_multiple_hops() {
+    let diagnostics = check_temp_typepython_source(concat!(
+        "class Base[T]:\n",
+        "    value: T\n",
+        "    def get(self) -> T:\n",
+        "        return self.value\n\n",
+        "    def put(self, value: T) -> None:\n",
+        "        self.value = value\n\n",
+        "class Middle[U](Base[list[U]]):\n",
+        "    pass\n\n",
+        "class Child(Middle[int]):\n",
+        "    pass\n\n",
+        "def read(child: Child) -> list[str]:\n",
+        "    return child.value\n\n",
+        "def call(child: Child) -> list[str]:\n",
+        "    return child.get()\n\n",
+        "def write(child: Child) -> None:\n",
+        "    child.value = [\"wrong\"]\n",
+        "    child.put([\"wrong\"])\n",
+    ))
+    .diagnostics;
+
+    let rendered = diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 4, "{rendered}");
+    assert!(rendered.contains("expects `list[int]`"), "{rendered}");
+}
+
+#[test]
+fn resolved_inherited_member_retains_specialized_declaring_owner() {
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    let source_text = concat!(
+        "class Base[T]:\n",
+        "    value: T\n\n",
+        "class Middle[U](Base[list[U]]):\n",
+        "    pass\n\n",
+        "class Child(Middle[int]):\n",
+        "    pass\n",
+    );
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let graph = build(&[bind(&tree)]);
+    let node = &graph.nodes[0];
+    let child = node
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.kind == DeclarationKind::Class && declaration.name == "Child"
+        })
+        .expect("Child class should be present");
+    let member = crate::find_resolved_member_declaration(
+        &graph.nodes,
+        node,
+        child,
+        &crate::lower_type_text_or_name("Child"),
+        "value",
+        |declaration| declaration.kind == DeclarationKind::Value,
+    )
+    .expect("inherited value should resolve");
+
+    assert_eq!(member.declaring_node.module_key, "app");
+    assert_eq!(member.declaring_class.name, "Base");
+    assert_eq!(member.declaration.owner.as_ref().map(|owner| owner.name.as_str()), Some("Base"));
+    assert_eq!(crate::render_semantic_type(&member.declaring_type), "Base[list[int]]");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn check_propagates_specialized_generic_base_arguments_from_imported_declaration() {
+    let result = check_two_module_typepython_sources_with_checker_options(
+        concat!(
+            "class Base[T]:\n",
+            "    value: T\n",
+            "    def get(self) -> T:\n",
+            "        return self.value\n\n",
+            "    def put(self, value: T) -> None:\n",
+            "        self.value = value\n",
+        ),
+        concat!(
+            "from lib import Base\n\n",
+            "class Child(Base[int]):\n",
+            "    pass\n\n",
+            "def use(child: Child) -> int:\n",
+            "    child.value = 1\n",
+            "    child.put(1)\n",
+            "    return child.get()\n",
+        ),
+        crate::CheckerOptions::permissive_test_default(),
+    );
+
+    assert!(result.diagnostics.is_empty(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_propagates_specialized_generic_base_arguments_into_inherited_property() {
+    let diagnostics = check_temp_typepython_source(concat!(
+        "class Base[T]:\n",
+        "    @property\n",
+        "    def value(self) -> T:\n",
+        "        raise NotImplementedError\n\n",
+        "    @value.setter\n",
+        "    def value(self, new_value: T) -> None:\n",
+        "        pass\n\n",
+        "class Child(Base[int]):\n",
+        "    pass\n\n",
+        "def read(child: Child) -> int:\n",
+        "    return child.value\n\n",
+        "def write(child: Child) -> None:\n",
+        "    child.value = 1\n",
+    ))
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+#[test]
+fn check_rejects_incompatible_inherited_property_from_specialized_generic_base() {
+    let diagnostics = check_temp_typepython_source(concat!(
+        "class Base[T]:\n",
+        "    @property\n",
+        "    def value(self) -> T:\n",
+        "        raise NotImplementedError\n\n",
+        "    @value.setter\n",
+        "    def value(self, new_value: T) -> None:\n",
+        "        pass\n\n",
+        "class Child(Base[int]):\n",
+        "    pass\n\n",
+        "def read(child: Child) -> str:\n",
+        "    return child.value\n\n",
+        "def write(child: Child) -> None:\n",
+        "    child.value = \"wrong\"\n",
+    ))
+    .diagnostics;
+
+    let rendered = diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 2, "{rendered}");
+    assert!(rendered.contains("expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_reorders_generic_arguments_across_inherited_member_lookup() {
+    let diagnostics = check_temp_typepython_source(concat!(
+        "class Base[T]:\n",
+        "    value: T\n",
+        "    def get(self) -> T:\n",
+        "        return self.value\n\n",
+        "class Middle[A, B](Base[B]):\n",
+        "    pass\n\n",
+        "class Child(Middle[str, int]):\n",
+        "    pass\n\n",
+        "def read(child: Child) -> int:\n",
+        "    return child.value\n\n",
+        "def call(child: Child) -> int:\n",
+        "    return child.get()\n\n",
+        "def write(child: Child) -> None:\n",
+        "    child.value = \"wrong\"\n",
+    ))
+    .diagnostics;
+
+    let rendered = diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 1, "{rendered}");
+    assert!(rendered.contains("expects `int`"), "{rendered}");
+}
+
+#[test]
 fn resolve_method_call_candidate_instantiates_owner_generic_arguments() {
     let root = create_temp_typepython_root();
     let path = root.join("app.tpy");

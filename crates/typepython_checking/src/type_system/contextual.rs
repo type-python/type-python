@@ -994,15 +994,22 @@ pub(super) fn resolve_direct_member_callable_semantic_signature_with_context(
     let owner_type_name = semantic_nominal_owner_name(&owner_type)?;
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let method =
-        find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+    let resolved_method = find_resolved_member_declaration(
+        nodes,
+        class_node,
+        class_decl,
+        &owner_type,
+        member_name,
+        |declaration| {
             matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
-        })?;
+        },
+    )?;
+    let method = resolved_method.declaration;
 
     let (actual_params, actual_return) = if let Some(callable_type) =
         resolve_decorated_callable_semantic_type_for_declaration_with_context(
             context,
-            class_node,
+            resolved_method.declaring_node,
             nodes,
             method,
         )
@@ -1016,17 +1023,33 @@ pub(super) fn resolve_direct_member_callable_semantic_signature_with_context(
             return_type.clone(),
         )
     } else {
-        let actual_params = declaration_semantic_signature_params_with_self(method, &owner_type_name)
+        let actual_params = declaration_semantic_signature_params(method)
             .unwrap_or_default()
             .into_iter()
             .map(|param| rewrite_imported_typing_semantic_type(node, &param.annotation_or_dynamic()))
             .collect::<Vec<_>>();
         let actual_return = rewrite_imported_typing_semantic_type(
             node,
-            &declaration_signature_return_semantic_type_with_self(method, &owner_type_name)?,
+            &declaration_signature_return_semantic_type(method)?,
         );
         (actual_params, actual_return)
     };
+    let owner_substitutions = without_shadowed_generic_params(
+        owner_generic_substitutions(
+            &resolved_method.declaring_type,
+            resolved_method.declaring_class,
+        ),
+        method,
+    );
+    let actual_params = actual_params
+        .into_iter()
+        .map(|param| substitute_semantic_type_params(&param, &owner_substitutions))
+        .map(|param| substitute_self_semantic_type_with_type(&param, Some(&owner_type)))
+        .collect::<Vec<_>>();
+    let actual_return = substitute_self_semantic_type_with_type(
+        &substitute_semantic_type_params(&actual_return, &owner_substitutions),
+        Some(&owner_type),
+    );
     let bound_params = match method.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
         typepython_syntax::MethodKind::Static => actual_params,
         typepython_syntax::MethodKind::Property => return None,

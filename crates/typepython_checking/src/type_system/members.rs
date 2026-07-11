@@ -658,10 +658,11 @@ pub(super) fn resolve_member_semantic_type_on_owner_type_with_self_type(
     }
     let owner_type_name = semantic_nominal_owner_name(owner_type)?;
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let Some(member) = find_owned_readable_member_declaration(
+    let Some(member) = find_resolved_readable_member_declaration(
         nodes,
         class_node,
         class_decl,
+        owner_type,
         member_name,
     ) else {
         if !options.framework_adapters {
@@ -686,12 +687,11 @@ pub(super) fn resolve_member_semantic_type_on_owner_type_with_self_type(
     if is_enum_like_class(nodes, class_node, class_decl) {
         return Some(lower_type_text_or_name(&format!("Literal[{}.{}]", class_decl.name, member_name)));
     }
-    resolve_readable_member_semantic_type_with_self_type(
+    resolve_resolved_readable_member_semantic_type_with_self_type(
         node,
         nodes,
-        member,
-        owner_type,
-        self_type.or(Some(owner_type)),
+        &member,
+        self_type.unwrap_or(owner_type),
     )
 }
 
@@ -722,19 +722,23 @@ pub(super) fn resolve_method_return_semantic_type_on_owner_type_with_self_type(
     let owner_type_name = semantic_nominal_owner_name(owner_type)?;
     let self_type = self_type.unwrap_or(owner_type);
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let owner_substitutions = owner_generic_substitutions(owner_type, class_decl);
-    let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
+    let methods =
+        find_resolved_callable_declarations(nodes, class_node, class_decl, owner_type, method_name);
     let [method] = methods.as_slice() else {
         return None;
     };
-    if method.kind == DeclarationKind::Overload {
+    if method.declaration.kind == DeclarationKind::Overload {
         return None;
     }
+    let owner_substitutions = without_shadowed_generic_params(
+        owner_generic_substitutions(&method.declaring_type, method.declaring_class),
+        method.declaration,
+    );
     Some(rewrite_imported_typing_semantic_type(
         node,
         &substitute_self_semantic_type_with_type(
             &substitute_semantic_type_params(
-                &declaration_signature_return_semantic_type(method)?,
+                &declaration_signature_return_semantic_type(method.declaration)?,
                 &owner_substitutions,
             ),
             Some(self_type),
@@ -913,12 +917,15 @@ fn resolve_direct_method_return_on_owner_type(
     let owner_type_name = semantic_nominal_owner_name(owner_type)?;
     let self_type = receiver_type;
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let owner_substitutions = owner_generic_substitutions(owner_type, class_decl);
-    let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
+    let methods =
+        find_resolved_callable_declarations(nodes, class_node, class_decl, owner_type, method_name);
     if methods.is_empty() {
         return None;
     }
-    if methods.iter().any(|declaration| declaration.kind == DeclarationKind::Overload)
+    let declaring_type = &methods[0].declaring_type;
+    if methods
+        .iter()
+        .any(|method| method.declaration.kind == DeclarationKind::Overload)
     {
         let call = node.method_calls.iter().find(|call| {
             call.owner_name == owner_name
@@ -938,8 +945,13 @@ fn resolve_direct_method_return_on_owner_type(
         };
         let overloads = methods
             .iter()
-            .filter(|declaration| declaration.kind == DeclarationKind::Overload)
-            .map(|declaration| (*declaration, declaration_callable_semantics(declaration)))
+            .filter(|method| method.declaration.kind == DeclarationKind::Overload)
+            .map(|method| {
+                (
+                    method.declaration,
+                    declaration_callable_semantics(method.declaration),
+                )
+            })
             .collect::<Vec<_>>();
         match resolve_method_overload_selection(
             node,
@@ -948,7 +960,7 @@ fn resolve_direct_method_return_on_owner_type(
             current_owner_name,
             current_owner_type_name,
             receiver_type,
-            lookup_owner_type,
+            Some(declaring_type),
             &overloads,
             options,
         ) {
@@ -956,7 +968,7 @@ fn resolve_direct_method_return_on_owner_type(
             _ => None,
         }
     } else {
-        let method = *methods.first()?;
+        let method = methods.first()?;
         if let Some(call) = node.method_calls.iter().find(|call| {
             call.owner_name == owner_name
                 && call.method == method_name
@@ -976,13 +988,13 @@ fn resolve_direct_method_return_on_owner_type(
             if let Some(return_type) = resolve_method_call_candidate_detailed(
                 node,
                 nodes,
-                method,
+                method.declaration,
                 &call,
                 current_owner_name,
                 current_owner_type_name,
                 receiver_type,
-                lookup_owner_type,
-                declaration_callable_semantics(method).as_ref(),
+                Some(&method.declaring_type),
+                declaration_callable_semantics(method.declaration).as_ref(),
                 options,
             )
             .ok()
@@ -992,11 +1004,15 @@ fn resolve_direct_method_return_on_owner_type(
             }
         }
 
+        let owner_substitutions = without_shadowed_generic_params(
+            owner_generic_substitutions(&method.declaring_type, method.declaring_class),
+            method.declaration,
+        );
         Some(rewrite_imported_typing_semantic_type(
             node,
             &substitute_self_semantic_type_with_type(
                 &substitute_semantic_type_params(
-                    &declaration_signature_return_semantic_type(method)?,
+                    &declaration_signature_return_semantic_type(method.declaration)?,
                     &owner_substitutions,
                 ),
                 Some(self_type),

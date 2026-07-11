@@ -504,8 +504,14 @@ fn direct_method_call_variant_diagnostics(
     let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &owner_type_name) else {
         return diagnostics;
     };
-    let candidates = find_owned_callable_declarations(nodes, class_node, class_decl, &call.method);
-    let Some(target) = candidates.first().copied() else {
+    let candidates = find_resolved_callable_declarations(
+        nodes,
+        class_node,
+        class_decl,
+        owner_type,
+        &call.method,
+    );
+    let Some(target) = candidates.first() else {
         let before_line = instance_initializer_access_cutoff(
             &call.owner_name,
             call.current_owner_name.as_deref(),
@@ -513,26 +519,30 @@ fn direct_method_call_variant_diagnostics(
             class_decl,
             call.line,
         );
-        let member_type =
-            find_owned_readable_member_declaration(nodes, class_node, class_decl, &call.method)
-                .and_then(|member| {
-                    resolve_readable_member_semantic_type_with_self_type(
-                        node,
-                        nodes,
-                        member,
-                        owner_type,
-                        Some(receiver_type),
-                    )
-                })
-                .or_else(|| {
-                    owned_instance_assignment_member_semantic_type_with_context(
-                        context,
-                        class_node,
-                        class_decl,
-                        &call.method,
-                        before_line,
-                    )
-                });
+        let member_type = find_resolved_readable_member_declaration(
+            nodes,
+            class_node,
+            class_decl,
+            owner_type,
+            &call.method,
+        )
+        .and_then(|member| {
+            resolve_resolved_readable_member_semantic_type_with_self_type(
+                node,
+                nodes,
+                &member,
+                receiver_type,
+            )
+        })
+        .or_else(|| {
+            owned_instance_assignment_member_semantic_type_with_context(
+                context,
+                class_node,
+                class_decl,
+                &call.method,
+                before_line,
+            )
+        });
         if let Some(member_type) = member_type
             && !semantic_type_may_be_callable(context, class_node, &member_type)
         {
@@ -571,9 +581,12 @@ fn direct_method_call_variant_diagnostics(
 
     let overloads = candidates
         .iter()
-        .filter(|declaration| declaration.kind == DeclarationKind::Overload)
-        .map(|declaration| {
-            (*declaration, context.load_declaration_semantics(declaration).callable)
+        .filter(|member| member.declaration.kind == DeclarationKind::Overload)
+        .map(|member| {
+            (
+                member.declaration,
+                context.load_declaration_semantics(member.declaration).callable,
+            )
         })
         .collect::<Vec<_>>();
     if !overloads.is_empty() {
@@ -584,7 +597,7 @@ fn direct_method_call_variant_diagnostics(
             call.current_owner_name.as_deref(),
             call.current_owner_type_name.as_deref(),
             receiver_type,
-            bound_owner_type,
+            Some(&target.declaring_type),
             &overloads,
             context.assignability_options(),
         ) {
@@ -653,16 +666,16 @@ fn direct_method_call_variant_diagnostics(
         }
     }
 
-    let target_callable = context.load_declaration_semantics(target).callable;
+    let target_callable = context.load_declaration_semantics(target.declaration).callable;
     match resolve_method_call_candidate_detailed(
         node,
         nodes,
-        target,
+        target.declaration,
         &direct_call,
         call.current_owner_name.as_deref(),
         call.current_owner_type_name.as_deref(),
         receiver_type,
-        bound_owner_type,
+        Some(&target.declaring_type),
         target_callable.as_ref(),
         context.assignability_options(),
     ) {
@@ -702,7 +715,7 @@ fn direct_method_call_variant_diagnostics(
             ));
             return diagnostics;
         }
-        Err(failure) if declaration_has_runtime_generic_paramlist(target) => {
+        Err(failure) if declaration_has_runtime_generic_paramlist(target.declaration) => {
             let callee = format!("{}.{}", class_decl.name, call.method);
             diagnostics.push(unresolved_generic_call_diagnostic(
                 node,
@@ -719,10 +732,11 @@ fn direct_method_call_variant_diagnostics(
         .as_ref()
         .map(|callable| {
             let owner_substitutions = without_shadowed_generic_params(
-                owner_generic_substitutions(owner_type, class_decl),
-                target,
+                owner_generic_substitutions(&target.declaring_type, target.declaring_class),
+                target.declaration,
             );
-            let params = method_semantic_params_without_self_from_semantics(target, callable);
+            let params =
+                method_semantic_params_without_self_from_semantics(target.declaration, callable);
             let params = substitute_semantic_callable_params(&params, &owner_substitutions);
             let params = substitute_self_semantic_params_with_type(&params, Some(receiver_type));
             signature_sites_from_semantic_params(&params)

@@ -966,44 +966,85 @@ pub(super) fn find_member_declaration<'a>(
     member_name: &str,
     predicate: impl Fn(&Declaration) -> bool + Copy,
 ) -> Option<&'a Declaration> {
-    let mut visited = BTreeSet::new();
-    find_member_declaration_with_visited(
+    let owner_type = SemanticType::Name(class_decl.name.clone());
+    find_resolved_member_declaration(
         nodes,
         class_node,
         class_decl,
+        &owner_type,
+        member_name,
+        predicate,
+    )
+    .map(|member| member.declaration)
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ResolvedMemberDeclaration<'a> {
+    pub(super) declaration: &'a Declaration,
+    pub(super) declaring_node: &'a typepython_graph::ModuleNode,
+    pub(super) declaring_class: &'a Declaration,
+    pub(super) declaring_type: SemanticType,
+}
+
+pub(super) fn find_resolved_member_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    owner_type: &SemanticType,
+    member_name: &str,
+    predicate: impl Fn(&Declaration) -> bool + Copy,
+) -> Option<ResolvedMemberDeclaration<'a>> {
+    let mut visited = BTreeSet::new();
+    find_resolved_member_declaration_with_visited(
+        nodes,
+        class_node,
+        class_decl,
+        owner_type,
         member_name,
         predicate,
         &mut visited,
     )
 }
 
-pub(super) fn find_member_declaration_with_visited<'a>(
+fn find_resolved_member_declaration_with_visited<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
     class_node: &'a typepython_graph::ModuleNode,
     class_decl: &'a Declaration,
+    owner_type: &SemanticType,
     member_name: &str,
     predicate: impl Fn(&Declaration) -> bool + Copy,
     visited: &mut BTreeSet<(String, String)>,
-) -> Option<&'a Declaration> {
+) -> Option<ResolvedMemberDeclaration<'a>> {
     let key = (class_node.module_key.clone(), class_decl.name.clone());
     if !visited.insert(key) {
         return None;
     }
+
+    let declaring_type = specialized_class_type(owner_type, class_decl);
 
     if let Some(member) = class_node.declarations.iter().find(|declaration| {
         declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
             && declaration.name == member_name
             && predicate(declaration)
     }) {
-        return Some(member);
+        return Some(ResolvedMemberDeclaration {
+            declaration: member,
+            declaring_node: class_node,
+            declaring_class: class_decl,
+            declaring_type,
+        });
     }
 
     for base in class_decl.rendered_class_bases() {
-        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base)
-            && let Some(member) = find_member_declaration_with_visited(
+        let base_type = specialized_class_base_type(class_decl, &declaring_type, &base);
+        if let Some(base_name) = semantic_nominal_owner_name(&base_type)
+            && let Some((base_node, base_decl)) =
+                resolve_direct_base(nodes, class_node, &base_name)
+            && let Some(member) = find_resolved_member_declaration_with_visited(
                 nodes,
                 base_node,
                 base_decl,
+                &base_type,
                 member_name,
                 predicate,
                 visited,
@@ -1013,6 +1054,28 @@ pub(super) fn find_member_declaration_with_visited<'a>(
     }
 
     None
+}
+
+pub(super) fn specialized_class_type(
+    owner_type: &SemanticType,
+    class_decl: &Declaration,
+) -> SemanticType {
+    match owner_type.strip_annotated() {
+        SemanticType::Generic { args, .. } => SemanticType::Generic {
+            head: class_decl.name.clone(),
+            args: args.clone(),
+        },
+        _ => SemanticType::Name(class_decl.name.clone()),
+    }
+}
+
+pub(super) fn specialized_class_base_type(
+    class_decl: &Declaration,
+    declaring_type: &SemanticType,
+    rendered_base: &str,
+) -> SemanticType {
+    let substitutions = owner_generic_substitutions(declaring_type, class_decl);
+    substitute_semantic_type_params(&lower_type_text_or_name(rendered_base), &substitutions)
 }
 
 pub(super) fn find_owned_value_declaration<'a>(
@@ -1037,6 +1100,27 @@ pub(super) fn find_owned_readable_member_declaration<'a>(
             || (declaration.kind == DeclarationKind::Function
                 && declaration.method_kind == Some(typepython_syntax::MethodKind::Property))
     })
+}
+
+pub(super) fn find_resolved_readable_member_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    owner_type: &SemanticType,
+    member_name: &str,
+) -> Option<ResolvedMemberDeclaration<'a>> {
+    find_resolved_member_declaration(
+        nodes,
+        class_node,
+        class_decl,
+        owner_type,
+        member_name,
+        |declaration| {
+            declaration.kind == DeclarationKind::Value
+                || (declaration.kind == DeclarationKind::Function
+                    && declaration.method_kind == Some(typepython_syntax::MethodKind::Property))
+        },
+    )
 }
 
 pub(super) fn has_owned_instance_assignment_member_with_context(
@@ -1212,17 +1296,31 @@ pub(super) fn framework_generated_member_semantic_type_with_context(
     }
 }
 
-pub(super) fn resolve_readable_member_semantic_type_with_self_type(
+pub(super) fn resolve_resolved_readable_member_semantic_type_with_self_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    member: &ResolvedMemberDeclaration<'_>,
+    self_type: &SemanticType,
+) -> Option<SemanticType> {
+    resolve_readable_member_semantic_type_for_declaring_type(
+        node,
+        nodes,
+        member.declaration,
+        member.declaring_class,
+        &member.declaring_type,
+        self_type,
+    )
+}
+
+fn resolve_readable_member_semantic_type_for_declaring_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     declaration: &Declaration,
-    owner_type: &SemanticType,
-    self_type: Option<&SemanticType>,
+    declaring_class: &Declaration,
+    declaring_type: &SemanticType,
+    self_type: &SemanticType,
 ) -> Option<SemanticType> {
-    let owner_type_name = semantic_nominal_owner_name(owner_type)?;
-    let self_type = self_type.unwrap_or(owner_type);
-    let (_, owner_class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let owner_substitutions = owner_generic_substitutions(owner_type, owner_class_decl);
+    let owner_substitutions = owner_generic_substitutions(declaring_type, declaring_class);
     match declaration.kind {
         DeclarationKind::Value => {
             if let Some(descriptor_return) =
@@ -1342,27 +1440,51 @@ pub(super) fn find_owned_callable_declarations<'a>(
     class_decl: &'a Declaration,
     member_name: &str,
 ) -> Vec<&'a Declaration> {
-    let mut visited = BTreeSet::new();
-    find_owned_callable_declarations_with_visited(
+    let owner_type = SemanticType::Name(class_decl.name.clone());
+    find_resolved_callable_declarations(
         nodes,
         class_node,
         class_decl,
+        &owner_type,
+        member_name,
+    )
+    .into_iter()
+    .map(|member| member.declaration)
+    .collect()
+}
+
+pub(super) fn find_resolved_callable_declarations<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    owner_type: &SemanticType,
+    member_name: &str,
+) -> Vec<ResolvedMemberDeclaration<'a>> {
+    let mut visited = BTreeSet::new();
+    find_resolved_callable_declarations_with_visited(
+        nodes,
+        class_node,
+        class_decl,
+        owner_type,
         member_name,
         &mut visited,
     )
 }
 
-pub(super) fn find_owned_callable_declarations_with_visited<'a>(
+fn find_resolved_callable_declarations_with_visited<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
     class_node: &'a typepython_graph::ModuleNode,
     class_decl: &'a Declaration,
+    owner_type: &SemanticType,
     member_name: &str,
     visited: &mut BTreeSet<(String, String)>,
-) -> Vec<&'a Declaration> {
+) -> Vec<ResolvedMemberDeclaration<'a>> {
     let key = (class_node.module_key.clone(), class_decl.name.clone());
     if !visited.insert(key) {
         return Vec::new();
     }
+
+    let declaring_type = specialized_class_type(owner_type, class_decl);
 
     let local = class_node
         .declarations
@@ -1374,15 +1496,28 @@ pub(super) fn find_owned_callable_declarations_with_visited<'a>(
         })
         .collect::<Vec<_>>();
     if !local.is_empty() {
-        return local;
+        return local
+            .into_iter()
+            .map(|declaration| ResolvedMemberDeclaration {
+                declaration,
+                declaring_node: class_node,
+                declaring_class: class_decl,
+                declaring_type: declaring_type.clone(),
+            })
+            .collect();
     }
 
     for base in class_decl.rendered_class_bases() {
-        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base) {
-            let inherited = find_owned_callable_declarations_with_visited(
+        let base_type = specialized_class_base_type(class_decl, &declaring_type, &base);
+        if let Some(base_name) = semantic_nominal_owner_name(&base_type)
+            && let Some((base_node, base_decl)) =
+                resolve_direct_base(nodes, class_node, &base_name)
+        {
+            let inherited = find_resolved_callable_declarations_with_visited(
                 nodes,
                 base_node,
                 base_decl,
+                &base_type,
                 member_name,
                 visited,
             );

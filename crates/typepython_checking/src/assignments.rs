@@ -1985,8 +1985,8 @@ pub(super) fn frozen_plain_dataclass_mutation_diagnostics(
 }
 
 pub(super) enum WritableAttributeTarget<'a> {
-    Value(&'a Declaration),
-    PropertySetter(&'a Declaration),
+    Value(ResolvedMemberDeclaration<'a>),
+    PropertySetter(ResolvedMemberDeclaration<'a>),
     ReadOnlyProperty,
     NonWritable,
 }
@@ -1995,6 +1995,7 @@ pub(super) fn find_owned_writable_member_target<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
     class_node: &'a typepython_graph::ModuleNode,
     class_decl: &'a Declaration,
+    owner_type: &SemanticType,
     member_name: &str,
 ) -> Option<WritableAttributeTarget<'a>> {
     let mut visited = BTreeSet::new();
@@ -2002,6 +2003,7 @@ pub(super) fn find_owned_writable_member_target<'a>(
         nodes,
         class_node,
         class_decl,
+        owner_type,
         member_name,
         &mut visited,
     )
@@ -2012,6 +2014,7 @@ fn find_owned_writable_member_target_with_visited<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
     class_node: &'a typepython_graph::ModuleNode,
     class_decl: &'a Declaration,
+    owner_type: &SemanticType,
     member_name: &str,
     visited: &mut BTreeSet<(String, String)>,
 ) -> Option<WritableAttributeTarget<'a>> {
@@ -2019,6 +2022,8 @@ fn find_owned_writable_member_target_with_visited<'a>(
     if !visited.insert(key) {
         return None;
     }
+
+    let declaring_type = specialized_class_type(owner_type, class_decl);
 
     let local = class_node
         .declarations
@@ -2034,14 +2039,24 @@ fn find_owned_writable_member_target_with_visited<'a>(
         .copied()
         .find(|declaration| declaration.kind == DeclarationKind::Value && !declaration.is_class_var)
     {
-        return Some(WritableAttributeTarget::Value(declaration));
+        return Some(WritableAttributeTarget::Value(ResolvedMemberDeclaration {
+            declaration,
+            declaring_node: class_node,
+            declaring_class: class_decl,
+            declaring_type,
+        }));
     }
 
     if let Some(setter) = local.iter().copied().find(|declaration| {
         declaration.kind == DeclarationKind::Function
             && declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter)
     }) {
-        return Some(WritableAttributeTarget::PropertySetter(setter));
+        return Some(WritableAttributeTarget::PropertySetter(ResolvedMemberDeclaration {
+            declaration: setter,
+            declaring_node: class_node,
+            declaring_class: class_decl,
+            declaring_type,
+        }));
     }
     if local.iter().any(|declaration| {
         declaration.kind == DeclarationKind::Function
@@ -2055,11 +2070,14 @@ fn find_owned_writable_member_target_with_visited<'a>(
     }
 
     for base in class_decl.rendered_class_bases() {
-        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base)
+        let base_type = specialized_class_base_type(class_decl, &declaring_type, &base);
+        if let Some(base_name) = semantic_nominal_owner_name(&base_type)
+            && let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base_name)
             && let Some(target) = find_owned_writable_member_target_with_visited(
                 nodes,
                 base_node,
                 base_decl,
+                &base_type,
                 member_name,
                 visited,
             )
@@ -2074,28 +2092,22 @@ fn find_owned_writable_member_target_with_visited<'a>(
 pub(super) fn resolve_writable_member_semantic_type_with_self_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    declaration: &Declaration,
-    owner_type: &SemanticType,
-    self_type: Option<&SemanticType>,
+    member: &ResolvedMemberDeclaration<'_>,
+    self_type: &SemanticType,
 ) -> Option<SemanticType> {
+    let declaration = member.declaration;
     match declaration.kind {
-        DeclarationKind::Value => resolve_readable_member_semantic_type_with_self_type(
-            node,
-            nodes,
-            declaration,
-            owner_type,
-            self_type,
+        DeclarationKind::Value => resolve_resolved_readable_member_semantic_type_with_self_type(
+            node, nodes, member, self_type,
         ),
         DeclarationKind::Function
             if declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter) =>
         {
-            let owner_type_name = semantic_nominal_owner_name(owner_type)?;
-            let (_, owner_class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-            let owner_substitutions = owner_generic_substitutions(owner_type, owner_class_decl);
+            let owner_substitutions =
+                owner_generic_substitutions(&member.declaring_type, member.declaring_class);
             let callable = declaration_callable_semantics(declaration)?;
             let params = method_semantic_params_without_self_from_semantics(declaration, &callable);
             let params = substitute_semantic_callable_params(&params, &owner_substitutions);
-            let self_type = self_type.unwrap_or(owner_type);
             let params = substitute_self_semantic_params_with_type(&params, Some(self_type));
             (params.len() == 1).then(|| {
                 rewrite_imported_typing_semantic_type(node, &params[0].annotation_or_dynamic())
@@ -2241,9 +2253,15 @@ fn attribute_assignment_variant_diagnostic(
     let target_type_rendered = diagnostic_type_text(target_type);
     let target_type_name = semantic_nominal_owner_name(target_type)?;
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &target_type_name)?;
-    match find_owned_writable_member_target(nodes, class_node, class_decl, &site.field_name) {
-        Some(WritableAttributeTarget::Value(declaration)) => {
-            if declaration.is_final {
+    match find_owned_writable_member_target(
+        nodes,
+        class_node,
+        class_decl,
+        target_type,
+        &site.field_name,
+    ) {
+        Some(WritableAttributeTarget::Value(member)) => {
+            if member.declaration.is_final {
                 return Some(final_attribute_reassignment_diagnostic(
                     &node.module_path,
                     &target_type_rendered,
@@ -2253,9 +2271,8 @@ fn attribute_assignment_variant_diagnostic(
             let expected = resolve_writable_member_semantic_type_with_self_type(
                 node,
                 nodes,
-                declaration,
-                target_type,
-                bound_target_type.map(|_| receiver_type),
+                &member,
+                bound_target_type.map_or(target_type, |_| receiver_type),
             )?;
             let value = site.value.as_ref()?;
             match site.kind {
@@ -2365,13 +2382,12 @@ fn attribute_assignment_variant_diagnostic(
                 typepython_syntax::FrozenFieldMutationKind::Delete => None,
             }
         }
-        Some(WritableAttributeTarget::PropertySetter(declaration)) => {
+        Some(WritableAttributeTarget::PropertySetter(member)) => {
             let expected = resolve_writable_member_semantic_type_with_self_type(
                 node,
                 nodes,
-                declaration,
-                target_type,
-                bound_target_type.map(|_| receiver_type),
+                &member,
+                bound_target_type.map_or(target_type, |_| receiver_type),
             )?;
             let value = site.value.as_ref()?;
             match site.kind {
@@ -2445,10 +2461,11 @@ fn attribute_assignment_variant_diagnostic(
                             })
                 }
                 typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => {
-                    let Some(readable) = find_owned_readable_member_declaration(
+                    let Some(readable) = find_resolved_readable_member_declaration(
                         nodes,
                         class_node,
                         class_decl,
+                        target_type,
                         &site.field_name,
                     ) else {
                         return Some(
@@ -2470,13 +2487,13 @@ fn attribute_assignment_variant_diagnostic(
                                     )),
                                 );
                     };
-                    let readable_type = resolve_readable_member_semantic_type_with_self_type(
-                        node,
-                        nodes,
-                        readable,
-                        target_type,
-                        bound_target_type.map(|_| receiver_type),
-                    )?;
+                    let readable_type =
+                        resolve_resolved_readable_member_semantic_type_with_self_type(
+                            node,
+                            nodes,
+                            &readable,
+                            bound_target_type.map_or(target_type, |_| receiver_type),
+                        )?;
                     let actual = resolve_augmented_assignment_result_semantic_type(
                         context,
                         node,
