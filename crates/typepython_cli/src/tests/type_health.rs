@@ -160,6 +160,166 @@ fn type_health_does_not_treat_stub_metadata_as_runtime_metadata() {
 }
 
 #[test]
+fn type_health_ast_counts_only_public_stub_scopes() {
+    let package = type_health_for_stub(
+        "type_health_ast_counts_only_public_stub_scopes",
+        r#"from typing import (
+    Any as Dynamic,
+    NamedTuple,
+    ParamSpec,
+    TYPE_CHECKING,
+    TypeAlias,
+    TypeVar,
+    TypedDict,
+)
+import typing as t
+import typing_extensions as te
+import models
+from models import DEFAULT, User as ImportedUser
+from typing_extensions import (
+    Any as ExtensionAny,
+    ExperimentalFeature as ExperimentalAlias,
+)
+
+__all__ = ["_explicit_private"]
+visible_not_in_all: Dynamic
+_explicit_private: Dynamic
+public_value: (
+    Dynamic
+)
+qualified_value: te.Any | None
+public_default = ...
+_private_default = ...
+Alias = list[int]
+LegacyAlias = t.List[int]
+Alias2: TypeAlias = dict[str, int]
+T = TypeVar("T")
+P = ParamSpec("P")
+Ts = te.TypeVarTuple("Ts")
+Point = NamedTuple("Point", [("x", int)])
+Payload = TypedDict("Payload", {"id": int})
+AliasType = te.TypeAliasType("AliasType", int)
+AliasBeforeUser = User
+ImportedAlias = ImportedUser
+QualifiedImportedAlias = models.User
+imported_value = DEFAULT
+typing_runtime_value = TYPE_CHECKING
+
+def multiline(
+    value: int,
+) -> (
+    t.Any
+): ...
+
+async def load() -> ExtensionAny: ...
+def _private_function() -> Dynamic: ...
+
+def outer() -> int:
+    local: Dynamic
+    local_default = ...
+    def nested() -> Dynamic: ...
+    class Local:
+        field: Dynamic
+        raw = ...
+    ...
+
+class Public:
+    field: Dynamic
+    raw = ...
+    Alias = dict[str, int]
+    T = TypeVar("T")
+
+    def method(self) -> t.Any: ...
+    def _private_method(self) -> Dynamic: ...
+
+    def container(self) -> int:
+        local: Dynamic
+        def nested() -> Dynamic: ...
+        ...
+
+    class Nested:
+        field: ExtensionAny
+        raw = ...
+
+    class _PrivateNested:
+        field: Dynamic
+        raw = ...
+        def method(self) -> Dynamic: ...
+
+class _Private:
+    field: Dynamic
+    raw = ...
+    def method(self) -> Dynamic: ...
+
+class User: ...
+"#,
+    );
+
+    assert_eq!(package.public_any_returns, 3);
+    assert_eq!(package.public_any_attributes, 5);
+    assert_eq!(package.public_untyped_attributes, 7);
+    assert_eq!(package.overload_any_fallbacks, 0);
+    assert_eq!(package.unsupported_typing_extensions_imports, 1);
+    assert_eq!(package.precision_debt, 16);
+}
+
+#[test]
+fn type_health_ast_groups_overload_fallbacks_by_name_and_scope() {
+    let package = type_health_for_stub(
+        "type_health_ast_groups_overload_fallbacks",
+        r#"from typing import Any, overload as ov
+import typing as t
+from typing_extensions import overload as extension_overload
+
+@ov
+def many(value: int) -> Any: ...
+unrelated: int
+@ov
+def many(value: str) -> Any: ...
+
+@t.overload
+def last_wide(value: int) -> int: ...
+other = ...
+@t.overload
+def last_wide(value: object) -> Any: ...
+
+@extension_overload
+def implemented(value: int) -> int: ...
+@extension_overload
+def implemented(value: str) -> str: ...
+def implemented(value: object) -> Any: ...
+
+@ov
+def safe_implementation(value: int) -> Any: ...
+def safe_implementation(value: object) -> object: ...
+
+@ov
+def shared(value: int) -> int: ...
+@ov
+def shared(value: object) -> Any: ...
+
+class Box:
+    @ov
+    def shared(self, value: int) -> Any: ...
+    @ov
+    def shared(self, value: object) -> str: ...
+
+class Other:
+    @ov
+    def shared(self, value: int) -> str: ...
+    @ov
+    def shared(self, value: object) -> Any: ...
+"#,
+    );
+
+    assert_eq!(package.public_any_returns, 8);
+    assert_eq!(package.overload_any_fallbacks, 5);
+    assert_eq!(package.public_any_attributes, 0);
+    assert_eq!(package.public_untyped_attributes, 1);
+    assert_eq!(package.precision_debt, 14);
+}
+
+#[test]
 fn run_type_health_writes_lock_and_enforces_threshold() {
     let project_dir = temp_project_dir("run_type_health_writes_lock_and_enforces_threshold");
     let (success, failure, lock) = {
@@ -216,4 +376,26 @@ fn run_type_health_writes_lock_and_enforces_threshold() {
     assert!(lock.contains("public_untyped_attributes = 0"));
     assert!(lock.contains("unsupported_typing_extensions_imports = 0"));
     assert!(lock.contains("precision_debt = 0"));
+}
+
+fn type_health_for_stub(test_name: &str, source: &str) -> crate::type_health::TypePackageHealth {
+    let project_dir = temp_project_dir(test_name);
+    let package = {
+        fs::create_dir_all(project_dir.join("site/demo-stubs/demo"))
+            .expect("stub package should exist");
+        fs::write(project_dir.join("site/demo-stubs/demo/__init__.pyi"), source)
+            .expect("stub should be written");
+        build_type_health_report_for_target(
+            &project_dir,
+            &[String::from("site")],
+            typepython_target::PythonTarget::default(),
+        )
+        .expect("type-health report should build")
+        .packages
+        .into_iter()
+        .find(|candidate| candidate.name == "demo" && candidate.is_stub_only)
+        .expect("stub package should be reported")
+    };
+    remove_temp_project_dir(&project_dir);
+    package
 }
