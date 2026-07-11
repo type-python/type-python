@@ -5,6 +5,7 @@ import builtins
 import functools
 import inspect
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from types import ModuleType
@@ -257,11 +258,11 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         self._visit_scope("module", node.body)
 
     def visit_If(self, node: ast.If) -> None:
-        if self._canonical_name(node.test) in {
-            "typing.TYPE_CHECKING",
-            "typing_extensions.TYPE_CHECKING",
-        }:
-            for statement in node.orelse:
+        runtime_truth = _runtime_type_checking_truth(node.test, self._canonical_name)
+        if runtime_truth is not None:
+            self._visit_runtime_boolean_test(node.test)
+            runtime_branch = node.body if runtime_truth else node.orelse
+            for statement in runtime_branch:
                 self.visit(statement)
             return
         self.visit(node.test)
@@ -274,6 +275,24 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
             self.visit(statement)
         else_state = self._current_scope_state()
         self._merge_current_scope_states(body_state, else_state)
+
+    def _visit_runtime_boolean_test(self, expression: ast.expr) -> None:
+        if isinstance(expression, ast.UnaryOp) and isinstance(expression.op, ast.Not):
+            self._visit_runtime_boolean_test(expression.operand)
+            return
+        if isinstance(expression, ast.BoolOp):
+            for value in expression.values:
+                value_truth = _runtime_type_checking_truth(value, self._canonical_name)
+                if value_truth is None:
+                    self.visit(value)
+                else:
+                    self._visit_runtime_boolean_test(value)
+                if isinstance(expression.op, ast.And) and value_truth is False:
+                    break
+                if isinstance(expression.op, ast.Or) and value_truth is True:
+                    break
+            return
+        self.visit(expression)
 
     def visit_For(self, node: ast.For) -> None:
         self._visit_loop(node)
@@ -948,6 +967,36 @@ def _scope_names(
     )
 
 
+def _runtime_type_checking_truth(
+    expression: ast.expr,
+    canonical_name: Callable[[ast.expr], str | None],
+) -> bool | None:
+    if canonical_name(expression) in {
+        "typing.TYPE_CHECKING",
+        "typing_extensions.TYPE_CHECKING",
+    }:
+        return False
+    if isinstance(expression, ast.UnaryOp) and isinstance(expression.op, ast.Not):
+        value = _runtime_type_checking_truth(expression.operand, canonical_name)
+        return None if value is None else not value
+    if isinstance(expression, ast.BoolOp):
+        values = [
+            _runtime_type_checking_truth(value, canonical_name)
+            for value in expression.values
+        ]
+        if isinstance(expression.op, ast.And):
+            if False in values:
+                return False
+            if values and all(value is True for value in values):
+                return True
+        elif isinstance(expression.op, ast.Or):
+            if True in values:
+                return True
+            if values and all(value is False for value in values):
+                return False
+    return None
+
+
 class _ScopeNameCollector(ast.NodeVisitor):
     def __init__(
         self,
@@ -966,23 +1015,32 @@ class _ScopeNameCollector(ast.NodeVisitor):
             self._shadow_typing_binding(name)
 
     def visit_If(self, node: ast.If) -> None:
-        dotted = _dotted_name(node.test)
-        is_type_checking_guard = dotted in self.type_checking_guard_names
-        if dotted is not None and "." in dotted:
-            owner, name = dotted.rsplit(".", 1)
-            is_type_checking_guard = (
-                owner in self.type_checking_module_names and name == "TYPE_CHECKING"
-            )
-        if is_type_checking_guard:
+        runtime_truth = _runtime_type_checking_truth(
+            node.test,
+            self._canonical_type_checking_name,
+        )
+        if runtime_truth is not None:
             type_only = _TypeCheckingImportCollector()
-            for statement in node.body:
+            type_only_branch = node.orelse if runtime_truth else node.body
+            runtime_branch = node.body if runtime_truth else node.orelse
+            for statement in type_only_branch:
                 type_only.visit(statement)
             self.type_checking_only_names.update(type_only.names)
             self.has_type_checking_wildcard_import |= type_only.has_wildcard_import
-            for statement in node.orelse:
+            for statement in runtime_branch:
                 self.visit(statement)
             return
         self.generic_visit(node)
+
+    def _canonical_type_checking_name(self, expression: ast.expr) -> str | None:
+        dotted = _dotted_name(expression)
+        if dotted in self.type_checking_guard_names:
+            return "typing.TYPE_CHECKING"
+        if dotted is not None and "." in dotted:
+            owner, name = dotted.rsplit(".", 1)
+            if owner in self.type_checking_module_names and name == "TYPE_CHECKING":
+                return "typing.TYPE_CHECKING"
+        return None
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.runtime_names.add(node.name)

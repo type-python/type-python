@@ -452,6 +452,33 @@ class AnnotationCompatTests(unittest.TestCase):
         )
         self.assertFalse(any(finding.code == "TPY-A002" for finding in safe.findings))
 
+    def test_audit_source_resolves_compound_and_negated_type_checking_guards(self) -> None:
+        compound = annotation_compat.audit_source(
+            "import sys\n"
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING and sys.version_info >= (3, 12):\n"
+            "    from models import User\n\n"
+            "def load(user: 'User') -> None:\n"
+            "    return None\n"
+        )
+        negated = annotation_compat.audit_source(
+            "from typing import TYPE_CHECKING\n"
+            "if not TYPE_CHECKING:\n"
+            "    runtime_ready = True\n"
+            "else:\n"
+            "    from models import User\n\n"
+            "def load(user: 'User') -> None:\n"
+            "    return None\n"
+        )
+
+        for name, audit in (("compound", compound), ("negated", negated)):
+            with self.subTest(name=name):
+                findings = [
+                    finding for finding in audit.findings if finding.code == "TPY-A002"
+                ]
+                self.assertEqual(len(findings), 1, audit.findings)
+                self.assertIn("User", findings[0].message)
+
     def test_audit_source_flags_nested_string_forward_references(self) -> None:
         audit = annotation_compat.audit_source(
             "from typing import TYPE_CHECKING\n"
