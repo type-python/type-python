@@ -1643,8 +1643,11 @@ impl PythonSurfaceExtractor<'_> {
             );
             if self.import_is_exported(local_name, alias.asname.is_some()) {
                 let signature = match &alias.asname {
-                    Some(alias) => format!("import {source_name} as {}", alias.as_str()),
+                    Some(alias) if alias.as_str() != source_name => {
+                        format!("import {source_name} as {}", alias.as_str())
+                    }
                     None => format!("import {source_name}"),
+                    Some(_) => format!("import {source_name}"),
                 };
                 self.insert_value(local_name, "re-export", signature);
             }
@@ -1666,10 +1669,10 @@ impl PythonSurfaceExtractor<'_> {
                 alias.asname.as_ref().map_or(source_name, ruff_python_ast::Identifier::as_str);
             if self.import_is_exported(local_name, alias.asname.is_some()) {
                 let signature = match &alias.asname {
-                    Some(alias) => {
+                    Some(alias) if alias.as_str() != source_name => {
                         format!("from {module} import {source_name} as {}", alias.as_str())
                     }
-                    None => format!("from {module} import {source_name}"),
+                    None | Some(_) => format!("from {module} import {source_name}"),
                 };
                 self.insert_value(local_name, "re-export", signature);
             }

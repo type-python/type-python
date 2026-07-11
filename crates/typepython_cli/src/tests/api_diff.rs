@@ -1321,6 +1321,42 @@ fn diff_api_surfaces_tracks_stub_and_runtime_reexports() {
 }
 
 #[test]
+fn diff_api_surfaces_ignores_redundant_reexport_aliases() {
+    let project_dir = temp_project_dir("diff_api_surfaces_ignores_redundant_reexport_aliases");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(old_dir.join("runtime.py"), "from .core import Public\nimport helpers\n")
+            .expect("old runtime surface should be written");
+        fs::write(
+            new_dir.join("runtime.py"),
+            "from .core import Public as Public\nimport helpers as helpers\n",
+        )
+        .expect("new runtime surface should be written");
+        fs::write(
+            old_dir.join("stub.pyi"),
+            "__all__ = [\"Public\", \"helpers\"]\nfrom .core import Public\nimport helpers\n",
+        )
+        .expect("old stub surface should be written");
+        fs::write(
+            new_dir.join("stub.pyi"),
+            "__all__ = [\"Public\", \"helpers\"]\nfrom .core import Public as Public\nimport helpers as helpers\n",
+        )
+        .expect("new stub surface should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should normalize redundant aliases")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+    assert_eq!(report.semver_recommendation, "patch");
+}
+
+#[test]
 fn diff_api_surfaces_compares_typepython_class_members() {
     let project_dir = temp_project_dir("diff_api_surfaces_compares_typepython_class_members");
     let report = {
