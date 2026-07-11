@@ -82,6 +82,107 @@ fn build_type_health_report_detects_pep561_and_stub_packages() {
 }
 
 #[test]
+fn type_health_requires_regular_py_typed_markers() {
+    let project_dir = temp_project_dir("type_health_requires_regular_py_typed_markers");
+    let report = {
+        fs::create_dir_all(project_dir.join("site/runtime_regular"))
+            .expect("runtime package should exist");
+        fs::write(project_dir.join("site/runtime_regular/py.typed"), "")
+            .expect("regular marker should be written");
+
+        fs::create_dir_all(project_dir.join("site/runtime_directory/py.typed"))
+            .expect("directory marker should exist");
+
+        fs::create_dir_all(project_dir.join("site/partial-stubs"))
+            .expect("partial stub package should exist");
+        fs::write(project_dir.join("site/partial-stubs/py.typed"), "partial\n")
+            .expect("partial marker should be written");
+
+        fs::create_dir_all(project_dir.join("site/marker-dir-stubs/py.typed"))
+            .expect("stub directory marker should exist");
+
+        build_type_health_report_for_target(
+            &project_dir,
+            &[String::from("site")],
+            typepython_target::PythonTarget::default(),
+        )
+        .expect("report should build")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.packages.iter().any(|package| {
+        package.name == "runtime_regular" && package.has_py_typed && !package.is_stub_only
+    }));
+    assert!(report.packages.iter().any(|package| {
+        package.name == "runtime_directory" && !package.has_py_typed && !package.is_stub_only
+    }));
+    assert!(report.packages.iter().any(|package| {
+        package.name == "partial"
+            && package.is_stub_only
+            && package.is_partial_stub
+            && !package.has_py_typed
+    }));
+    assert!(report.packages.iter().any(|package| {
+        package.name == "marker-dir"
+            && package.is_stub_only
+            && !package.is_partial_stub
+            && !package.has_py_typed
+    }));
+}
+
+#[test]
+fn type_health_reports_invalid_py_typed_contents() {
+    let project_dir = temp_project_dir("type_health_reports_invalid_py_typed_contents");
+    let error = {
+        fs::create_dir_all(project_dir.join("site/demo")).expect("package should exist");
+        fs::write(project_dir.join("site/demo/py.typed"), [0xff, 0xfe])
+            .expect("invalid UTF-8 marker should be written");
+
+        build_type_health_report_for_target(
+            &project_dir,
+            &[String::from("site")],
+            typepython_target::PythonTarget::default(),
+        )
+        .expect_err("invalid UTF-8 marker should reject the report")
+        .to_string()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(error.contains("unable to read PEP 561 marker"), "{error}");
+    assert!(error.contains("site/demo/py.typed"), "{error}");
+}
+
+#[cfg(unix)]
+#[test]
+fn type_health_does_not_follow_py_typed_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let project_dir = temp_project_dir("type_health_does_not_follow_py_typed_symlinks");
+    let package = {
+        fs::create_dir_all(project_dir.join("site/demo")).expect("package should exist");
+        fs::write(project_dir.join("site/demo/marker-target"), "partial\n")
+            .expect("marker target should be written");
+        symlink("marker-target", project_dir.join("site/demo/py.typed"))
+            .expect("marker symlink should be created");
+
+        build_type_health_report_for_target(
+            &project_dir,
+            &[String::from("site")],
+            typepython_target::PythonTarget::default(),
+        )
+        .expect("report should build")
+        .packages
+        .into_iter()
+        .find(|package| package.name == "demo")
+        .expect("package should be reported")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(!package.has_py_typed);
+    assert!(!package.is_partial_stub);
+}
+
+#[test]
 fn type_health_rejects_unavailable_configured_roots() {
     let project_dir = temp_project_dir("type_health_rejects_unavailable_configured_roots");
     let (report_error, command_error) = {

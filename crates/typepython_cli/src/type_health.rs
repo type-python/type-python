@@ -237,7 +237,7 @@ fn checker_version(checker: &str) -> Option<String> {
 fn package_health(path: &Path, target_python: PythonTarget) -> Result<TypePackageHealth> {
     let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
     let py_typed = path.join("py.typed");
-    let marker = fs::read_to_string(&py_typed).unwrap_or_default();
+    let marker = read_py_typed_marker(&py_typed)?;
     let package_name = file_name.trim_end_matches("-stubs").to_owned();
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let runtime_version = distribution_version(parent, &package_name)?;
@@ -249,9 +249,11 @@ fn package_health(path: &Path, target_python: PythonTarget) -> Result<TypePackag
     Ok(TypePackageHealth {
         name: package_name,
         root: path.display().to_string(),
-        has_py_typed: py_typed.exists() && !file_name.ends_with("-stubs"),
+        has_py_typed: marker.is_some() && !file_name.ends_with("-stubs"),
         is_stub_only: file_name.ends_with("-stubs"),
-        is_partial_stub: marker.lines().any(|line| line.trim() == "partial"),
+        is_partial_stub: marker
+            .as_deref()
+            .is_some_and(|marker| marker.lines().any(|line| line.trim() == "partial")),
         public_any_returns: public_any.returns,
         public_any_attributes: public_any.attributes,
         overload_any_fallbacks: public_any.overload_fallbacks,
@@ -262,6 +264,27 @@ fn package_health(path: &Path, target_python: PythonTarget) -> Result<TypePackag
         stub_version,
         stub_version_matches_runtime,
     })
+}
+
+/// Reads a package-owned PEP 561 marker without following symlinks.
+///
+/// Installed wheel metadata should materialize `py.typed` as a regular file. Treating a directory,
+/// device, or symlink as a marker would let filesystem layout accidentally claim typing support.
+fn read_py_typed_marker(path: &Path) -> Result<Option<String>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("unable to inspect PEP 561 marker {}", path.display()));
+        }
+    };
+    if !metadata.file_type().is_file() {
+        return Ok(None);
+    }
+    fs::read_to_string(path)
+        .with_context(|| format!("unable to read PEP 561 marker {}", path.display()))
+        .map(Some)
 }
 
 #[derive(Debug, Default)]

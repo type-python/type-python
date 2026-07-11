@@ -460,6 +460,9 @@ typepython api-diff dist/old-stubs dist/new-stubs --format json
 
 Inspect configured dependency/type roots for PEP 561 typing metadata and produce a typing-supply-chain score. The prototype scans `resolution.type_roots`, detects `py.typed`, `*-stubs` packages, partial stub markers, public `.pyi` functions returning `Any`, overloaded `.pyi` fallbacks returning `Any`, public `.pyi` attributes annotated as `Any`, public `.pyi` attributes without annotations, unrecognized `typing_extensions` imports for the configured target model, runtime/stub distribution version mismatches, and can write `.typepython/type-lock.toml` for review. The score averages package typing coverage and applies a capped penalty for precision-debt signals so `--fail-under` can catch degraded stubs, not just missing `py.typed` markers. The lock records the configured target and analysis Python versions, bundled typeshed commit, observed `typing_extensions` version, default checker versions when installed, and per-package typing metadata.
 
+A `py.typed` marker must itself be a regular UTF-8 file. Directories, special files, and symbolic
+links are not accepted, and TypePython does not follow a symbolic link to read a marker target.
+
 Public precision debt is derived from the parsed stub AST. Module declarations and public members of
 public classes are counted; private class subtrees, function bodies, local declarations, and nested
 functions are not. Publicness currently follows Python's leading-underscore convention even when a
