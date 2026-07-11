@@ -277,6 +277,36 @@ fn diff_api_surfaces_maps_stub_only_wheel_packages_to_runtime_modules() {
 }
 
 #[test]
+fn diff_api_surfaces_maps_sdist_src_layout_to_import_modules() {
+    let project_dir = temp_project_dir("diff_api_surfaces_maps_sdist_src_layout_to_import_modules");
+    let report = {
+        let old_dir = project_dir.join("old");
+        fs::create_dir_all(old_dir.join("pkg")).expect("old package should be created");
+        fs::write(old_dir.join("pkg/__init__.pyi"), "stable: int\n")
+            .expect("package stub should be written");
+        fs::write(old_dir.join("pkg/mod.pyi"), "def parse() -> str: ...\n")
+            .expect("module stub should be written");
+        let new_sdist = project_dir.join("demo-1.0.0.tar.gz");
+        write_tar_gz_archive(
+            &new_sdist,
+            "demo-1.0.0",
+            &[
+                ("src/pkg/__init__.pyi", "stable: int\n"),
+                ("src/pkg/mod.pyi", "def parse() -> str: ...\n"),
+            ],
+        );
+
+        diff_api_surfaces(&old_dir, &new_sdist)
+            .expect("sdist src layout should use import module names")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+}
+
+#[test]
 fn diff_api_surfaces_accepts_source_directory_inputs_when_stubs_are_absent() {
     let project_dir = temp_project_dir("diff_api_surfaces_accepts_source_directory_inputs");
     let report = {

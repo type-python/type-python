@@ -454,13 +454,13 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
             .cmp(&surface_source_priority(right.2))
             .then_with(|| left.0.cmp(&right.0))
     });
+    sources.retain(|(entry_name, _, source_kind)| {
+        *source_kind == SurfaceSourceKind::Stub
+            || archive_entry_is_under_typed_root(entry_name, &typed_roots)
+    });
+    let strip_sdist_src = kind == ArchivePathKind::Sdist && sdist_sources_use_src_layout(&sources);
     for (entry_name, source, source_kind) in sources {
-        if source_kind != SurfaceSourceKind::Stub
-            && !archive_entry_is_under_typed_root(&entry_name, &typed_roots)
-        {
-            continue;
-        }
-        let module = module_name_from_archive_entry(&entry_name, kind);
+        let module = module_name_from_archive_entry(&entry_name, kind, strip_sdist_src);
         let symbols = public_symbols(&source, source_kind).with_context(|| {
             format!("unable to parse public API surface entry {entry_name} in {}", path.display())
         })?;
@@ -530,14 +530,15 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
             .cmp(&surface_source_priority(right.2))
             .then_with(|| left.0.cmp(&right.0))
     });
-    for (entry_path, source, kind) in sources {
-        if kind != SurfaceSourceKind::Stub
-            && !archive_entry_is_under_typed_root(&entry_path, &typed_roots)
-        {
-            continue;
-        }
-        let module = module_name_from_archive_entry(&entry_path, ArchivePathKind::Sdist);
-        let symbols = public_symbols(&source, kind).with_context(|| {
+    sources.retain(|(entry_path, _, source_kind)| {
+        *source_kind == SurfaceSourceKind::Stub
+            || archive_entry_is_under_typed_root(entry_path, &typed_roots)
+    });
+    let strip_sdist_src = sdist_sources_use_src_layout(&sources);
+    for (entry_path, source, source_kind) in sources {
+        let module =
+            module_name_from_archive_entry(&entry_path, ArchivePathKind::Sdist, strip_sdist_src);
+        let symbols = public_symbols(&source, source_kind).with_context(|| {
             format!("unable to parse public API surface entry {entry_path} in {}", path.display())
         })?;
         insert_surface_module(
@@ -644,7 +645,21 @@ fn is_tar_gz_artifact(path: &Path) -> bool {
     name.ends_with(".tar.gz") || name.ends_with(".tgz") || name.ends_with(".sdist")
 }
 
-fn module_name_from_archive_entry(entry_name: &str, kind: ArchivePathKind) -> String {
+fn sdist_sources_use_src_layout(sources: &[(String, String, SurfaceSourceKind)]) -> bool {
+    !sources.is_empty()
+        && sources.iter().all(|(entry, _, _)| {
+            let mut components = entry.split('/');
+            components.next().is_some_and(|root| root.contains('-'))
+                && components.next() == Some("src")
+                && components.next().is_some()
+        })
+}
+
+fn module_name_from_archive_entry(
+    entry_name: &str,
+    kind: ArchivePathKind,
+    strip_sdist_src: bool,
+) -> String {
     let mut parts = Path::new(entry_name)
         .with_extension("")
         .components()
@@ -655,6 +670,9 @@ fn module_name_from_archive_entry(entry_name: &str, kind: ArchivePathKind) -> St
             if parts.first().is_some_and(|part| part.contains('-')) && parts.len() > 1 =>
         {
             parts.remove(0);
+            if strip_sdist_src && parts.first().map(String::as_str) == Some("src") {
+                parts.remove(0);
+            }
         }
         ArchivePathKind::Wheel => {
             if let Some(package) = parts.first_mut()
