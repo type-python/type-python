@@ -406,7 +406,7 @@ The report classifies:
 
 Both text and JSON output include release-note snippets derived from the same changes, so maintainers can review copy-ready summaries such as removed symbols, changed signatures, added public APIs, and `py.typed` metadata regressions without reading raw stubs.
 
-The summary also includes a conservative SemVer recommendation: `major` when symbols are removed or changed, `minor` when the diff is purely additive, and `patch` when no public typing-surface drift is detected.
+The summary also includes a conservative SemVer recommendation: `major` when symbols are removed or a changed symbol is not classified as likely type-compatible, `minor` when the remaining diff adds public symbols or contains likely type-compatible surface changes, and `patch` when no public typing-surface drift is detected.
 
 **Example:**
 

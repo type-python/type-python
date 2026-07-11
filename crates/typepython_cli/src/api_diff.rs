@@ -343,9 +343,11 @@ fn semver_recommendation(
     changed: &[ApiSurfaceChange],
     added: &[ApiSurfaceChange],
 ) -> String {
-    if !removed.is_empty() || !changed.is_empty() {
+    if !removed.is_empty()
+        || changed.iter().any(|change| change.classification != "likely type-compatible")
+    {
         String::from("major")
-    } else if !added.is_empty() {
+    } else if !changed.is_empty() || !added.is_empty() {
         String::from("minor")
     } else {
         String::from("patch")
