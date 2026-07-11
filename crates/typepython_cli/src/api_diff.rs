@@ -1004,7 +1004,7 @@ impl PythonSurfaceExtractor<'_> {
                 Stmt::FunctionDef(function)
                     if self.top_level_name_is_exported(function.name.as_str()) =>
                 {
-                    self.insert_function(function.name.as_str(), function, "function", None);
+                    self.insert_function(function.name.as_str(), function, "function", None, false);
                 }
                 Stmt::ClassDef(class_def)
                     if self.top_level_name_is_exported(class_def.name.as_str()) =>
@@ -1236,15 +1236,29 @@ impl PythonSurfaceExtractor<'_> {
         class_overload_bindings: &mut OverloadBindings,
     ) {
         for statement in suite {
+            let property_name = match statement {
+                Stmt::FunctionDef(function)
+                    if function_is_property(
+                        function,
+                        class_overload_bindings,
+                        Some(&self.overload_bindings),
+                    ) =>
+                {
+                    Some(function.name.as_str())
+                }
+                _ => None,
+            };
             match statement {
                 Stmt::FunctionDef(function) if public_member_name(function.name.as_str()) => {
                     let member_key = format!("{key}.{}", function.name.as_str());
-                    let kind = if is_property(function) { "property" } else { "method" };
+                    let is_property = property_name.is_some();
+                    let kind = if is_property { "property" } else { "method" };
                     self.insert_function(
                         &member_key,
                         function,
                         kind,
                         Some(class_overload_bindings),
+                        is_property,
                     );
                     let binds_class_receiver = function.decorator_list.iter().any(|decorator| {
                         matches!(
@@ -1325,6 +1339,11 @@ impl PythonSurfaceExtractor<'_> {
                 _ => {}
             }
             class_overload_bindings.record_statement(statement, Some(&self.overload_bindings));
+            if let Some(property_name) = property_name {
+                class_overload_bindings
+                    .names
+                    .insert(property_name.to_owned(), OverloadBinding::PropertyDescriptor);
+            }
         }
     }
 
@@ -1450,6 +1469,7 @@ impl PythonSurfaceExtractor<'_> {
         function: &ruff_python_ast::StmtFunctionDef,
         kind: &str,
         local_overload_bindings: Option<&OverloadBindings>,
+        is_grouped_property: bool,
     ) {
         let signature = decorated_header_signature(
             self.source,
@@ -1483,8 +1503,6 @@ impl PythonSurfaceExtractor<'_> {
                 },
             )
         });
-        let is_grouped_property = is_property(function);
-
         if is_overload || is_grouped_property {
             if is_overload && self.overloads.insert(key.to_owned()) {
                 self.grouped_signatures.remove(key);
@@ -1643,6 +1661,8 @@ enum OverloadBinding {
     AnyType,
     BuiltinsModule,
     ClassMethodDecorator,
+    PropertyDecorator,
+    PropertyDescriptor,
     StaticMethodDecorator,
     TypeAliasMarker,
     TypingModule,
@@ -1662,6 +1682,7 @@ impl OverloadBindings {
             .or_else(|| fallback.and_then(|bindings| bindings.names.get(name).copied()))
             .or(match name {
                 "classmethod" => Some(OverloadBinding::ClassMethodDecorator),
+                "property" => Some(OverloadBinding::PropertyDecorator),
                 "staticmethod" => Some(OverloadBinding::StaticMethodDecorator),
                 _ => None,
             })
@@ -1710,19 +1731,27 @@ impl OverloadBindings {
                 OverloadBinding::TypeAliasMarker
             }
             Expr::Attribute(attribute)
-                if matches!(attribute.attr.as_str(), "classmethod" | "staticmethod")
-                    && matches!(
-                        attribute.value.as_ref(),
-                        Expr::Name(name)
-                            if self.resolve(name.id.as_str(), fallback)
-                                == Some(OverloadBinding::BuiltinsModule)
-                    ) =>
+                if matches!(
+                    attribute.attr.as_str(),
+                    "classmethod" | "property" | "staticmethod"
+                ) && matches!(
+                    attribute.value.as_ref(),
+                    Expr::Name(name)
+                        if self.resolve(name.id.as_str(), fallback)
+                            == Some(OverloadBinding::BuiltinsModule)
+                ) =>
             {
-                if attribute.attr.as_str() == "classmethod" {
-                    OverloadBinding::ClassMethodDecorator
-                } else {
-                    OverloadBinding::StaticMethodDecorator
+                match attribute.attr.as_str() {
+                    "classmethod" => OverloadBinding::ClassMethodDecorator,
+                    "property" => OverloadBinding::PropertyDecorator,
+                    _ => OverloadBinding::StaticMethodDecorator,
                 }
+            }
+            Expr::Call(call)
+                if self.expression_binding(call.func.as_ref(), fallback)
+                    == OverloadBinding::PropertyDecorator =>
+            {
+                OverloadBinding::PropertyDescriptor
             }
             _ => OverloadBinding::Other,
         }
@@ -1767,6 +1796,9 @@ impl OverloadBindings {
                         (true, "TypeAlias") => OverloadBinding::TypeAliasMarker,
                         (false, "classmethod") if imports_builtins => {
                             OverloadBinding::ClassMethodDecorator
+                        }
+                        (false, "property") if imports_builtins => {
+                            OverloadBinding::PropertyDecorator
                         }
                         (false, "staticmethod") if imports_builtins => {
                             OverloadBinding::StaticMethodDecorator
@@ -2040,19 +2072,28 @@ fn annotation_is_type_alias(
     bindings.expression_binding(annotation, fallback) == OverloadBinding::TypeAliasMarker
 }
 
-fn decorator_name(decorator: &Expr) -> Option<&str> {
-    match decorator {
-        Expr::Name(name) => Some(name.id.as_str()),
-        Expr::Attribute(attribute) => Some(attribute.attr.as_str()),
-        Expr::Call(call) => decorator_name(call.func.as_ref()),
-        _ => None,
-    }
-}
-
-fn is_property(function: &ruff_python_ast::StmtFunctionDef) -> bool {
+fn function_is_property(
+    function: &ruff_python_ast::StmtFunctionDef,
+    bindings: &OverloadBindings,
+    fallback: Option<&OverloadBindings>,
+) -> bool {
     function.decorator_list.iter().any(|decorator| {
-        decorator_name(&decorator.expression)
-            .is_some_and(|name| matches!(name, "property" | "setter" | "deleter" | "getter"))
+        if bindings.expression_binding(&decorator.expression, fallback)
+            == OverloadBinding::PropertyDecorator
+        {
+            return true;
+        }
+        matches!(
+            &decorator.expression,
+            Expr::Attribute(attribute)
+                if matches!(attribute.attr.as_str(), "setter" | "deleter" | "getter")
+                    && matches!(
+                        attribute.value.as_ref(),
+                        Expr::Name(name)
+                            if bindings.resolve(name.id.as_str(), None)
+                                == Some(OverloadBinding::PropertyDescriptor)
+                    )
+        )
     })
 }
 

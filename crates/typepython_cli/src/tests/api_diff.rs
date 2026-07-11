@@ -886,6 +886,84 @@ fn diff_api_surfaces_resolves_static_and_class_method_identity_for_attributes() 
 }
 
 #[test]
+fn diff_api_surfaces_groups_only_bound_property_descriptors() {
+    let project_dir = temp_project_dir("diff_api_surfaces_groups_only_bound_properties");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        let prefix = concat!(
+            "def _identity(value): return value\n",
+            "class _Decorators:\n",
+            "    setter = _identity\n",
+            "_decorators = _Decorators()\n",
+            "_prop = property\n",
+        );
+        fs::write(
+            old_dir.join("app.pyi"),
+            format!(
+                concat!(
+                    "{}",
+                    "class Custom:\n",
+                    "    @_decorators.setter\n",
+                    "    def render(self, value: int) -> int: ...\n",
+                    "    @_decorators.setter\n",
+                    "    def render(self, value: str) -> str: ...\n",
+                    "class Alias:\n",
+                    "    @_prop\n",
+                    "    def value(self) -> int: ...\n",
+                    "    @value.setter\n",
+                    "    def value(self, new: int) -> None: ...\n",
+                    "property = _identity\n",
+                    "class Shadowed:\n",
+                    "    @property\n",
+                    "    def value(self) -> int: ...\n",
+                ),
+                prefix
+            ),
+        )
+        .expect("old surface should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            format!(
+                concat!(
+                    "{}",
+                    "class Custom:\n",
+                    "    @_decorators.setter\n",
+                    "    def render(self, value: str) -> str: ...\n",
+                    "class Alias:\n",
+                    "    @_prop\n",
+                    "    def value(self) -> int: ...\n",
+                    "property = _identity\n",
+                    "class Shadowed:\n",
+                    "    @property\n",
+                    "    def value(self) -> str: ...\n",
+                ),
+                prefix
+            ),
+        )
+        .expect("new surface should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should resolve property decorator identities")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let changed = report
+        .changed
+        .iter()
+        .map(|change| (change.symbol.as_str(), change))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(changed.keys().copied().collect::<Vec<_>>(), vec!["Alias.value", "Shadowed.value"]);
+    let alias = changed["Alias.value"];
+    assert_eq!(alias.kind, "property");
+    assert_eq!(alias.old_signature.as_deref().unwrap_or_default().matches("def value").count(), 2);
+    assert_eq!(alias.new_signature.as_deref().unwrap_or_default().matches("def value").count(), 1);
+    assert_eq!(changed["Shadowed.value"].kind, "method");
+}
+
+#[test]
 fn diff_api_surfaces_uses_static_all_for_private_and_reexported_names() {
     let project_dir =
         temp_project_dir("diff_api_surfaces_uses_static_all_for_private_and_reexported_names");
