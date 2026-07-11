@@ -1179,6 +1179,331 @@ fn diff_api_surfaces_does_not_revive_rebound_conditional_overloads() {
 }
 
 #[test]
+fn diff_api_surfaces_unions_base_and_conditional_overload_groups() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_unions_base_and_conditional_overload_groups");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload\n",
+                "@overload\n",
+                "def parse(value: None) -> None: ...\n",
+                "@overload\n",
+                "def parse(value: bool) -> bool: ...\n",
+                "if FLAG:\n",
+                "    @overload\n",
+                "    def parse(value: str) -> str: ...\n",
+                "elif OTHER:\n",
+                "    @overload\n",
+                "    def parse(value: bytes) -> bytes: ...\n",
+                "else:\n",
+                "    @overload\n",
+                "    def parse(value: float) -> float: ...\n",
+                "def parse(value: object) -> object: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("base and conditional overload groups should form one API union")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let signature = report
+        .removed
+        .iter()
+        .find(|change| change.symbol == "parse")
+        .and_then(|change| change.old_signature.as_deref())
+        .expect("removed parse signature should be reported");
+    for parameter in ["None", "bool", "str", "bytes", "float"] {
+        assert!(signature.contains(&format!("value: {parameter}")), "{signature}");
+    }
+    assert_eq!(signature.matches("@overload").count(), 5, "{signature}");
+    assert!(!signature.contains("value: object"), "{signature}");
+}
+
+#[test]
+fn diff_api_surfaces_preserves_conditional_overloads_before_implementation() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_preserves_conditional_overloads_before_implementation");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload\n",
+                "if FLAG:\n",
+                "    @overload\n",
+                "    def parse(value: str) -> str: ...\n",
+                "    @overload\n",
+                "    def parse(value: int) -> int: ...\n",
+                "else:\n",
+                "    @overload\n",
+                "    def parse(value: bytes) -> bytes: ...\n",
+                "    @overload\n",
+                "    def parse(value: float) -> float: ...\n",
+                "def parse(value: object) -> object: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("conditional overload declarations should hide their implementation")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let signature = report
+        .removed
+        .iter()
+        .find(|change| change.symbol == "parse")
+        .and_then(|change| change.old_signature.as_deref())
+        .expect("removed parse signature should be reported");
+    for parameter in ["str", "int", "bytes", "float"] {
+        assert!(signature.contains(&format!("value: {parameter}")), "{signature}");
+    }
+    assert_eq!(signature.matches("@overload").count(), 4, "{signature}");
+    assert!(!signature.contains("value: object"), "{signature}");
+}
+
+#[test]
+fn diff_api_surfaces_includes_implementation_for_partial_conditional_overloads() {
+    let project_dir = temp_project_dir(
+        "diff_api_surfaces_includes_implementation_for_partial_conditional_overloads",
+    );
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload\n",
+                "if FLAG:\n",
+                "    @overload\n",
+                "    def parse(value: str) -> str: ...\n",
+                "    @overload\n",
+                "    def parse(value: bytes) -> bytes: ...\n",
+                "def parse(value: object) -> object: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("API union should retain the implementation from the no-overload path")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let signature = report
+        .removed
+        .iter()
+        .find(|change| change.symbol == "parse")
+        .and_then(|change| change.old_signature.as_deref())
+        .expect("removed parse signature should be reported");
+    assert!(signature.contains("value: str"), "{signature}");
+    assert!(signature.contains("value: bytes"), "{signature}");
+    assert!(signature.contains("value: object"), "{signature}");
+}
+
+#[test]
+fn diff_api_surfaces_preserves_mixed_grouped_and_ordinary_conditional_surfaces() {
+    let project_dir = temp_project_dir(
+        "diff_api_surfaces_preserves_mixed_grouped_and_ordinary_conditional_surfaces",
+    );
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload\n",
+                "if FLAG:\n",
+                "    @overload\n",
+                "    def parse(value: str) -> str: ...\n",
+                "    @overload\n",
+                "    def parse(value: bytes) -> bytes: ...\n",
+                "else:\n",
+                "    def parse(value: object) -> object: ...\n",
+                "class Box:\n",
+                "    if FLAG:\n",
+                "        @property\n",
+                "        def value(self) -> int: ...\n",
+                "    else:\n",
+                "        def value(self) -> str: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("mixed grouped and ordinary branch surfaces should stay conditional")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let signatures = report
+        .removed
+        .iter()
+        .filter_map(|change| {
+            change
+                .old_signature
+                .as_deref()
+                .map(|signature| (change.symbol.as_str(), (change.kind.as_str(), signature)))
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert!(signatures["parse"].1.contains("value: str"));
+    assert!(signatures["parse"].1.contains("value: bytes"));
+    assert!(signatures["parse"].1.contains("value: object"));
+    assert_eq!(signatures["Box.value"].0, "conditional");
+    assert!(signatures["Box.value"].1.contains("-> int"));
+    assert!(signatures["Box.value"].1.contains("-> str"));
+}
+
+#[test]
+fn diff_api_surfaces_unions_try_overloads_before_finally_and_implementation() {
+    let project_dir = temp_project_dir(
+        "diff_api_surfaces_unions_try_overloads_before_finally_and_implementation",
+    );
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import overload\n",
+                "try:\n",
+                "    @overload\n",
+                "    def parse(value: str) -> str: ...\n",
+                "    @overload\n",
+                "    def parse(value: int) -> int: ...\n",
+                "except ImportError:\n",
+                "    @overload\n",
+                "    def parse(value: bytes) -> bytes: ...\n",
+                "    @overload\n",
+                "    def parse(value: float) -> float: ...\n",
+                "finally:\n",
+                "    @overload\n",
+                "    def parse(value: complex) -> complex: ...\n",
+                "def parse(value: object) -> object: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("try outcomes and finally overloads should form one API union")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let signature = report
+        .removed
+        .iter()
+        .find(|change| change.symbol == "parse")
+        .and_then(|change| change.old_signature.as_deref())
+        .expect("removed parse signature should be reported");
+    for parameter in ["str", "int", "bytes", "float", "complex"] {
+        assert!(signature.contains(&format!("value: {parameter}")), "{signature}");
+    }
+    assert_eq!(signature.matches("@overload").count(), 5, "{signature}");
+    assert!(!signature.contains("value: object"), "{signature}");
+}
+
+#[test]
+fn diff_api_surfaces_unions_conditional_property_getters_and_setter() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_unions_conditional_property_getters_and_setter");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "class Box:\n",
+                "    if FLAG:\n",
+                "        @property\n",
+                "        def value(self) -> int: ...\n",
+                "    else:\n",
+                "        @property\n",
+                "        def value(self) -> str: ...\n",
+                "    @value.setter\n",
+                "    def value(self, new_value: int | str) -> None: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("conditional property getters should remain grouped with their setter")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let signature = report
+        .removed
+        .iter()
+        .find(|change| change.symbol == "Box.value")
+        .and_then(|change| change.old_signature.as_deref())
+        .expect("removed property signature should be reported");
+    assert!(signature.contains("-> int"), "{signature}");
+    assert!(signature.contains("-> str"), "{signature}");
+    assert!(signature.contains("@value.setter"), "{signature}");
+    assert!(signature.contains("new_value: int | str"), "{signature}");
+}
+
+#[test]
+fn diff_api_surfaces_unions_base_property_and_conditional_setters() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_unions_base_property_and_conditional_setters");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "class Box:\n",
+                "    @property\n",
+                "    def value(self) -> int | str: ...\n",
+                "    try:\n",
+                "        @value.setter\n",
+                "        def value(self, new_value: int) -> None: ...\n",
+                "    except ImportError:\n",
+                "        @value.setter\n",
+                "        def value(self, new_value: str) -> None: ...\n",
+                "    finally:\n",
+                "        @value.deleter\n",
+                "        def value(self) -> None: ...\n",
+            ),
+        )
+        .expect("old stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("property getter, conditional setters, and deleter should stay grouped")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let signature = report
+        .removed
+        .iter()
+        .find(|change| change.symbol == "Box.value")
+        .and_then(|change| change.old_signature.as_deref())
+        .expect("removed property signature should be reported");
+    for expected in ["-> int | str", "new_value: int", "new_value: str", "@value.deleter"] {
+        assert!(signature.contains(expected), "{signature}");
+    }
+}
+
+#[test]
 fn diff_api_surfaces_reports_class_method_property_and_attribute_changes() {
     let project_dir =
         temp_project_dir("diff_api_surfaces_reports_class_method_property_and_attribute_changes");

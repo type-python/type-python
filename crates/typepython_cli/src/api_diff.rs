@@ -979,9 +979,8 @@ fn public_symbols(
         explicit_exports: explicit_exports.as_ref(),
         source_kind,
         symbols: BTreeMap::new(),
-        overloads: BTreeSet::new(),
         overload_bindings: OverloadBindings::default(),
-        grouped_signatures: BTreeMap::new(),
+        declaration_groups: DeclarationGroups::default(),
     };
     extractor.extract_module(parsed.suite());
 
@@ -1003,14 +1002,118 @@ struct PythonSurfaceExtractor<'a> {
     explicit_exports: Option<&'a BTreeSet<String>>,
     source_kind: SurfaceSourceKind,
     symbols: BTreeMap<String, PublicSymbol>,
-    overloads: BTreeSet<String>,
     overload_bindings: OverloadBindings,
-    grouped_signatures: BTreeMap<String, Vec<String>>,
+    declaration_groups: DeclarationGroups,
 }
 
 struct ExtractedConditionalBranch {
     symbols: BTreeMap<String, PublicSymbol>,
     overload_bindings: OverloadBindings,
+    declaration_groups: DeclarationGroups,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum DeclarationGroupPresence {
+    SomePaths,
+    AllPaths,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct DeclarationGroups {
+    overloads: BTreeMap<String, DeclarationGroupPresence>,
+    properties: BTreeMap<String, DeclarationGroupPresence>,
+    signatures: BTreeMap<String, Vec<String>>,
+}
+
+impl DeclarationGroups {
+    fn merge_paths<'a>(paths: impl IntoIterator<Item = &'a DeclarationGroups>) -> Self {
+        let paths = paths.into_iter().collect::<Vec<_>>();
+        let overload_maps = paths.iter().map(|groups| &groups.overloads).collect::<Vec<_>>();
+        let property_maps = paths.iter().map(|groups| &groups.properties).collect::<Vec<_>>();
+        let mut signatures = BTreeMap::<String, Vec<String>>::new();
+        for path in &paths {
+            for (key, path_signatures) in &path.signatures {
+                let merged = signatures.entry(key.clone()).or_default();
+                for signature in path_signatures {
+                    if !merged.contains(signature) {
+                        merged.push(signature.clone());
+                    }
+                }
+            }
+        }
+        Self {
+            overloads: merge_declaration_group_presence(&overload_maps),
+            properties: merge_declaration_group_presence(&property_maps),
+            signatures,
+        }
+    }
+
+    fn record_overload(&mut self, key: &str, signature: String) {
+        if !self.overloads.contains_key(key) {
+            self.properties.remove(key);
+            self.signatures.remove(key);
+        }
+        self.overloads.insert(key.to_owned(), DeclarationGroupPresence::AllPaths);
+        self.push_signature(key, signature);
+    }
+
+    fn record_property(&mut self, key: &str, signature: String) {
+        if !self.properties.contains_key(key) {
+            self.overloads.remove(key);
+            self.signatures.remove(key);
+        }
+        self.properties.insert(key.to_owned(), DeclarationGroupPresence::AllPaths);
+        self.push_signature(key, signature);
+    }
+
+    fn push_signature(&mut self, key: &str, signature: String) {
+        let signatures = self.signatures.entry(key.to_owned()).or_default();
+        if !signatures.contains(&signature) {
+            signatures.push(signature);
+        }
+    }
+
+    fn combined_signature(&self, key: &str) -> Option<String> {
+        self.signatures.get(key).map(|signatures| signatures.join("\n"))
+    }
+
+    fn overload_presence(&self, key: &str) -> Option<DeclarationGroupPresence> {
+        self.overloads.get(key).copied()
+    }
+
+    fn is_property(&self, key: &str) -> bool {
+        self.properties.contains_key(key)
+    }
+
+    fn is_definite_group(&self, key: &str) -> bool {
+        self.overloads.get(key) == Some(&DeclarationGroupPresence::AllPaths)
+            || self.properties.get(key) == Some(&DeclarationGroupPresence::AllPaths)
+    }
+
+    fn clear(&mut self, key: &str) {
+        self.overloads.remove(key);
+        self.properties.remove(key);
+        self.signatures.remove(key);
+    }
+}
+
+fn merge_declaration_group_presence(
+    paths: &[&BTreeMap<String, DeclarationGroupPresence>],
+) -> BTreeMap<String, DeclarationGroupPresence> {
+    let keys = paths.iter().flat_map(|groups| groups.keys().cloned()).collect::<BTreeSet<_>>();
+    let mut merged = BTreeMap::new();
+    for key in keys {
+        let presence = if paths
+            .iter()
+            .all(|groups| groups.get(&key) == Some(&DeclarationGroupPresence::AllPaths))
+        {
+            DeclarationGroupPresence::AllPaths
+        } else {
+            DeclarationGroupPresence::SomePaths
+        };
+        merged.insert(key, presence);
+    }
+    merged
 }
 
 impl PythonSurfaceExtractor<'_> {
@@ -1179,9 +1282,8 @@ impl PythonSurfaceExtractor<'_> {
             explicit_exports: self.explicit_exports,
             source_kind: self.source_kind,
             symbols: BTreeMap::new(),
-            overloads: BTreeSet::new(),
             overload_bindings: self.overload_bindings.clone(),
-            grouped_signatures: BTreeMap::new(),
+            declaration_groups: self.declaration_groups.clone(),
         };
         if let Some(name) = temporary_binding {
             branch.overload_bindings.names.insert(name.to_owned(), OverloadBinding::Other);
@@ -1195,6 +1297,7 @@ impl PythonSurfaceExtractor<'_> {
         ExtractedConditionalBranch {
             symbols: branch.symbols,
             overload_bindings: branch.overload_bindings,
+            declaration_groups: branch.declaration_groups,
         }
     }
 
@@ -1209,10 +1312,18 @@ impl PythonSurfaceExtractor<'_> {
             binding_paths.push(&self.overload_bindings);
         }
         let merged_bindings = OverloadBindings::merge_paths(binding_paths);
+        let mut group_paths =
+            branches.iter().map(|(_, branch)| &branch.declaration_groups).collect::<Vec<_>>();
+        if include_base_fallback {
+            group_paths.push(&self.declaration_groups);
+        }
+        let merged_groups = DeclarationGroups::merge_paths(group_paths);
         let symbol_branches =
             branches.into_iter().map(|(label, branch)| (label, branch.symbols)).collect();
         self.merge_conditional_symbols(symbol_branches, include_base_fallback);
         self.overload_bindings = merged_bindings;
+        self.declaration_groups = merged_groups;
+        self.refresh_grouped_symbols();
     }
 
     fn merge_conditional_symbols(
@@ -1545,9 +1656,8 @@ impl PythonSurfaceExtractor<'_> {
             explicit_exports: self.explicit_exports,
             source_kind: self.source_kind,
             symbols: BTreeMap::new(),
-            overloads: BTreeSet::new(),
             overload_bindings: self.overload_bindings.clone(),
-            grouped_signatures: BTreeMap::new(),
+            declaration_groups: self.declaration_groups.clone(),
         };
         let mut bindings = bindings.clone();
         if let Some(name) = temporary_binding {
@@ -1559,7 +1669,11 @@ impl PythonSurfaceExtractor<'_> {
         if let Some(name) = temporary_binding {
             bindings.names.remove(name);
         }
-        ExtractedConditionalBranch { symbols: branch.symbols, overload_bindings: bindings }
+        ExtractedConditionalBranch {
+            symbols: branch.symbols,
+            overload_bindings: bindings,
+            declaration_groups: branch.declaration_groups,
+        }
     }
 
     fn merge_class_branches(
@@ -1574,10 +1688,18 @@ impl PythonSurfaceExtractor<'_> {
             binding_paths.push(bindings);
         }
         let merged_bindings = OverloadBindings::merge_paths(binding_paths);
+        let mut group_paths =
+            branches.iter().map(|(_, branch)| &branch.declaration_groups).collect::<Vec<_>>();
+        if include_base_fallback {
+            group_paths.push(&self.declaration_groups);
+        }
+        let merged_groups = DeclarationGroups::merge_paths(group_paths);
         let symbol_branches =
             branches.into_iter().map(|(label, branch)| (label, branch.symbols)).collect();
         self.merge_conditional_symbols(symbol_branches, include_base_fallback);
         *bindings = merged_bindings;
+        self.declaration_groups = merged_groups;
+        self.refresh_grouped_symbols();
     }
 
     fn insert_function(
@@ -1643,49 +1765,104 @@ impl PythonSurfaceExtractor<'_> {
                 },
             )
         });
-        if is_overload || is_grouped_property {
-            if is_overload && self.overloads.insert(key.to_owned()) {
-                self.grouped_signatures.remove(key);
+        if is_overload {
+            self.declaration_groups.record_overload(key, signature);
+            self.insert_grouped_callable(key, kind, local_overload_bindings);
+        } else if is_grouped_property {
+            self.declaration_groups.record_property(key, signature);
+            self.insert_grouped_callable(key, kind, local_overload_bindings);
+        } else {
+            match self.declaration_groups.overload_presence(key) {
+                Some(DeclarationGroupPresence::AllPaths) => {}
+                Some(DeclarationGroupPresence::SomePaths) => {
+                    self.declaration_groups.push_signature(key, signature);
+                    self.insert_grouped_callable(key, kind, local_overload_bindings);
+                }
+                None => {
+                    self.declaration_groups.clear(key);
+                    self.symbols.insert(
+                        key.to_owned(),
+                        PublicSymbol::callable(kind, signature, dynamic_positions),
+                    );
+                }
             }
-            let signatures = self.grouped_signatures.entry(key.to_owned()).or_default();
-            signatures.push(signature);
-            let combined_signature = signatures.join("\n");
-            let combined_dynamic_positions = local_overload_bindings.map_or_else(
-                || {
-                    callable_dynamic_positions_for_bindings(
-                        &combined_signature,
-                        &self.overload_bindings,
-                        None,
-                    )
-                    .unwrap_or_default()
-                },
-                |local| {
-                    callable_dynamic_positions_for_bindings(
-                        &combined_signature,
-                        local,
-                        Some(&self.overload_bindings),
-                    )
-                    .unwrap_or_default()
-                },
-            );
-            self.symbols.insert(
-                key.to_owned(),
-                PublicSymbol::callable(kind, combined_signature, combined_dynamic_positions),
-            );
-        } else if !self.overloads.contains(key) {
-            self.symbols
-                .insert(key.to_owned(), PublicSymbol::callable(kind, signature, dynamic_positions));
+        }
+    }
+
+    fn insert_grouped_callable(
+        &mut self,
+        key: &str,
+        kind: &str,
+        local_overload_bindings: Option<&OverloadBindings>,
+    ) {
+        let Some(combined_signature) = self.declaration_groups.combined_signature(key) else {
+            return;
+        };
+        let combined_dynamic_positions = local_overload_bindings.map_or_else(
+            || {
+                callable_dynamic_positions_for_bindings(
+                    &combined_signature,
+                    &self.overload_bindings,
+                    None,
+                )
+                .unwrap_or_default()
+            },
+            |local| {
+                callable_dynamic_positions_for_bindings(
+                    &combined_signature,
+                    local,
+                    Some(&self.overload_bindings),
+                )
+                .unwrap_or_default()
+            },
+        );
+        self.symbols.insert(
+            key.to_owned(),
+            PublicSymbol::callable(kind, combined_signature, combined_dynamic_positions),
+        );
+    }
+
+    fn refresh_grouped_symbols(&mut self) {
+        let grouped = self
+            .declaration_groups
+            .signatures
+            .iter()
+            .filter_map(|(key, signatures)| {
+                self.declaration_groups
+                    .is_definite_group(key)
+                    .then(|| self.symbols.get(key))
+                    .flatten()
+                    .map(|symbol| {
+                        (
+                            key.clone(),
+                            signatures.join("\n"),
+                            symbol.kind.clone(),
+                            symbol.dynamic_positions.clone(),
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
+        for (key, signature, existing_kind, dynamic_positions) in grouped {
+            let kind = if self.declaration_groups.is_property(&key) {
+                String::from("property")
+            } else {
+                existing_kind
+            };
+            let dynamic_positions = dynamic_positions
+                .or_else(|| callable_dynamic_positions(&signature))
+                .unwrap_or_default();
+            self.symbols.insert(key, PublicSymbol::callable(kind, signature, dynamic_positions));
         }
     }
 
     fn insert_value(&mut self, key: &str, kind: &str, signature: String) {
+        self.declaration_groups.clear(key);
         self.symbols.insert(key.to_owned(), PublicSymbol::new(kind, signature));
     }
 
     fn remove_symbol(&mut self, key: &str) {
         self.symbols.remove(key);
-        self.grouped_signatures.remove(key);
-        self.overloads.remove(key);
+        self.declaration_groups.clear(key);
     }
 
     fn insert_instance_attributes(
