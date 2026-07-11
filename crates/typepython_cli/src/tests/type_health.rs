@@ -183,6 +183,146 @@ fn type_health_does_not_follow_py_typed_symlinks() {
 }
 
 #[test]
+fn type_health_includes_top_level_module_stub_units() {
+    let project_dir = temp_project_dir("type_health_includes_top_level_module_stub_units");
+    let module_root = project_dir.join("site/foo.pyi");
+    let report = {
+        fs::create_dir_all(project_dir.join("site/container-stubs"))
+            .expect("stub package should exist");
+        fs::write(project_dir.join("site/container-stubs/nested.pyi"), "nested_value: int\n")
+            .expect("nested stub should be written");
+        fs::write(project_dir.join("site/foo.py"), "value = object()\n")
+            .expect("adjacent runtime module should be written");
+        fs::write(&module_root, "from typing import Any\n\nvalue: Any\ndef load() -> Any: ...\n")
+            .expect("top-level module stub should be written");
+        fs::create_dir_all(project_dir.join("site/foo-2.4.0.dist-info"))
+            .expect("runtime metadata should exist");
+        fs::write(
+            project_dir.join("site/foo-2.4.0.dist-info/METADATA"),
+            "Name: foo\nVersion: 2.4.0\n",
+        )
+        .expect("runtime metadata should be written");
+
+        build_type_health_report_for_target(
+            &project_dir,
+            &[String::from("site")],
+            typepython_target::PythonTarget::default(),
+        )
+        .expect("report should build")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.packages.len(), 2);
+    assert_eq!(report.score, 90);
+    assert!(!report.packages.iter().any(|package| package.name == "nested"));
+    let module = report
+        .packages
+        .iter()
+        .find(|package| package.name == "foo")
+        .expect("top-level module should be reported");
+    assert_eq!(module.root, module_root.display().to_string());
+    assert!(module.is_stub_only);
+    assert!(!module.has_py_typed);
+    assert!(!module.is_partial_stub);
+    assert_eq!(module.public_any_returns, 1);
+    assert_eq!(module.public_any_attributes, 1);
+    assert_eq!(module.precision_debt, 2);
+    assert_eq!(module.runtime_version.as_deref(), Some("2.4.0"));
+    assert_eq!(module.stub_version, None);
+    assert_eq!(module.stub_version_matches_runtime, None);
+}
+
+#[test]
+fn type_health_directory_units_take_precedence_over_same_name_module_stubs() {
+    let project_dir =
+        temp_project_dir("type_health_directory_units_take_precedence_over_module_stubs");
+    let runtime_root = project_dir.join("site/foo");
+    let stub_root = project_dir.join("site/bar-stubs");
+    let report = {
+        fs::create_dir_all(&runtime_root).expect("runtime package should exist");
+        fs::write(runtime_root.join("py.typed"), "").expect("marker should be written");
+        fs::write(runtime_root.join("__init__.pyi"), "value: int\n")
+            .expect("package stub should be written");
+        fs::write(project_dir.join("site/foo.pyi"), "def invalid(")
+            .expect("colliding module stub should be written");
+
+        fs::create_dir_all(&stub_root).expect("stub-only package should exist");
+        fs::write(stub_root.join("__init__.pyi"), "value: int\n")
+            .expect("stub package surface should be written");
+        fs::write(project_dir.join("site/bar.pyi"), "def invalid(")
+            .expect("colliding stub module should be written");
+
+        build_type_health_report_for_target(
+            &project_dir,
+            &[String::from("site")],
+            typepython_target::PythonTarget::default(),
+        )
+        .expect("report should build")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.packages.len(), 2);
+    let runtime = report
+        .packages
+        .iter()
+        .find(|package| package.name == "foo")
+        .expect("runtime directory should be reported");
+    assert_eq!(runtime.root, runtime_root.display().to_string());
+    assert!(runtime.has_py_typed);
+    assert_eq!(runtime.precision_debt, 0);
+
+    let stubs = report
+        .packages
+        .iter()
+        .find(|package| package.name == "bar")
+        .expect("stub directory should be reported");
+    assert_eq!(stubs.root, stub_root.display().to_string());
+    assert!(stubs.is_stub_only);
+    assert_eq!(stubs.precision_debt, 0);
+}
+
+#[test]
+fn type_health_ignores_private_invalid_and_non_stub_root_files() {
+    let project_dir =
+        temp_project_dir("type_health_ignores_private_invalid_and_non_stub_root_files");
+    let report = {
+        fs::create_dir_all(project_dir.join("site")).expect("type root should exist");
+        fs::write(project_dir.join("site/visible.pyi"), "value: int\n")
+            .expect("public stub should be written");
+        for ignored in ["_private.pyi", "bad-name.pyi", "class.pyi"] {
+            fs::write(project_dir.join("site").join(ignored), "def invalid(")
+                .expect("ignored entry should be written");
+        }
+        fs::write(project_dir.join("site/runtime.py"), "value = 1\n")
+            .expect("runtime module should be written");
+        fs::write(project_dir.join("site/README.txt"), "not a stub\n")
+            .expect("non-stub entry should be written");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+
+            fs::write(project_dir.join("outside.pyi"), "def linked() -> Any: ...\n")
+                .expect("symlink target should be written");
+            symlink(project_dir.join("outside.pyi"), project_dir.join("site/linked.pyi"))
+                .expect("stub symlink should be created");
+        }
+
+        build_type_health_report_for_target(
+            &project_dir,
+            &[String::from("site")],
+            typepython_target::PythonTarget::default(),
+        )
+        .expect("ignored entries should not reject the report")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.packages.len(), 1);
+    assert_eq!(report.packages[0].name, "visible");
+    assert!(report.packages[0].is_stub_only);
+}
+
+#[test]
 fn type_health_rejects_unavailable_configured_roots() {
     let project_dir = temp_project_dir("type_health_rejects_unavailable_configured_roots");
     let (report_error, command_error) = {
@@ -423,6 +563,7 @@ class Other:
 #[test]
 fn run_type_health_writes_lock_and_enforces_threshold() {
     let project_dir = temp_project_dir("run_type_health_writes_lock_and_enforces_threshold");
+    let module_root = project_dir.join("site/module_health.pyi");
     let (success, failure, lock) = {
         fs::write(
             project_dir.join("typepython.toml"),
@@ -432,6 +573,8 @@ fn run_type_health_writes_lock_and_enforces_threshold() {
         fs::create_dir_all(project_dir.join("src")).expect("src should exist");
         fs::create_dir_all(project_dir.join("site/demo")).expect("package should exist");
         fs::write(project_dir.join("site/demo/py.typed"), "").expect("marker should be written");
+        fs::write(&module_root, "from typing import Any\n\ndef load() -> Any: ...\n")
+            .expect("module stub should be written");
         fs::create_dir_all(project_dir.join("site/typing_extensions-4.12.2.dist-info"))
             .expect("typing_extensions metadata should exist");
         fs::write(
@@ -442,13 +585,13 @@ fn run_type_health_writes_lock_and_enforces_threshold() {
 
         let success = run_type_health(TypeHealthArgs {
             run: RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
-            fail_under: Some(100),
+            fail_under: Some(95),
             write_lock: true,
         })
         .expect("type-health should run");
         let failure = run_type_health(TypeHealthArgs {
             run: RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
-            fail_under: Some(101),
+            fail_under: Some(96),
             write_lock: false,
         })
         .expect("type-health should run");
@@ -460,6 +603,7 @@ fn run_type_health_writes_lock_and_enforces_threshold() {
 
     assert_eq!(success, ExitCode::SUCCESS);
     assert_eq!(failure, ExitCode::FAILURE);
+    assert!(lock.contains("score = 95"));
     assert!(lock.contains("[inputs]"));
     assert!(lock.contains("target_python = \"3.12\""));
     assert!(lock.contains("analysis_python = \"3.11\""));
@@ -470,6 +614,16 @@ fn run_type_health_writes_lock_and_enforces_threshold() {
     assert!(lock.contains("name = \"pyright\""));
     assert!(lock.contains("name = \"ty\""));
     assert!(lock.contains("[[package]]"));
+    assert_eq!(lock.matches("[[package]]").count(), 2);
+    let locked_module = lock
+        .split("[[package]]")
+        .find(|package| package.contains("name = \"module_health\""))
+        .expect("module typing unit should be locked");
+    assert!(locked_module.contains(&format!("root = \"{}\"", module_root.display())));
+    assert!(locked_module.contains("has_py_typed = false"));
+    assert!(locked_module.contains("is_stub_only = true"));
+    assert!(locked_module.contains("public_any_returns = 1"));
+    assert!(locked_module.contains("precision_debt = 1"));
     assert!(lock.contains("has_py_typed = true"));
     assert!(lock.contains("public_any_returns = 0"));
     assert!(lock.contains("public_any_attributes = 0"));

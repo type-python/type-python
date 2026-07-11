@@ -11,7 +11,7 @@ use ruff_python_ast::{
     Expr, Operator, Stmt,
     visitor::{self, Visitor},
 };
-use ruff_python_parser::parse_module;
+use ruff_python_parser::{parse_expression, parse_module};
 use serde::Serialize;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_project::bundled_stdlib_root;
@@ -138,17 +138,44 @@ pub(crate) fn build_type_health_report_for_target(
         if !metadata.is_dir() {
             anyhow::bail!("configured type root `{}` is not a directory", root_path.display());
         }
+        let mut directory_paths = Vec::new();
+        let mut module_stubs = Vec::new();
         for entry in fs::read_dir(&root_path)
             .with_context(|| format!("unable to read {}", root_path.display()))?
         {
-            let path = entry?.path();
+            let entry = entry.with_context(|| format!("unable to read {}", root_path.display()))?;
+            let path = entry.path();
+            let file_type = entry
+                .file_type()
+                .with_context(|| format!("unable to inspect {}", path.display()))?;
             let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
-            if path.is_dir() && !file_name.ends_with(".dist-info") {
-                packages.push(package_health(&path, target_python)?);
+            if file_type.is_dir() && !file_name.ends_with(".dist-info") {
+                directory_paths.push(path);
+            } else if file_type.is_file()
+                && let Some(module_name) = top_level_stub_module_name(&path)
+            {
+                module_stubs.push((module_name.to_owned(), path));
+            }
+        }
+        directory_paths.sort();
+        module_stubs.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+
+        // Preserve the existing directory-backed inventory as authoritative. A root-level stub
+        // with the same logical name is an alternate import surface, not another package to score.
+        let mut directory_names = BTreeSet::new();
+        for path in directory_paths {
+            let package = package_health(&path, target_python)?;
+            directory_names.insert(package.name.clone());
+            packages.push(package);
+        }
+        for (module_name, path) in module_stubs {
+            if !directory_names.contains(&module_name) {
+                packages.push(module_health(&path, &module_name, target_python)?);
             }
         }
     }
-    packages.sort_by(|left, right| left.name.cmp(&right.name));
+    packages
+        .sort_by(|left, right| left.name.cmp(&right.name).then_with(|| left.root.cmp(&right.root)));
     let score = type_health_score(&packages);
     Ok(TypeHealthReport { score, packages, lock_inputs: None, lock_path: None })
 }
@@ -239,21 +266,47 @@ fn package_health(path: &Path, target_python: PythonTarget) -> Result<TypePackag
     let py_typed = path.join("py.typed");
     let marker = read_py_typed_marker(&py_typed)?;
     let package_name = file_name.trim_end_matches("-stubs").to_owned();
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let runtime_version = distribution_version(parent, &package_name)?;
-    let stub_version = distribution_version(parent, &format!("{package_name}-stubs"))?;
+    type_unit_health(
+        path,
+        path,
+        package_name,
+        marker.is_some() && !file_name.ends_with("-stubs"),
+        file_name.ends_with("-stubs"),
+        marker.as_deref().is_some_and(|marker| marker.lines().any(|line| line.trim() == "partial")),
+        target_python,
+    )
+}
+
+fn module_health(
+    path: &Path,
+    module_name: &str,
+    target_python: PythonTarget,
+) -> Result<TypePackageHealth> {
+    type_unit_health(path, path, module_name.to_owned(), false, true, false, target_python)
+}
+
+fn type_unit_health(
+    root: &Path,
+    typing_surface: &Path,
+    name: String,
+    has_py_typed: bool,
+    is_stub_only: bool,
+    is_partial_stub: bool,
+    target_python: PythonTarget,
+) -> Result<TypePackageHealth> {
+    let parent = root.parent().unwrap_or_else(|| Path::new("."));
+    let runtime_version = distribution_version(parent, &name)?;
+    let stub_version = distribution_version(parent, &format!("{name}-stubs"))?;
     let stub_version_matches_runtime =
         runtime_version.as_ref().zip(stub_version.as_ref()).map(|(runtime, stub)| runtime == stub);
-    let public_any = public_any_counts(path, target_python)?;
+    let public_any = public_any_counts(typing_surface, target_python)?;
     let precision_debt = public_any.precision_debt();
     Ok(TypePackageHealth {
-        name: package_name,
-        root: path.display().to_string(),
-        has_py_typed: marker.is_some() && !file_name.ends_with("-stubs"),
-        is_stub_only: file_name.ends_with("-stubs"),
-        is_partial_stub: marker
-            .as_deref()
-            .is_some_and(|marker| marker.lines().any(|line| line.trim() == "partial")),
+        name,
+        root: root.display().to_string(),
+        has_py_typed,
+        is_stub_only,
+        is_partial_stub,
         public_any_returns: public_any.returns,
         public_any_attributes: public_any.attributes,
         overload_any_fallbacks: public_any.overload_fallbacks,
@@ -264,6 +317,19 @@ fn package_health(path: &Path, target_python: PythonTarget) -> Result<TypePackag
         stub_version,
         stub_version_matches_runtime,
     })
+}
+
+fn top_level_stub_module_name(path: &Path) -> Option<&str> {
+    let module_name = path.file_name()?.to_str()?.strip_suffix(".pyi")?;
+    if module_name.starts_with('_') {
+        return None;
+    }
+    parse_expression(module_name)
+        .ok()
+        .is_some_and(
+            |parsed| matches!(parsed.expr(), Expr::Name(name) if name.id.as_str() == module_name),
+        )
+        .then_some(module_name)
 }
 
 /// Reads a package-owned PEP 561 marker without following symlinks.
