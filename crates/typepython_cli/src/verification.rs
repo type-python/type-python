@@ -2897,8 +2897,8 @@ fn read_supplied_artifact_entries(
     let path_text = artifact.path.to_string_lossy().to_ascii_lowercase();
     match artifact.kind {
         SuppliedArtifactKind::Wheel => {
-            if !(path_text.ends_with(".whl") || path_text.ends_with(".zip")) {
-                return Err(String::from("expected a .whl or .zip file"));
+            if !path_text.ends_with(".whl") {
+                return Err(String::from("expected a .whl file"));
             }
             Ok(SuppliedArchiveEntries {
                 entries: archive_entries_to_map(read_zip_entries(

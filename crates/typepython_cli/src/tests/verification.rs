@@ -26,6 +26,24 @@ fn supplied_archive_reader_rejects_unsafe_member_paths() {
 }
 
 #[test]
+fn supplied_wheel_reader_rejects_renamed_zip_archives() {
+    let project_dir = temp_project_dir("supplied_wheel_reader_rejects_renamed_zip_archives");
+    let error = {
+        let wheel = project_dir.join("payload.zip");
+        write_zip_archive(&wheel, &[("demo/__init__.py", "pass\n")]);
+
+        inspect_supplied_archive_paths(&SuppliedVerifyArtifact {
+            kind: SuppliedArtifactKind::Wheel,
+            path: wheel,
+        })
+        .expect_err("wheel verification must require a wheel filename")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(error.contains("expected a .whl file"), "{error}");
+}
+
+#[test]
 fn supplied_archive_reader_rejects_absolute_sdist_member_paths() {
     let project_dir =
         temp_project_dir("supplied_archive_reader_rejects_absolute_sdist_member_paths");
