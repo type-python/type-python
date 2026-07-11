@@ -426,6 +426,32 @@ class AnnotationCompatTests(unittest.TestCase):
         self.assertEqual({finding.code for finding in audit.findings}, {"TPY-A002"})
         self.assertIn("TYPE_CHECKING-only", audit.findings[0].message)
 
+    def test_audit_source_flags_type_checking_wildcard_annotations(self) -> None:
+        audit = annotation_compat.audit_source(
+            "from typing import TYPE_CHECKING, get_type_hints\n"
+            "if TYPE_CHECKING:\n"
+            "    from nonexistent_models import *\n\n"
+            "def load(user: 'User') -> None:\n"
+            "    return None\n\n"
+            "get_type_hints(load)\n"
+        )
+
+        findings = [finding for finding in audit.findings if finding.code == "TPY-A002"]
+        self.assertEqual(len(findings), 1, audit.findings)
+        self.assertIn("User", findings[0].message)
+        self.assertIn("possibly provided", findings[0].message)
+
+        safe = annotation_compat.audit_source(
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from nonexistent_models import *\n\n"
+            "class User:\n"
+            "    pass\n\n"
+            "def load(user: 'User', count: int) -> None:\n"
+            "    return None\n"
+        )
+        self.assertFalse(any(finding.code == "TPY-A002" for finding in safe.findings))
+
     def test_audit_source_flags_nested_string_forward_references(self) -> None:
         audit = annotation_compat.audit_source(
             "from typing import TYPE_CHECKING\n"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import functools
 import inspect
 import sys
@@ -71,6 +72,7 @@ class _AuditScope:
     resolution_overrides: set[str]
     final_type_checking_module_names: frozenset[str]
     final_type_checking_guard_names: frozenset[str]
+    has_type_checking_wildcard_import: bool
 
 
 def supported_formats() -> AnnotationSupport:
@@ -369,6 +371,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                 resolution_overrides=set(),
                 final_type_checking_module_names=frozenset(),
                 final_type_checking_guard_names=frozenset(),
+                has_type_checking_wildcard_import=False,
             )
         )
         self.visit(node.body)
@@ -407,6 +410,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                 resolution_overrides=set(),
                 final_type_checking_module_names=frozenset(),
                 final_type_checking_guard_names=frozenset(),
+                has_type_checking_wildcard_import=False,
             )
         )
         for index, generator in enumerate(node.generators):
@@ -574,6 +578,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
             type_checking_only_names,
             final_type_checking_module_names,
             final_type_checking_guard_names,
+            has_type_checking_wildcard_import,
         ) = _scope_names(
             statements,
             type_checking_module_names={
@@ -604,6 +609,7 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
                 final_type_checking_guard_names=frozenset(
                     final_type_checking_guard_names
                 ),
+                has_type_checking_wildcard_import=has_type_checking_wildcard_import,
             )
         )
         for statement in statements:
@@ -765,13 +771,26 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
         for annotation in annotations:
             names = _annotation_names(annotation)
             blocked = sorted(name for name in names if self._is_unbound_type_only_name(name))
+            wildcard_blocked = sorted(
+                name
+                for name in names
+                if name not in blocked
+                and self._may_come_from_type_checking_wildcard(name)
+            )
+            blocked.extend(wildcard_blocked)
             if blocked:
+                prefix = (
+                    "annotation references name(s) possibly provided only by "
+                    "TYPE_CHECKING wildcard import(s)"
+                    if wildcard_blocked
+                    else "annotation references TYPE_CHECKING-only import(s)"
+                )
                 self.findings.append(
                     AnnotationAuditFinding(
                         code="TPY-A002",
                         message=(
-                            "annotation references TYPE_CHECKING-only import(s) "
-                            f"{', '.join(blocked)}; runtime annotation evaluation can fail or "
+                            f"{prefix} {', '.join(blocked)}; "
+                            "runtime annotation evaluation can fail or "
                             "reintroduce import cycles"
                         ),
                         line=annotation.lineno,
@@ -815,6 +834,19 @@ class _AnnotationAuditVisitor(ast.NodeVisitor):
             if name in scope.definitely_bound_names:
                 return False
         return False
+
+    def _may_come_from_type_checking_wildcard(self, name: str) -> bool:
+        if hasattr(builtins, name):
+            return False
+        inside_function = bool(self._scopes and self._scopes[-1].kind == "function")
+        wildcard_seen = False
+        for scope in reversed(self._scopes):
+            if inside_function and scope.kind == "class":
+                continue
+            if name in scope.runtime_names or name in scope.type_checking_only_names:
+                return False
+            wildcard_seen |= scope.has_type_checking_wildcard_import
+        return wildcard_seen
 
     def _annotation_is_deferred(self, annotation: ast.expr) -> bool:
         return self._future_annotations or (
@@ -894,7 +926,7 @@ def _scope_names(
     type_checking_module_names: set[str] | None = None,
     type_checking_guard_names: set[str] | None = None,
     shadowed_names: set[str] | None = None,
-) -> tuple[set[str], set[str], set[str], set[str]]:
+) -> tuple[set[str], set[str], set[str], set[str], bool]:
     collector = _ScopeNameCollector(
         type_checking_module_names=type_checking_module_names,
         type_checking_guard_names=type_checking_guard_names,
@@ -912,6 +944,7 @@ def _scope_names(
         type_checking_only_names,
         set(collector.type_checking_module_names),
         set(collector.type_checking_guard_names),
+        collector.has_type_checking_wildcard_import,
     )
 
 
@@ -928,6 +961,7 @@ class _ScopeNameCollector(ast.NodeVisitor):
         self.global_or_nonlocal_names: set[str] = set()
         self.type_checking_module_names = set(type_checking_module_names or ())
         self.type_checking_guard_names = set(type_checking_guard_names or ())
+        self.has_type_checking_wildcard_import = False
         for name in shadowed_names or ():
             self._shadow_typing_binding(name)
 
@@ -944,6 +978,7 @@ class _ScopeNameCollector(ast.NodeVisitor):
             for statement in node.body:
                 type_only.visit(statement)
             self.type_checking_only_names.update(type_only.names)
+            self.has_type_checking_wildcard_import |= type_only.has_wildcard_import
             for statement in node.orelse:
                 self.visit(statement)
             return
@@ -1088,11 +1123,14 @@ class _ScopeNameCollector(ast.NodeVisitor):
 class _TypeCheckingImportCollector(ast.NodeVisitor):
     def __init__(self) -> None:
         self.names: set[str] = set()
+        self.has_wildcard_import = False
 
     def visit_Import(self, node: ast.Import) -> None:
         self.names.update(alias.asname or alias.name.split(".", 1)[0] for alias in node.names)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if any(alias.name == "*" for alias in node.names):
+            self.has_wildcard_import = True
         self.names.update(
             alias.asname or alias.name for alias in node.names if alias.name != "*"
         )
