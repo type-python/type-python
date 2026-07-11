@@ -278,7 +278,7 @@ fn matching_parenthesis(text: &str, open: usize) -> Option<usize> {
 fn signature_mentions_dynamic_type(signature: &str) -> bool {
     signature
         .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
-        .any(|token| matches!(token, "Any" | "Unknown" | "unknown" | "dynamic"))
+        .any(|token| token == "Any")
 }
 
 fn semver_recommendation(

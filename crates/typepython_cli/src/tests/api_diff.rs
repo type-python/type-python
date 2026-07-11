@@ -1418,6 +1418,29 @@ fn diff_api_surfaces_recommends_patch_for_unchanged_surfaces() {
 }
 
 #[test]
+fn diff_api_surfaces_does_not_treat_nominal_unknown_as_dynamic() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_does_not_treat_nominal_unknown_as_dynamic");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(old_dir.join("app.pyi"), "class Unknown: ...\ndef load() -> Unknown: ...\n")
+            .expect("old stub should be written");
+        fs::write(new_dir.join("app.pyi"), "class Unknown: ...\ndef load() -> str: ...\n")
+            .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should compare nominal types")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].symbol, "load");
+    assert_eq!(report.changed[0].classification, "unknown risk");
+}
+
+#[test]
 fn run_api_diff_fails_for_likely_breaking_changes() {
     let project_dir = temp_project_dir("run_api_diff_fails_for_likely_breaking_changes");
     let result = {
