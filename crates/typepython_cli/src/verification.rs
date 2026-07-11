@@ -86,8 +86,11 @@ import json
 import pathlib
 import sys
 
-source_path = pathlib.Path(sys.argv[1])
-target_text = sys.argv[2]
+support_root = sys.argv[1]
+if support_root:
+    sys.path.insert(0, support_root)
+source_path = pathlib.Path(sys.argv[2])
+target_text = sys.argv[3]
 target_version = tuple(int(part) for part in target_text.split(".", 1))
 host_version = sys.version_info[:2]
 source = source_path.read_text(encoding="utf-8")
@@ -1371,14 +1374,12 @@ pub(crate) fn runtime_annotation_compatibility_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let interpreter = resolve_python_executable(config);
-    let mut command = ProcessCommand::new(&interpreter);
+    let mut command = isolated_python_command(&interpreter);
     command
-        .args(["-B", "-c", ANNOTATION_RUNTIME_AUDIT_SCRIPT])
+        .args(["-c", ANNOTATION_RUNTIME_AUDIT_SCRIPT])
+        .arg(annotation_runtime_support_root().unwrap_or_default())
         .arg(runtime_path)
         .arg(target_python.to_string());
-    if let Some(py_path) = annotation_runtime_pythonpath() {
-        command.env("PYTHONPATH", py_path);
-    }
     let output = match command.output() {
         Ok(output) => output,
         Err(error) => {
@@ -1488,24 +1489,21 @@ pub(crate) fn runtime_annotation_compatibility_diagnostics(
     diagnostics
 }
 
-fn annotation_runtime_pythonpath() -> Option<std::ffi::OsString> {
+fn annotation_runtime_support_root() -> Option<PathBuf> {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let annotation_module = repo_root.join("typepython/annotation_compat.py");
-    if !annotation_module.exists() {
-        return env::var_os("PYTHONPATH").filter(|value| !value.is_empty());
-    }
-    prepend_pythonpath(&repo_root, env::var_os("PYTHONPATH").as_deref()).ok()
+    annotation_module.exists().then_some(repo_root)
 }
 
-pub(crate) fn prepend_pythonpath(
-    path: &Path,
-    existing: Option<&std::ffi::OsStr>,
-) -> Result<std::ffi::OsString, env::JoinPathsError> {
-    let mut paths = vec![path.to_path_buf()];
-    if let Some(existing) = existing.filter(|value| !value.is_empty()) {
-        paths.extend(env::split_paths(existing));
-    }
-    env::join_paths(paths)
+pub(crate) fn isolated_python_command(interpreter: &Path) -> ProcessCommand {
+    let mut command = ProcessCommand::new(interpreter);
+    command
+        .args(["-I", "-B"])
+        .env_remove("PYTHONHOME")
+        .env_remove("PYTHONPATH")
+        .env_remove("PYTHONUSERBASE")
+        .env("PYTHONNOUSERSITE", "1");
+    command
 }
 
 fn verify_supplied_artifact(
@@ -2647,9 +2645,9 @@ fn probe_runtime_module(
     let import_root = runtime_import_root(config, out_root)?;
     let probe_dir = runtime_import_probe_dir(module_name)?;
     let interpreter = resolve_python_executable(config);
-    let output = ProcessCommand::new(&interpreter)
+    let output = isolated_python_command(&interpreter)
         .current_dir(&probe_dir)
-        .args(["-B", "-c", RUNTIME_IMPORTABILITY_SCRIPT])
+        .args(["-c", RUNTIME_IMPORTABILITY_SCRIPT])
         .arg(&import_root)
         .arg(module_name)
         .output()

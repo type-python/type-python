@@ -3841,7 +3841,7 @@ fn verify_runtime_public_name_parity_isolates_top_level_runtime_side_effects() {
     remove_temp_project_dir(&project_dir);
 
     let (diagnostics, side_effect_exists) = diagnostics;
-    assert!(diagnostics.is_empty());
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
     assert!(!side_effect_exists);
 }
 
@@ -3993,15 +3993,24 @@ fn verify_runtime_public_name_parity_reports_runtime_import_failure() {
 }
 
 #[test]
-fn annotation_runtime_pythonpath_uses_platform_path_encoding() {
-    let root = PathBuf::from("annotation-runtime-root");
-    let first = PathBuf::from("existing-one");
-    let second = PathBuf::from("existing-two");
-    let existing = env::join_paths([&first, &second]).expect("test paths should be joinable");
+fn verification_python_commands_use_isolated_mode() {
+    let command = isolated_python_command(Path::new("python"));
 
-    let joined = prepend_pythonpath(&root, Some(&existing)).expect("paths should be joinable");
-
-    assert_eq!(env::split_paths(&joined).collect::<Vec<_>>(), vec![root, first, second]);
+    assert_eq!(
+        command.get_args().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>(),
+        vec!["-I", "-B"]
+    );
+    let environment = command
+        .get_envs()
+        .map(|(key, value)| (key.to_string_lossy().into_owned(), value.map(OsStr::to_os_string)))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(environment.get("PYTHONHOME"), Some(&None));
+    assert_eq!(environment.get("PYTHONPATH"), Some(&None));
+    assert_eq!(environment.get("PYTHONUSERBASE"), Some(&None));
+    assert_eq!(
+        environment.get("PYTHONNOUSERSITE").and_then(|value| value.as_deref()),
+        Some(OsStr::new("1"))
+    );
 }
 
 #[test]
@@ -4311,9 +4320,9 @@ fn verify_runtime_public_name_parity_imports_each_module_once() {
 }
 
 #[test]
-fn verify_runtime_public_name_parity_uses_configured_interpreter_environment() {
+fn verify_runtime_public_name_parity_isolates_configured_interpreter_environment() {
     let project_dir = temp_project_dir(
-        "verify_runtime_public_name_parity_uses_configured_interpreter_environment",
+        "verify_runtime_public_name_parity_isolates_configured_interpreter_environment",
     );
     let diagnostics = {
         fs::create_dir_all(project_dir.join("bin")).expect("test setup should succeed");
@@ -4336,11 +4345,11 @@ if [ "$1" = "-c" ] && printf '%s' "$2" | grep -q 'version_info'; then
   exit 0
 fi
 if printf '%s' "$*" | grep -q 'importlib.import_module'; then
-  if printf ' %s ' "$*" | grep -Eq ' -(I|S) '; then
-    printf '{"importable": false, "error": "ModuleNotFoundError: No module named demo_dep"}\n'
-  else
-    printf '{"importable": true, "public_names": ["build_user"]}\n'
+  if ! printf ' %s ' "$*" | grep -q ' -I ' || [ "${PYTHONPATH+x}" = x ] || [ "${PYTHONHOME+x}" = x ]; then
+    printf '{"importable": false, "error": "probe was not isolated"}\n'
+    exit 0
   fi
+  printf '{"importable": true, "public_names": ["build_user"]}\n'
   exit 0
 fi
 exec python3 "$@"

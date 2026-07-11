@@ -21,12 +21,11 @@ pub(super) use super::pipeline::{
 };
 pub(super) use super::type_health::{build_type_health_report_for_target, run_type_health};
 pub(super) use super::verification::inspect_supplied_archive_paths;
-pub(super) use super::verification::prepend_pythonpath;
 pub(super) use super::verification::{
     CheckerAllowlistEntry, SuppliedArtifactKind, SuppliedVerifyArtifact, TypePortabilityReport,
     allowlisted_checker_diagnostic, expand_checker_list, external_checker_invocation,
-    pep561_readiness_report, publication_type_health_diagnostics, run_verify,
-    runtime_annotation_compatibility_diagnostics, stub_portability_diagnostics,
+    isolated_python_command, pep561_readiness_report, publication_type_health_diagnostics,
+    run_verify, runtime_annotation_compatibility_diagnostics, stub_portability_diagnostics,
     supplied_verify_artifacts, type_portability_report, type_portability_score,
     validate_checker_allowlist_entry, verify_build_artifacts, verify_checker_invocations,
     verify_emitted_declaration_surface, verify_packaged_artifacts, verify_publication_metadata,
@@ -48,7 +47,9 @@ pub(super) use notify::RecursiveMode;
 pub(super) use std::os::unix::fs::PermissionsExt;
 pub(super) use std::{
     collections::{BTreeMap, BTreeSet},
-    env, fs,
+    env,
+    ffi::OsStr,
+    fs,
     path::MAIN_SEPARATOR,
     path::{Path, PathBuf},
     process::ExitCode,
