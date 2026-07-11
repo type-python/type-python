@@ -53,6 +53,21 @@ pub(crate) struct ApiSurfaceChange {
 struct PublicSymbol {
     kind: String,
     signature: String,
+    dynamic_positions: Option<CallableDynamicPositions>,
+}
+
+impl PublicSymbol {
+    fn new(kind: impl Into<String>, signature: String) -> Self {
+        Self { kind: kind.into(), signature, dynamic_positions: None }
+    }
+
+    fn callable(
+        kind: impl Into<String>,
+        signature: String,
+        dynamic_positions: CallableDynamicPositions,
+    ) -> Self {
+        Self { kind: kind.into(), signature, dynamic_positions: Some(dynamic_positions) }
+    }
 }
 
 const TYPING_METADATA_MODULE: &str = "__typing_metadata__";
@@ -197,8 +212,14 @@ fn classify_changed_symbol(old_symbol: &PublicSymbol, new_symbol: &PublicSymbol)
     }
     if matches!(old_symbol.kind.as_str(), "function" | "method" | "property")
         && let (Some(old), Some(new)) = (
-            callable_dynamic_positions(&old_symbol.signature),
-            callable_dynamic_positions(&new_symbol.signature),
+            old_symbol
+                .dynamic_positions
+                .clone()
+                .or_else(|| callable_dynamic_positions(&old_symbol.signature)),
+            new_symbol
+                .dynamic_positions
+                .clone()
+                .or_else(|| callable_dynamic_positions(&new_symbol.signature)),
         )
     {
         let likely_breaking = (old.parameters && !new.parameters) || (!old.returns && new.returns);
@@ -213,13 +234,30 @@ fn classify_changed_symbol(old_symbol: &PublicSymbol, new_symbol: &PublicSymbol)
     String::from("unknown risk")
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct CallableDynamicPositions {
     parameters: bool,
     returns: bool,
 }
 
 fn callable_dynamic_positions(signature: &str) -> Option<CallableDynamicPositions> {
+    callable_dynamic_positions_by(signature, signature_mentions_dynamic_type)
+}
+
+fn callable_dynamic_positions_for_bindings(
+    signature: &str,
+    bindings: &OverloadBindings,
+    fallback: Option<&OverloadBindings>,
+) -> Option<CallableDynamicPositions> {
+    callable_dynamic_positions_by(signature, |segment| {
+        signature_mentions_bound_any(segment, bindings, fallback)
+    })
+}
+
+fn callable_dynamic_positions_by(
+    signature: &str,
+    mentions_dynamic: impl Fn(&str) -> bool,
+) -> Option<CallableDynamicPositions> {
     let mut positions = CallableDynamicPositions::default();
     let mut found = false;
     for line in signature.lines() {
@@ -232,14 +270,33 @@ fn callable_dynamic_positions(signature: &str) -> Option<CallableDynamicPosition
         if colon <= close {
             return None;
         }
-        positions.parameters |= signature_mentions_dynamic_type(&line[open + 1..close]);
+        positions.parameters |= mentions_dynamic(&line[open + 1..close]);
         if let Some(arrow) = line[close + 1..colon].find("->") {
-            positions.returns |=
-                signature_mentions_dynamic_type(&line[close + 1 + arrow + 2..colon]);
+            positions.returns |= mentions_dynamic(&line[close + 1 + arrow + 2..colon]);
         }
         found = true;
     }
     found.then_some(positions)
+}
+
+fn signature_mentions_bound_any(
+    signature: &str,
+    bindings: &OverloadBindings,
+    fallback: Option<&OverloadBindings>,
+) -> bool {
+    signature
+        .split(|character: char| {
+            !(character == '_' || character == '.' || character.is_alphanumeric())
+        })
+        .filter(|token| !token.is_empty())
+        .any(|token| {
+            if let Some((root, member)) = token.split_once('.') {
+                member == "Any"
+                    && bindings.resolve(root, fallback) == Some(OverloadBinding::TypingModule)
+            } else {
+                bindings.resolve(token, fallback) == Some(OverloadBinding::AnyType)
+            }
+        })
 }
 
 fn matching_parenthesis(text: &str, open: usize) -> Option<usize> {
@@ -716,10 +773,10 @@ fn insert_py_typed_marker(
     } else {
         format!("{TYPING_METADATA_MODULE}.{package}")
     };
-    modules.entry(module).or_default().insert(
-        String::from(PY_TYPED_SYMBOL),
-        PublicSymbol { kind: String::from("metadata"), signature },
-    );
+    modules
+        .entry(module)
+        .or_default()
+        .insert(String::from(PY_TYPED_SYMBOL), PublicSymbol::new("metadata", signature));
 }
 
 fn py_typed_signature(contents: &[u8]) -> Result<String> {
@@ -917,10 +974,10 @@ fn public_symbols(
 
     if let Some(exports) = explicit_exports.as_ref() {
         for name in exports {
-            extractor.symbols.entry(name.clone()).or_insert_with(|| PublicSymbol {
-                kind: String::from("export"),
-                signature: format!("__all__: {name}"),
-            });
+            extractor
+                .symbols
+                .entry(name.clone())
+                .or_insert_with(|| PublicSymbol::new("export", format!("__all__: {name}")));
         }
     }
 
@@ -1132,6 +1189,15 @@ impl PythonSurfaceExtractor<'_> {
             } else {
                 String::from("conditional")
             };
+            let dynamic_positions = present.iter().try_fold(
+                CallableDynamicPositions::default(),
+                |mut combined, symbol| {
+                    let positions = symbol.dynamic_positions.as_ref()?;
+                    combined.parameters |= positions.parameters;
+                    combined.returns |= positions.returns;
+                    Some(combined)
+                },
+            );
             let signature = variants
                 .into_iter()
                 .map(|(label, symbol)| match symbol {
@@ -1140,7 +1206,7 @@ impl PythonSurfaceExtractor<'_> {
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            self.symbols.insert(key, PublicSymbol { kind, signature });
+            self.symbols.insert(key, PublicSymbol { kind, signature, dynamic_positions });
         }
     }
 
@@ -1151,8 +1217,7 @@ impl PythonSurfaceExtractor<'_> {
             &class_def.decorator_list,
             self.tokens.in_range(class_def.range),
         );
-        self.symbols
-            .insert(key.to_owned(), PublicSymbol { kind: String::from("class"), signature });
+        self.symbols.insert(key.to_owned(), PublicSymbol::new("class", signature));
 
         let mut class_overload_bindings = OverloadBindings::default();
         self.extract_class_suite(key, &class_def.body, &mut class_overload_bindings);
@@ -1367,6 +1432,20 @@ impl PythonSurfaceExtractor<'_> {
             &function.decorator_list,
             self.tokens.in_range(function.range),
         );
+        let dynamic_positions = local_overload_bindings.map_or_else(
+            || {
+                callable_dynamic_positions_for_bindings(&signature, &self.overload_bindings, None)
+                    .unwrap_or_default()
+            },
+            |local| {
+                callable_dynamic_positions_for_bindings(
+                    &signature,
+                    local,
+                    Some(&self.overload_bindings),
+                )
+                .unwrap_or_default()
+            },
+        );
         let is_overload = function.decorator_list.iter().any(|decorator| {
             local_overload_bindings.map_or_else(
                 || is_overload_decorator(&decorator.expression, &self.overload_bindings, None),
@@ -1387,17 +1466,37 @@ impl PythonSurfaceExtractor<'_> {
             }
             let signatures = self.grouped_signatures.entry(key.to_owned()).or_default();
             signatures.push(signature);
+            let combined_signature = signatures.join("\n");
+            let combined_dynamic_positions = local_overload_bindings.map_or_else(
+                || {
+                    callable_dynamic_positions_for_bindings(
+                        &combined_signature,
+                        &self.overload_bindings,
+                        None,
+                    )
+                    .unwrap_or_default()
+                },
+                |local| {
+                    callable_dynamic_positions_for_bindings(
+                        &combined_signature,
+                        local,
+                        Some(&self.overload_bindings),
+                    )
+                    .unwrap_or_default()
+                },
+            );
             self.symbols.insert(
                 key.to_owned(),
-                PublicSymbol { kind: kind.to_owned(), signature: signatures.join("\n") },
+                PublicSymbol::callable(kind, combined_signature, combined_dynamic_positions),
             );
         } else if !self.overloads.contains(key) {
-            self.symbols.insert(key.to_owned(), PublicSymbol { kind: kind.to_owned(), signature });
+            self.symbols
+                .insert(key.to_owned(), PublicSymbol::callable(kind, signature, dynamic_positions));
         }
     }
 
     fn insert_value(&mut self, key: &str, kind: &str, signature: String) {
-        self.symbols.insert(key.to_owned(), PublicSymbol { kind: kind.to_owned(), signature });
+        self.symbols.insert(key.to_owned(), PublicSymbol::new(kind, signature));
     }
 
     fn insert_instance_attributes(
@@ -1519,6 +1618,7 @@ impl<'a> Visitor<'a> for InstanceAttributeCollector<'a> {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum OverloadBinding {
     Decorator,
+    AnyType,
     TypingModule,
     Other,
 }
@@ -1556,6 +1656,17 @@ impl OverloadBindings {
             {
                 OverloadBinding::Decorator
             }
+            Expr::Attribute(attribute)
+                if attribute.attr.as_str() == "Any"
+                    && matches!(
+                        attribute.value.as_ref(),
+                        Expr::Name(name)
+                            if self.resolve(name.id.as_str(), fallback)
+                                == Some(OverloadBinding::TypingModule)
+                    ) =>
+            {
+                OverloadBinding::AnyType
+            }
             _ => OverloadBinding::Other,
         }
     }
@@ -1591,10 +1702,10 @@ impl OverloadBindings {
                         .asname
                         .as_ref()
                         .map_or(source_name, ruff_python_ast::Identifier::as_str);
-                    let binding = if imports_typing && source_name == "overload" {
-                        OverloadBinding::Decorator
-                    } else {
-                        OverloadBinding::Other
+                    let binding = match (imports_typing, source_name) {
+                        (true, "overload") => OverloadBinding::Decorator,
+                        (true, "Any") => OverloadBinding::AnyType,
+                        _ => OverloadBinding::Other,
                     };
                     self.names.insert(local_name.to_owned(), binding);
                 }
@@ -2041,15 +2152,15 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
             {
                 symbols.insert(
                     alias.name.clone(),
-                    PublicSymbol {
-                        kind: String::from("type alias"),
-                        signature: format!(
+                    PublicSymbol::new(
+                        "type alias",
+                        format!(
                             "typealias {}{} = {}",
                             alias.name,
                             render_typepython_type_params(&alias.type_params),
                             alias.value
                         ),
-                    },
+                    ),
                 );
             }
             typepython_syntax::SyntaxStatement::FunctionDef(function)
@@ -2058,10 +2169,10 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
                 if !overloads.contains_key(&function.name) {
                     symbols.insert(
                         function.name.clone(),
-                        PublicSymbol {
-                            kind: String::from("function"),
-                            signature: render_typepython_function(function),
-                        },
+                        typepython_callable_symbol(
+                            "function",
+                            render_typepython_function(function),
+                        ),
                     );
                 }
             }
@@ -2072,10 +2183,7 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
                 signatures.push(format!("@overload\n{}", render_typepython_function(function)));
                 symbols.insert(
                     function.name.clone(),
-                    PublicSymbol {
-                        kind: String::from("function"),
-                        signature: signatures.join("\n"),
-                    },
+                    typepython_callable_symbol("function", signatures.join("\n")),
                 );
             }
             typepython_syntax::SyntaxStatement::ClassDef(class_def)
@@ -2103,13 +2211,10 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
                     if typepython_name_is_exported(&binding.local_name, explicit_exports.as_ref()) {
                         symbols.insert(
                             binding.local_name.clone(),
-                            PublicSymbol {
-                                kind: String::from("re-export"),
-                                signature: format!(
-                                    "import {} as {}",
-                                    binding.source_path, binding.local_name
-                                ),
-                            },
+                            PublicSymbol::new(
+                                "re-export",
+                                format!("import {} as {}", binding.source_path, binding.local_name),
+                            ),
                         );
                     }
                 }
@@ -2128,10 +2233,7 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
                             .unwrap_or_else(|| String::from("unknown"));
                         symbols.insert(
                             name.clone(),
-                            PublicSymbol {
-                                kind: String::from("value"),
-                                signature: format!("{name}: {detail}"),
-                            },
+                            PublicSymbol::new("value", format!("{name}: {detail}")),
                         );
                     }
                 }
@@ -2141,13 +2243,17 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
     }
     if let Some(exports) = explicit_exports {
         for name in exports {
-            symbols.entry(name.clone()).or_insert_with(|| PublicSymbol {
-                kind: String::from("export"),
-                signature: format!("__all__: {name}"),
-            });
+            symbols
+                .entry(name.clone())
+                .or_insert_with(|| PublicSymbol::new("export", format!("__all__: {name}")));
         }
     }
     Ok(symbols)
+}
+
+fn typepython_callable_symbol(kind: &str, signature: String) -> PublicSymbol {
+    let dynamic_positions = callable_dynamic_positions(&signature).unwrap_or_default();
+    PublicSymbol::callable(kind, signature, dynamic_positions)
 }
 
 fn typepython_name_is_exported(name: &str, exports: Option<&BTreeSet<String>>) -> bool {
@@ -2205,15 +2311,15 @@ fn insert_typepython_class_symbols(
 ) {
     symbols.insert(
         class_def.name.clone(),
-        PublicSymbol {
-            kind: String::from("class"),
-            signature: format!(
+        PublicSymbol::new(
+            "class",
+            format!(
                 "{declaration_kind} {}{}{}:",
                 class_def.name,
                 render_typepython_type_params(&class_def.type_params),
                 class_def.header_suffix
             ),
-        },
+        ),
     );
     let mut overloads = BTreeMap::<String, Vec<String>>::new();
     let mut properties = BTreeMap::<String, Vec<String>>::new();
@@ -2230,10 +2336,7 @@ fn insert_typepython_class_symbols(
                     .unwrap_or_else(|| String::from("unknown"));
                 symbols.insert(
                     key,
-                    PublicSymbol {
-                        kind: String::from("attribute"),
-                        signature: format!("{}: {detail}", member.name),
-                    },
+                    PublicSymbol::new("attribute", format!("{}: {detail}", member.name)),
                 );
             }
             typepython_syntax::ClassMemberKind::Method => {
@@ -2250,24 +2353,16 @@ fn insert_typepython_class_symbols(
                 ) {
                     let signatures = properties.entry(key.clone()).or_default();
                     signatures.push(signature);
-                    symbols.insert(
-                        key,
-                        PublicSymbol {
-                            kind: String::from("property"),
-                            signature: signatures.join("\n"),
-                        },
-                    );
+                    symbols
+                        .insert(key, typepython_callable_symbol("property", signatures.join("\n")));
                 } else {
-                    symbols.insert(key, PublicSymbol { kind: String::from("method"), signature });
+                    symbols.insert(key, typepython_callable_symbol("method", signature));
                 }
             }
             typepython_syntax::ClassMemberKind::Overload => {
                 let signatures = overloads.entry(key.clone()).or_default();
                 signatures.push(format!("@overload\n{}", render_typepython_member(member)));
-                symbols.insert(
-                    key,
-                    PublicSymbol { kind: String::from("method"), signature: signatures.join("\n") },
-                );
+                symbols.insert(key, typepython_callable_symbol("method", signatures.join("\n")));
             }
         }
     }

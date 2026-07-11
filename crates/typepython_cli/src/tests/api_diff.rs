@@ -1441,6 +1441,51 @@ fn diff_api_surfaces_does_not_treat_nominal_unknown_as_dynamic() {
 }
 
 #[test]
+fn diff_api_surfaces_resolves_any_import_identity() {
+    let project_dir = temp_project_dir("diff_api_surfaces_resolves_any_import_identity");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import Any as _Any\n",
+                "import typing_extensions as _te\n",
+                "class Any: ...\n",
+                "def aliased() -> _Any: ...\n",
+                "def qualified() -> _te.Any: ...\n",
+                "def nominal() -> Any: ...\n",
+            ),
+        )
+        .expect("old surface should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "class Any: ...\n",
+                "def aliased() -> str: ...\n",
+                "def qualified() -> str: ...\n",
+                "def nominal() -> str: ...\n",
+            ),
+        )
+        .expect("new surface should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should resolve imported Any types")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let classifications = report
+        .changed
+        .iter()
+        .map(|change| (change.symbol.as_str(), change.classification.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(classifications.get("aliased"), Some(&"likely type-compatible"));
+    assert_eq!(classifications.get("qualified"), Some(&"likely type-compatible"));
+    assert_eq!(classifications.get("nominal"), Some(&"unknown risk"));
+}
+
+#[test]
 fn run_api_diff_fails_for_likely_breaking_changes() {
     let project_dir = temp_project_dir("run_api_diff_fails_for_likely_breaking_changes");
     let result = {
