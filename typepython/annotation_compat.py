@@ -170,6 +170,8 @@ def _legacy_raw_annotations(obj: Any) -> dict[str, Any] | None:
         return obj.__dict__.get("__annotations__")
     if isinstance(obj, ModuleType):
         return getattr(obj, "__annotations__", None)
+    if not callable(obj):
+        raise TypeError(f"{obj!r} is not a module, class, or callable")
     return getattr(obj, "__annotations__", None)
 
 

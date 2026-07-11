@@ -38,6 +38,15 @@ class AnnotationCompatTests(unittest.TestCase):
         self.assertEqual(annotations["value"], int)
         self.assertEqual(annotations["return"], str)
 
+    def test_legacy_fallback_rejects_non_callable_instances(self) -> None:
+        class Box:
+            value: int
+
+        for value in (Box(), 42, object()):
+            with self.subTest(value=type(value).__name__):
+                with self.assertRaisesRegex(TypeError, "module, class, or callable"):
+                    annotation_compat.get_annotations(value)
+
     def test_eval_str_fallback_merges_partial_explicit_namespaces(self) -> None:
         function_namespace: dict[str, object] = {"GlobalType": bytes}
         exec(
