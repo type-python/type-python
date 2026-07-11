@@ -1045,10 +1045,11 @@ impl PythonSurfaceExtractor<'_> {
                         self.insert_value(
                             name.id.as_str(),
                             kind,
-                            canonical_tokens(
+                            annotated_assignment_signature(
                                 self.source,
-                                self.tokens.in_range(assign.range),
-                                TokenLimit::All,
+                                self.tokens,
+                                assign,
+                                self.source_kind,
                             ),
                         );
                     }
@@ -1337,10 +1338,11 @@ impl PythonSurfaceExtractor<'_> {
                         self.insert_value(
                             &format!("{key}.{}", name.id.as_str()),
                             kind,
-                            canonical_tokens(
+                            annotated_assignment_signature(
                                 self.source,
-                                self.tokens.in_range(assign.range),
-                                TokenLimit::All,
+                                self.tokens,
+                                assign,
+                                self.source_kind,
                             ),
                         );
                     }
@@ -2123,6 +2125,22 @@ fn simple_target_names(target: &Expr) -> Vec<&str> {
         Expr::List(list) => list.elts.iter().flat_map(simple_target_names).collect(),
         _ => Vec::new(),
     }
+}
+
+fn annotated_assignment_signature(
+    source: &str,
+    tokens: &Tokens,
+    assignment: &ruff_python_ast::StmtAnnAssign,
+    source_kind: SurfaceSourceKind,
+) -> String {
+    let signature = canonical_tokens(source, tokens.in_range(assignment.range), TokenLimit::All);
+    if source_kind == SurfaceSourceKind::Stub
+        && matches!(assignment.value.as_deref(), Some(Expr::EllipsisLiteral(_)))
+        && let Some(annotation_only) = signature.strip_suffix(" = ...")
+    {
+        return annotation_only.to_owned();
+    }
+    signature
 }
 
 fn annotation_is_type_alias(

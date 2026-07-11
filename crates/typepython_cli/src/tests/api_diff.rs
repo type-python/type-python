@@ -784,6 +784,29 @@ fn diff_api_surfaces_reports_class_method_property_and_attribute_changes() {
 }
 
 #[test]
+fn diff_api_surfaces_ignores_stub_ellipsis_initializers() {
+    let project_dir = temp_project_dir("diff_api_surfaces_ignores_stub_ellipsis_initializers");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(old_dir.join("app.pyi"), "VALUE: int = ...\nclass Box:\n    item: str = ...\n")
+            .expect("old surface should be written");
+        fs::write(new_dir.join("app.pyi"), "VALUE: int\nclass Box:\n    item: str\n")
+            .expect("new surface should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should compare equivalent stubs")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+    assert_eq!(report.semver_recommendation, "patch");
+}
+
+#[test]
 fn diff_api_surfaces_resolves_legacy_type_alias_identity() {
     let project_dir = temp_project_dir("diff_api_surfaces_resolves_legacy_type_alias_identity");
     let report = {
