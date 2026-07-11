@@ -4,7 +4,7 @@ use std::{
     ffi::OsString,
     fs,
     path::{Component, Path, PathBuf},
-    process::{Command as ProcessCommand, ExitCode},
+    process::ExitCode,
 };
 
 use anyhow::{Context, Result};
@@ -46,7 +46,9 @@ use crate::cli::{CleanArgs, OutputFormat, RunArgs};
 use crate::discovery::{
     DiscoveredSource, bundled_stdlib_snapshot_identity, collect_source_paths, support_source_index,
 };
-use crate::verification::{public_surface_completeness_diagnostics, verify_build_artifacts};
+use crate::verification::{
+    isolated_python_command, public_surface_completeness_diagnostics, verify_build_artifacts,
+};
 use crate::{
     CommandSummary, bytecode_path_for, exit_code, load_project, print_summary,
     remove_dir_if_exists, resolve_python_executable,
@@ -1586,7 +1588,7 @@ fn compile_single_runtime_bytecode(interpreter: &Path, runtime_path: &Path) -> R
         fs::create_dir_all(parent)
             .with_context(|| format!("unable to create bytecode directory {}", parent.display()))?;
     }
-    let status = ProcessCommand::new(interpreter)
+    let status = isolated_python_command(interpreter)
         .args([
             "-c",
             "import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)",

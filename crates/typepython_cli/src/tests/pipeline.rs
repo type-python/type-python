@@ -2091,6 +2091,7 @@ fn compile_runtime_bytecode_uses_configured_python_executable() {
 
     let (compiled, log) = result;
     assert_eq!(compiled, 1);
+    assert!(log.contains("-I -B"));
     assert!(log.contains("py_compile.compile"));
     assert!(log.contains("__init__.py"));
     assert!(log.contains("__pycache__"));
