@@ -1028,7 +1028,11 @@ impl PythonSurfaceExtractor<'_> {
                         && name.id.as_str() != "__all__"
                         && self.top_level_name_is_exported(name.id.as_str())
                     {
-                        let kind = if annotation_is_type_alias(assign.annotation.as_ref()) {
+                        let kind = if annotation_is_type_alias(
+                            assign.annotation.as_ref(),
+                            &self.overload_bindings,
+                            None,
+                        ) {
                             "type alias"
                         } else {
                             "value"
@@ -1267,9 +1271,18 @@ impl PythonSurfaceExtractor<'_> {
                     if let Expr::Name(name) = assign.target.as_ref()
                         && public_name(name.id.as_str())
                     {
+                        let kind = if annotation_is_type_alias(
+                            assign.annotation.as_ref(),
+                            class_overload_bindings,
+                            Some(&self.overload_bindings),
+                        ) {
+                            "type alias"
+                        } else {
+                            "attribute"
+                        };
                         self.insert_value(
                             &format!("{key}.{}", name.id.as_str()),
-                            "attribute",
+                            kind,
                             canonical_tokens(
                                 self.source,
                                 self.tokens.in_range(assign.range),
@@ -1621,6 +1634,7 @@ impl<'a> Visitor<'a> for InstanceAttributeCollector<'a> {
 enum OverloadBinding {
     Decorator,
     AnyType,
+    TypeAliasMarker,
     TypingModule,
     Other,
 }
@@ -1669,6 +1683,17 @@ impl OverloadBindings {
             {
                 OverloadBinding::AnyType
             }
+            Expr::Attribute(attribute)
+                if attribute.attr.as_str() == "TypeAlias"
+                    && matches!(
+                        attribute.value.as_ref(),
+                        Expr::Name(name)
+                            if self.resolve(name.id.as_str(), fallback)
+                                == Some(OverloadBinding::TypingModule)
+                    ) =>
+            {
+                OverloadBinding::TypeAliasMarker
+            }
             _ => OverloadBinding::Other,
         }
     }
@@ -1707,6 +1732,7 @@ impl OverloadBindings {
                     let binding = match (imports_typing, source_name) {
                         (true, "overload") => OverloadBinding::Decorator,
                         (true, "Any") => OverloadBinding::AnyType,
+                        (true, "TypeAlias") => OverloadBinding::TypeAliasMarker,
                         _ => OverloadBinding::Other,
                     };
                     self.names.insert(local_name.to_owned(), binding);
@@ -1968,12 +1994,12 @@ fn simple_target_names(target: &Expr) -> Vec<&str> {
     }
 }
 
-fn annotation_is_type_alias(annotation: &Expr) -> bool {
-    match annotation {
-        Expr::Name(name) => name.id.as_str() == "TypeAlias",
-        Expr::Attribute(attribute) => attribute.attr.as_str() == "TypeAlias",
-        _ => false,
-    }
+fn annotation_is_type_alias(
+    annotation: &Expr,
+    bindings: &OverloadBindings,
+    fallback: Option<&OverloadBindings>,
+) -> bool {
+    bindings.expression_binding(annotation, fallback) == OverloadBinding::TypeAliasMarker
 }
 
 fn decorator_name(decorator: &Expr) -> Option<&str> {

@@ -784,6 +784,49 @@ fn diff_api_surfaces_reports_class_method_property_and_attribute_changes() {
 }
 
 #[test]
+fn diff_api_surfaces_resolves_legacy_type_alias_identity() {
+    let project_dir = temp_project_dir("diff_api_surfaces_resolves_legacy_type_alias_identity");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        let surface = |value: &str| {
+            format!(
+                concat!(
+                    "from typing import TypeAlias as _TA\n",
+                    "_Alias = _TA\n",
+                    "Public: _Alias = {0}\n",
+                    "class Box:\n",
+                    "    Nested: _TA = {0}\n",
+                    "class TypeAlias: ...\n",
+                    "Nominal: TypeAlias = {0}\n",
+                    "class Shadow:\n",
+                    "    TypeAlias: int\n",
+                    "    Nested: TypeAlias = {0}\n",
+                ),
+                value
+            )
+        };
+        fs::write(old_dir.join("app.pyi"), surface("int")).expect("old surface should be written");
+        fs::write(new_dir.join("app.pyi"), surface("str")).expect("new surface should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should resolve TypeAlias bindings")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let kinds = report
+        .changed
+        .iter()
+        .map(|change| (change.symbol.as_str(), change.kind.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(kinds.get("Public"), Some(&"type alias"));
+    assert_eq!(kinds.get("Box.Nested"), Some(&"type alias"));
+    assert_eq!(kinds.get("Nominal"), Some(&"value"));
+    assert_eq!(kinds.get("Shadow.Nested"), Some(&"attribute"));
+}
+
+#[test]
 fn diff_api_surfaces_uses_static_all_for_private_and_reexported_names() {
     let project_dir =
         temp_project_dir("diff_api_surfaces_uses_static_all_for_private_and_reexported_names");
