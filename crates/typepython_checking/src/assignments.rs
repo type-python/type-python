@@ -1997,28 +1997,78 @@ pub(super) fn find_owned_writable_member_target<'a>(
     class_decl: &'a Declaration,
     member_name: &str,
 ) -> Option<WritableAttributeTarget<'a>> {
-    if let Some(declaration) =
-        find_owned_value_declaration(nodes, class_node, class_decl, member_name)
-        && !declaration.is_class_var
+    let mut visited = BTreeSet::new();
+    find_owned_writable_member_target_with_visited(
+        nodes,
+        class_node,
+        class_decl,
+        member_name,
+        &mut visited,
+    )
+    .or(Some(WritableAttributeTarget::NonWritable))
+}
+
+fn find_owned_writable_member_target_with_visited<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+    visited: &mut BTreeSet<(String, String)>,
+) -> Option<WritableAttributeTarget<'a>> {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visited.insert(key) {
+        return None;
+    }
+
+    let local = class_node
+        .declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+                && declaration.name == member_name
+        })
+        .collect::<Vec<_>>();
+
+    if let Some(declaration) = local
+        .iter()
+        .copied()
+        .find(|declaration| declaration.kind == DeclarationKind::Value && !declaration.is_class_var)
     {
         return Some(WritableAttributeTarget::Value(declaration));
     }
 
-    let callables = find_owned_callable_declarations(nodes, class_node, class_decl, member_name);
-    if let Some(setter) = callables.iter().find(|declaration| {
+    if let Some(setter) = local.iter().copied().find(|declaration| {
         declaration.kind == DeclarationKind::Function
             && declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter)
     }) {
         return Some(WritableAttributeTarget::PropertySetter(setter));
     }
-    if callables.iter().any(|declaration| {
+    if local.iter().any(|declaration| {
         declaration.kind == DeclarationKind::Function
             && declaration.method_kind == Some(typepython_syntax::MethodKind::Property)
     }) {
         return Some(WritableAttributeTarget::ReadOnlyProperty);
     }
 
-    Some(WritableAttributeTarget::NonWritable)
+    if !local.is_empty() {
+        return Some(WritableAttributeTarget::NonWritable);
+    }
+
+    for base in class_decl.rendered_class_bases() {
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base)
+            && let Some(target) = find_owned_writable_member_target_with_visited(
+                nodes,
+                base_node,
+                base_decl,
+                member_name,
+                visited,
+            )
+        {
+            return Some(target);
+        }
+    }
+
+    None
 }
 
 pub(super) fn resolve_writable_member_semantic_type_with_self_type(

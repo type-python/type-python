@@ -18761,9 +18761,45 @@ fn check_reports_getter_only_property_assignment() {
 }
 
 #[test]
+fn check_reports_getter_only_property_shadowing_inherited_value_assignment() {
+    let result = check_temp_typepython_source(
+        "class Base:\n    name: str\n\nclass Box(Base):\n    @property\n    def name(self) -> str:\n        return \"x\"\n\ndef mutate(box: Box) -> None:\n    box.name = \"Grace\"\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"));
+    assert!(rendered.contains("property `name` on `Box`"));
+    assert!(rendered.contains("is not writable"));
+}
+
+#[test]
+fn check_reports_getter_only_property_shadowing_inherited_setter_assignment() {
+    let result = check_temp_typepython_source(
+        "class Base:\n    @property\n    def name(self) -> str:\n        return \"x\"\n\n    @name.setter\n    def name(self, value: str) -> None:\n        pass\n\nclass Box(Base):\n    @property\n    def name(self) -> str:\n        return \"x\"\n\ndef mutate(box: Box) -> None:\n    box.name = \"Grace\"\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"));
+    assert!(rendered.contains("property `name` on `Box`"));
+    assert!(rendered.contains("is not writable"));
+}
+
+#[test]
 fn check_reports_getter_only_property_augmented_assignment() {
     let result = check_temp_typepython_source(
         "class Box:\n    @property\n    def count(self) -> int:\n        return 0\n\ndef mutate(box: Box) -> None:\n    box.count += 1\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"));
+    assert!(rendered.contains("property `count` on `Box`"));
+    assert!(rendered.contains("is not writable"));
+}
+
+#[test]
+fn check_reports_getter_only_property_shadowing_inherited_value_augmented_assignment() {
+    let result = check_temp_typepython_source(
+        "class Base:\n    count: int\n\nclass Box(Base):\n    @property\n    def count(self) -> int:\n        return 0\n\ndef mutate(box: Box) -> None:\n    box.count += 1\n",
     );
 
     let rendered = result.diagnostics.as_text();
@@ -18818,6 +18854,16 @@ fn check_reports_property_setter_assignment_type_mismatch() {
 fn check_accepts_inherited_property_setter_assignment() {
     let result = check_temp_typepython_source(
         "class Base:\n    @property\n    def name(self) -> str:\n        return \"x\"\n\n    @name.setter\n    def name(self, value: str) -> None:\n        pass\n\nclass Box(Base):\n    pass\n\ndef mutate(box: Box) -> None:\n    box.name = \"Grace\"\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_accepts_inherited_property_setter_assignment_without_local_shadow() {
+    let result = check_temp_typepython_source(
+        "class Base:\n    @property\n    def name(self) -> str:\n        return \"x\"\n\n    @name.setter\n    def name(self, value: str) -> None:\n        pass\n\nclass Box(Base):\n    other: int\n\ndef mutate(box: Box) -> None:\n    box.name = \"Grace\"\n",
     );
 
     let rendered = result.diagnostics.as_text();
