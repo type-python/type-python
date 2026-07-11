@@ -414,6 +414,34 @@ fn diff_api_surfaces_accepts_typepython_source_directory_inputs() {
     assert_eq!(report.added[0].symbol, "Added");
 }
 
+#[test]
+fn diff_api_surfaces_classifies_typepython_dynamic_variance() {
+    let project_dir = temp_project_dir("diff_api_surfaces_classifies_typepython_dynamic_variance");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(
+            old_dir.join("app.tpy"),
+            "def load() -> dynamic: ...\ndef store(value: str) -> None: ...\n",
+        )
+        .expect("old surface should be written");
+        fs::write(
+            new_dir.join("app.tpy"),
+            "def load() -> str: ...\ndef store(value: dynamic) -> None: ...\n",
+        )
+        .expect("new surface should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should classify dynamic variance")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 2);
+    assert!(report.changed.iter().all(|change| change.classification == "likely type-compatible"));
+    assert_eq!(report.semver_recommendation, "minor");
+}
+
 #[cfg(unix)]
 #[test]
 fn diff_api_surfaces_does_not_follow_nested_symlinks() {

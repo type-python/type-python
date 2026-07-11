@@ -343,6 +343,12 @@ fn signature_mentions_dynamic_type(signature: &str) -> bool {
         .any(|token| token == "Any")
 }
 
+fn signature_mentions_typepython_dynamic_type(signature: &str) -> bool {
+    signature
+        .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+        .any(|token| matches!(token, "Any" | "dynamic"))
+}
+
 fn semver_recommendation(
     removed: &[ApiSurfaceChange],
     changed: &[ApiSurfaceChange],
@@ -2452,7 +2458,9 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
 }
 
 fn typepython_callable_symbol(kind: &str, signature: String) -> PublicSymbol {
-    let dynamic_positions = callable_dynamic_positions(&signature).unwrap_or_default();
+    let dynamic_positions =
+        callable_dynamic_positions_by(&signature, signature_mentions_typepython_dynamic_type)
+            .unwrap_or_default();
     PublicSymbol::callable(kind, signature, dynamic_positions)
 }
 
