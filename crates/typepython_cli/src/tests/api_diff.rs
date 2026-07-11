@@ -873,6 +873,312 @@ fn diff_api_surfaces_respects_overload_name_shadowing() {
 }
 
 #[test]
+fn diff_api_surfaces_merges_consistent_if_special_bindings() {
+    let project_dir = temp_project_dir("diff_api_surfaces_merges_consistent_if_special_bindings");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        let source = concat!(
+            "from typing import overload as _typing_overload\n",
+            "if FLAG:\n",
+            "    _overload = _typing_overload\n",
+            "elif OTHER:\n",
+            "    _overload = _typing_overload\n",
+            "else:\n",
+            "    _overload = _typing_overload\n",
+            "@_overload\n",
+            "def parse(value: str) -> FIRST_RETURN: ...\n",
+            "@_overload\n",
+            "def parse(value: bytes) -> int: ...\n",
+        );
+        fs::write(old_dir.join("app.pyi"), source.replace("FIRST_RETURN", "int"))
+            .expect("old stub should be written");
+        fs::write(new_dir.join("app.pyi"), source.replace("FIRST_RETURN", "str"))
+            .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("consistent conditional overload aliases should be retained")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].symbol, "parse");
+    assert!(report.changed[0].old_signature.as_deref().is_some_and(|signature| {
+        signature.contains("parse(value: str)") && signature.contains("parse(value: bytes)")
+    }));
+}
+
+#[test]
+fn diff_api_surfaces_merges_try_bindings_before_finally() {
+    let project_dir = temp_project_dir("diff_api_surfaces_merges_try_bindings_before_finally");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        let source = concat!(
+            "from typing import overload as _typing_overload\n",
+            "try:\n",
+            "    _overload = _typing_overload\n",
+            "except ImportError:\n",
+            "    _overload = _typing_overload\n",
+            "finally:\n",
+            "    _final_overload = _overload\n",
+            "@_final_overload\n",
+            "def parse(value: str) -> FIRST_RETURN: ...\n",
+            "@_final_overload\n",
+            "def parse(value: bytes) -> int: ...\n",
+        );
+        fs::write(old_dir.join("app.pyi"), source.replace("FIRST_RETURN", "int"))
+            .expect("old stub should be written");
+        fs::write(new_dir.join("app.pyi"), source.replace("FIRST_RETURN", "str"))
+            .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("finally should observe bindings shared by try outcomes")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].symbol, "parse");
+}
+
+#[test]
+fn diff_api_surfaces_merges_consistent_any_and_type_alias_bindings() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_merges_consistent_any_and_type_alias_bindings");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        let prefix = concat!(
+            "from typing import Any as _TypingAny, TypeAlias as _TypingTypeAlias\n",
+            "if FLAG:\n",
+            "    _Any = _TypingAny\n",
+            "    _TypeAlias = _TypingTypeAlias\n",
+            "else:\n",
+            "    _Any = _TypingAny\n",
+            "    _TypeAlias = _TypingTypeAlias\n",
+        );
+        fs::write(
+            old_dir.join("app.pyi"),
+            format!("{prefix}def load() -> _Any: ...\nAlias: _TypeAlias = list[int]\n"),
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            format!("{prefix}def load() -> str: ...\nAlias: _TypeAlias = list[str]\n"),
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("consistent Any and TypeAlias identities should survive control flow")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let changes = report
+        .changed
+        .iter()
+        .map(|change| (change.symbol.as_str(), change))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(changes["load"].classification, "likely type-compatible");
+    assert_eq!(changes["Alias"].kind, "type alias");
+}
+
+#[test]
+fn diff_api_surfaces_merges_consistent_class_property_bindings() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_merges_consistent_class_property_bindings");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!("class Box:\n", "    @property\n", "    def value(self) -> int: ...\n",),
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            concat!(
+                "class Box:\n",
+                "    if FLAG:\n",
+                "        _property = property\n",
+                "    else:\n",
+                "        _property = property\n",
+                "    @_property\n",
+                "    def value(self) -> int: ...\n",
+            ),
+        )
+        .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("consistent conditional property aliases should be retained")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+}
+
+#[test]
+fn diff_api_surfaces_degrades_conflicting_class_property_bindings() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_degrades_conflicting_class_property_bindings");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        let source = concat!(
+            "class Box:\n",
+            "    _property = property\n",
+            "    if FLAG:\n",
+            "        _property = _custom\n",
+            "    @_property\n",
+            "    def value(self) -> VALUE_TYPE: ...\n",
+        );
+        fs::write(old_dir.join("app.pyi"), source.replace("VALUE_TYPE", "int"))
+            .expect("old stub should be written");
+        fs::write(new_dir.join("app.pyi"), source.replace("VALUE_TYPE", "str"))
+            .expect("new stub should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("partially rebound property aliases should degrade to ordinary decorators")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].symbol, "Box.value");
+    assert_eq!(report.changed[0].kind, "method");
+}
+
+#[test]
+fn diff_api_surfaces_degrades_conflicting_special_bindings() {
+    let project_dir = temp_project_dir("diff_api_surfaces_degrades_conflicting_special_bindings");
+    let (any_report, type_alias_report) = {
+        let any_old = project_dir.join("any-old");
+        let any_new = project_dir.join("any-new");
+        let alias_old = project_dir.join("alias-old");
+        let alias_new = project_dir.join("alias-new");
+        for directory in [&any_old, &any_new, &alias_old, &alias_new] {
+            fs::create_dir_all(directory).expect("surface dir should be created");
+        }
+        fs::write(
+            any_old.join("app.pyi"),
+            concat!(
+                "from typing import Any as _Any\n",
+                "if FLAG:\n",
+                "    _Any = str\n",
+                "def load() -> _Any: ...\n",
+            ),
+        )
+        .expect("old Any stub should be written");
+        fs::write(any_new.join("app.pyi"), "def load() -> str: ...\n")
+            .expect("new Any stub should be written");
+        fs::write(alias_old.join("app.pyi"), "Alias: int = list[int]\n")
+            .expect("old alias stub should be written");
+        fs::write(
+            alias_new.join("app.pyi"),
+            concat!(
+                "from typing import TypeAlias as _TypeAlias\n",
+                "if FLAG:\n",
+                "    del _TypeAlias\n",
+                "else:\n",
+                "    del _TypeAlias\n",
+                "Alias: _TypeAlias = list[str]\n",
+            ),
+        )
+        .expect("new alias stub should be written");
+
+        (
+            diff_api_surfaces(&any_old, &any_new)
+                .expect("conflicting Any aliases should compare conservatively"),
+            diff_api_surfaces(&alias_old, &alias_new)
+                .expect("deleted TypeAlias markers should not be revived"),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(any_report.changed[0].classification, "unknown risk");
+    assert_eq!(type_alias_report.changed[0].kind, "value");
+}
+
+#[test]
+fn diff_api_surfaces_does_not_revive_rebound_conditional_overloads() {
+    let cases = [
+        (
+            "if_delete",
+            concat!(
+                "from typing import overload as _overload\n",
+                "if FLAG:\n",
+                "    del _overload\n",
+                "else:\n",
+                "    del _overload\n",
+            ),
+        ),
+        (
+            "try_conflict",
+            concat!(
+                "from typing import overload as _overload\n",
+                "try:\n",
+                "    _overload = _custom\n",
+                "except ImportError:\n",
+                "    del _overload\n",
+            ),
+        ),
+        (
+            "except_target",
+            concat!(
+                "from typing import overload as _overload\n",
+                "try:\n",
+                "    risky()\n",
+                "except Exception as _overload:\n",
+                "    pass\n",
+            ),
+        ),
+    ];
+
+    for (label, prefix) in cases {
+        let project_dir = temp_project_dir(&format!(
+            "diff_api_surfaces_does_not_revive_rebound_conditional_overloads_{label}"
+        ));
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        let suffix = concat!(
+            "@_overload\n",
+            "def parse(value: str) -> FIRST_RETURN: ...\n",
+            "def parse(value: bytes) -> int: ...\n",
+        );
+        fs::write(
+            old_dir.join("app.pyi"),
+            format!("{prefix}{}", suffix.replace("FIRST_RETURN", "int")),
+        )
+        .expect("old stub should be written");
+        fs::write(
+            new_dir.join("app.pyi"),
+            format!("{prefix}{}", suffix.replace("FIRST_RETURN", "str")),
+        )
+        .expect("new stub should be written");
+
+        let report = diff_api_surfaces(&old_dir, &new_dir)
+            .expect("uncertain overload aliases must not be treated as typing.overload");
+        remove_temp_project_dir(&project_dir);
+
+        assert!(report.added.is_empty(), "{label}");
+        assert!(report.removed.is_empty(), "{label}");
+        assert!(report.changed.is_empty(), "{label}: {:#?}", report.changed);
+    }
+}
+
+#[test]
 fn diff_api_surfaces_reports_class_method_property_and_attribute_changes() {
     let project_dir =
         temp_project_dir("diff_api_surfaces_reports_class_method_property_and_attribute_changes");
