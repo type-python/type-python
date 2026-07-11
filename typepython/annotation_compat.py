@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 import inspect
 import sys
 from dataclasses import dataclass
@@ -148,9 +149,27 @@ def _fallback_get_annotations(
             eval_str=eval_str,
         )
 
+    return _legacy_get_annotations(
+        obj,
+        globals=globals,
+        locals=locals,
+        eval_str=eval_str,
+    )
+
+
+def _legacy_get_annotations(
+    obj: Any,
+    *,
+    globals: dict[str, Any] | None,
+    locals: dict[str, Any] | None,
+    eval_str: bool,
+) -> dict[str, Any]:
+
     raw = _legacy_raw_annotations(obj)
     if raw is None:
         return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{obj!r}.__annotations__ is neither a dict nor None")
     annotations = dict(raw)
     if not eval_str:
         return annotations
@@ -188,9 +207,10 @@ def _legacy_eval_namespaces(
         default_globals = vars(module) if module is not None else {}
         default_locals = dict(vars(obj))
     else:
-        default_globals = getattr(obj, "__globals__", None)
+        unwrapped = _legacy_unwrap_callable(obj)
+        default_globals = getattr(unwrapped, "__globals__", None)
         if default_globals is None:
-            module = sys.modules.get(getattr(obj, "__module__", ""))
+            module = sys.modules.get(getattr(unwrapped, "__module__", ""))
             default_globals = vars(module) if module is not None else {}
         default_locals = None
 
@@ -202,6 +222,23 @@ def _legacy_eval_namespaces(
     else:
         localns = globalns
     return globalns, localns
+
+
+def _legacy_unwrap_callable(obj: Any) -> Any:
+    unwrapped = obj
+    seen: set[int] = set()
+    while True:
+        identity = id(unwrapped)
+        if identity in seen:
+            raise ValueError("wrapper loop when unwrapping annotations")
+        seen.add(identity)
+        if hasattr(unwrapped, "__wrapped__"):
+            unwrapped = unwrapped.__wrapped__
+            continue
+        if isinstance(unwrapped, functools.partial):
+            unwrapped = unwrapped.func
+            continue
+        return unwrapped
 
 
 class _AnnotationAuditVisitor(ast.NodeVisitor):

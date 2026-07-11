@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import types
 import unittest
 
@@ -46,6 +47,47 @@ class AnnotationCompatTests(unittest.TestCase):
             with self.subTest(value=type(value).__name__):
                 with self.assertRaisesRegex(TypeError, "module, class, or callable"):
                     annotation_compat.get_annotations(value)
+
+    def test_legacy_fallback_unwraps_callable_namespaces(self) -> None:
+        namespace: dict[str, object] = {"Alias": bytes}
+        exec(
+            "def original(value: Alias) -> Alias:\n    return value\n",
+            namespace,
+            namespace,
+        )
+        original = namespace["original"]
+
+        def wrapper(*args: object, **kwargs: object) -> object:
+            return original(*args, **kwargs)  # type: ignore[operator]
+
+        functools.update_wrapper(wrapper, original)
+        partial = functools.partial(original)  # type: ignore[arg-type]
+        partial.__annotations__ = dict(wrapper.__annotations__)
+
+        for callable_obj in (wrapper, partial):
+            with self.subTest(callable=type(callable_obj).__name__):
+                annotations = annotation_compat._legacy_get_annotations(
+                    callable_obj,
+                    globals=None,
+                    locals=None,
+                    eval_str=True,
+                )
+                self.assertEqual(annotations, {"value": bytes, "return": bytes})
+
+    def test_legacy_fallback_rejects_malformed_annotations(self) -> None:
+        class Callable:
+            __annotations__ = [("value", int)]
+
+            def __call__(self) -> None:
+                return None
+
+        with self.assertRaisesRegex(ValueError, "neither a dict nor None"):
+            annotation_compat._legacy_get_annotations(
+                Callable(),
+                globals=None,
+                locals=None,
+                eval_str=False,
+            )
 
     def test_eval_str_fallback_merges_partial_explicit_namespaces(self) -> None:
         function_namespace: dict[str, object] = {"GlobalType": bytes}
