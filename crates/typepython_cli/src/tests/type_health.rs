@@ -82,6 +82,40 @@ fn build_type_health_report_detects_pep561_and_stub_packages() {
 }
 
 #[test]
+fn type_health_rejects_unavailable_configured_roots() {
+    let project_dir = temp_project_dir("type_health_rejects_unavailable_configured_roots");
+    let (report_error, command_error) = {
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"missing-stubs\"]\n",
+        )
+        .expect("config should be written");
+        fs::create_dir_all(project_dir.join("src")).expect("src should exist");
+
+        let report_error = build_type_health_report_for_target(
+            &project_dir,
+            &[String::from("missing-stubs")],
+            typepython_target::PythonTarget::default(),
+        )
+        .expect_err("missing configured root should reject the report")
+        .to_string();
+        let command_error = run_type_health(TypeHealthArgs {
+            run: RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            fail_under: Some(100),
+            write_lock: false,
+        })
+        .expect_err("missing configured root should fail the command")
+        .to_string();
+        (report_error, command_error)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report_error.contains("configured type root"), "{report_error}");
+    assert!(report_error.contains("unavailable"), "{report_error}");
+    assert!(command_error.contains("configured type root"), "{command_error}");
+}
+
+#[test]
 fn run_type_health_writes_lock_and_enforces_threshold() {
     let project_dir = temp_project_dir("run_type_health_writes_lock_and_enforces_threshold");
     let (success, failure, lock) = {

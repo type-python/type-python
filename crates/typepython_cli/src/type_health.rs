@@ -121,8 +121,11 @@ pub(crate) fn build_type_health_report_for_target(
     let mut packages = Vec::new();
     for root in type_roots {
         let root_path = config_dir.join(root);
-        if !root_path.is_dir() {
-            continue;
+        let metadata = fs::metadata(&root_path).with_context(|| {
+            format!("configured type root `{}` is unavailable", root_path.display())
+        })?;
+        if !metadata.is_dir() {
+            anyhow::bail!("configured type root `{}` is not a directory", root_path.display());
         }
         for entry in fs::read_dir(&root_path)
             .with_context(|| format!("unable to read {}", root_path.display()))?
