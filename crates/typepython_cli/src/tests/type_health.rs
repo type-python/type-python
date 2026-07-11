@@ -116,6 +116,50 @@ fn type_health_rejects_unavailable_configured_roots() {
 }
 
 #[test]
+fn type_health_does_not_treat_stub_metadata_as_runtime_metadata() {
+    let project_dir =
+        temp_project_dir("type_health_does_not_treat_stub_metadata_as_runtime_metadata");
+    let package = {
+        fs::create_dir_all(project_dir.join("site/demo-stubs/demo"))
+            .expect("stub package should exist");
+        fs::write(project_dir.join("site/demo-stubs/demo/__init__.pyi"), "value: int\n")
+            .expect("stub should be written");
+        fs::write(project_dir.join("site/demo-stubs/py.typed"), "partial\n")
+            .expect("marker should be written");
+        fs::create_dir_all(project_dir.join("site/demo_stubs-1.2.0.dist-info"))
+            .expect("stub metadata should exist");
+        fs::write(
+            project_dir.join("site/demo_stubs-1.2.0.dist-info/METADATA"),
+            "Metadata-Version: 2.1\nName: demo-stubs\nVersion: 1.2.0\n",
+        )
+        .expect("stub metadata should be written");
+        fs::create_dir_all(project_dir.join("site/demo_extra-9.9.9.dist-info"))
+            .expect("unrelated metadata should exist");
+        fs::write(
+            project_dir.join("site/demo_extra-9.9.9.dist-info/METADATA"),
+            "Metadata-Version: 2.1\nName: demo-extra\nVersion: 9.9.9\n",
+        )
+        .expect("unrelated metadata should be written");
+
+        build_type_health_report_for_target(
+            &project_dir,
+            &[String::from("site")],
+            typepython_target::PythonTarget::default(),
+        )
+        .expect("report should build")
+        .packages
+        .into_iter()
+        .find(|package| package.is_stub_only && package.name == "demo")
+        .expect("stub package should be reported")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(package.runtime_version, None);
+    assert_eq!(package.stub_version.as_deref(), Some("1.2.0"));
+    assert_eq!(package.stub_version_matches_runtime, None);
+}
+
+#[test]
 fn run_type_health_writes_lock_and_enforces_threshold() {
     let project_dir = temp_project_dir("run_type_health_writes_lock_and_enforces_threshold");
     let (success, failure, lock) = {

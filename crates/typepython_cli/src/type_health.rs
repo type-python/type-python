@@ -433,7 +433,8 @@ fn distribution_version(site_root: &Path, distribution_name: &str) -> Result<Opt
     if !site_root.is_dir() {
         return Ok(None);
     }
-    let normalized_distribution = distribution_name.replace('_', "-").to_ascii_lowercase();
+    let normalized_distribution = normalize_distribution_name(distribution_name);
+    let mut matches = Vec::new();
     for entry in fs::read_dir(site_root)
         .with_context(|| format!("unable to read {}", site_root.display()))?
     {
@@ -441,20 +442,74 @@ fn distribution_version(site_root: &Path, distribution_name: &str) -> Result<Opt
         let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let normalized_name = file_name.replace('_', "-").to_ascii_lowercase();
-        if !normalized_name.starts_with(&format!("{normalized_distribution}-"))
-            || !normalized_name.ends_with(".dist-info")
-        {
+        let Some(stem) = file_name.strip_suffix(".dist-info") else {
+            continue;
+        };
+        let Some((filename_distribution, _)) = stem.rsplit_once('-') else {
+            continue;
+        };
+        if normalize_distribution_name(filename_distribution) != normalized_distribution {
             continue;
         }
         let metadata_path = path.join("METADATA");
         let metadata = fs::read_to_string(&metadata_path)
             .with_context(|| format!("unable to read {}", metadata_path.display()))?;
-        if let Some(version) = metadata.lines().find_map(|line| line.strip_prefix("Version: ")) {
-            return Ok(Some(version.trim().to_owned()));
+        let (metadata_name, version) =
+            distribution_metadata_identity(&metadata).with_context(|| {
+                format!("unable to identify distribution metadata in {}", metadata_path.display())
+            })?;
+        if normalize_distribution_name(&metadata_name) != normalized_distribution {
+            anyhow::bail!(
+                "distribution metadata `{}` declares Name `{metadata_name}`, expected `{distribution_name}`",
+                metadata_path.display()
+            );
+        }
+        matches.push((metadata_path, version));
+    }
+    match matches.as_slice() {
+        [] => Ok(None),
+        [(_, version)] => Ok(Some(version.clone())),
+        matches => anyhow::bail!(
+            "multiple metadata directories match distribution `{distribution_name}`: {}",
+            matches
+                .iter()
+                .map(|(path, _)| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+fn normalize_distribution_name(name: &str) -> String {
+    name.to_ascii_lowercase()
+        .split(['-', '_', '.'])
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn distribution_metadata_identity(metadata: &str) -> Result<(String, String)> {
+    let mut names = Vec::new();
+    let mut versions = Vec::new();
+    for line in metadata.lines() {
+        if line.is_empty() {
+            break;
+        }
+        let Some((header, value)) = line.split_once(':') else {
+            continue;
+        };
+        if header.eq_ignore_ascii_case("Name") {
+            names.push(value.trim().to_owned());
+        } else if header.eq_ignore_ascii_case("Version") {
+            versions.push(value.trim().to_owned());
         }
     }
-    Ok(None)
+    match (names.as_slice(), versions.as_slice()) {
+        ([name], [version]) if !name.is_empty() && !version.is_empty() => {
+            Ok((name.clone(), version.clone()))
+        }
+        _ => anyhow::bail!("metadata must contain exactly one non-empty Name and Version header"),
+    }
 }
 
 fn write_type_lock(path: &Path, report: &TypeHealthReport, inputs: &TypeLockInputs) -> Result<()> {
