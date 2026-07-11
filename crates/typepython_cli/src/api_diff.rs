@@ -454,14 +454,14 @@ fn collect_zip_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<String, 
             .cmp(&surface_source_priority(right.2))
             .then_with(|| left.0.cmp(&right.0))
     });
-    for (entry_name, source, kind) in sources {
-        if kind != SurfaceSourceKind::Stub
+    for (entry_name, source, source_kind) in sources {
+        if source_kind != SurfaceSourceKind::Stub
             && !archive_entry_is_under_typed_root(&entry_name, &typed_roots)
         {
             continue;
         }
-        let module = module_name_from_archive_entry(&entry_name);
-        let symbols = public_symbols(&source, kind).with_context(|| {
+        let module = module_name_from_archive_entry(&entry_name, kind);
+        let symbols = public_symbols(&source, source_kind).with_context(|| {
             format!("unable to parse public API surface entry {entry_name} in {}", path.display())
         })?;
         insert_surface_module(
@@ -536,7 +536,7 @@ fn collect_tar_gz_surface(path: &Path) -> Result<BTreeMap<String, BTreeMap<Strin
         {
             continue;
         }
-        let module = module_name_from_archive_entry(&entry_path);
+        let module = module_name_from_archive_entry(&entry_path, ArchivePathKind::Sdist);
         let symbols = public_symbols(&source, kind).with_context(|| {
             format!("unable to parse public API surface entry {entry_path} in {}", path.display())
         })?;
@@ -644,14 +644,27 @@ fn is_tar_gz_artifact(path: &Path) -> bool {
     name.ends_with(".tar.gz") || name.ends_with(".tgz") || name.ends_with(".sdist")
 }
 
-fn module_name_from_archive_entry(entry_name: &str) -> String {
+fn module_name_from_archive_entry(entry_name: &str, kind: ArchivePathKind) -> String {
     let mut parts = Path::new(entry_name)
         .with_extension("")
         .components()
         .map(|component| component.as_os_str().to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    if parts.first().is_some_and(|part| part.contains('-')) && parts.len() > 1 {
-        parts.remove(0);
+    match kind {
+        ArchivePathKind::Sdist
+            if parts.first().is_some_and(|part| part.contains('-')) && parts.len() > 1 =>
+        {
+            parts.remove(0);
+        }
+        ArchivePathKind::Wheel => {
+            if let Some(package) = parts.first_mut()
+                && let Some(runtime_package) = package.strip_suffix("-stubs")
+                && !runtime_package.is_empty()
+            {
+                *package = runtime_package.to_owned();
+            }
+        }
+        ArchivePathKind::Sdist => {}
     }
     if parts.last().map(String::as_str) == Some("__init__") {
         parts.pop();

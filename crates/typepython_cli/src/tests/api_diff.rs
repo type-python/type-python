@@ -247,6 +247,36 @@ fn diff_api_surfaces_ignores_false_archive_typed_markers() {
 }
 
 #[test]
+fn diff_api_surfaces_maps_stub_only_wheel_packages_to_runtime_modules() {
+    let project_dir =
+        temp_project_dir("diff_api_surfaces_maps_stub_only_wheel_packages_to_runtime_modules");
+    let report = {
+        let old_dir = project_dir.join("old");
+        fs::create_dir_all(old_dir.join("foo")).expect("old package should be created");
+        fs::write(old_dir.join("foo/__init__.pyi"), "stable: int\n")
+            .expect("package stub should be written");
+        fs::write(old_dir.join("foo/mod.pyi"), "def parse() -> str: ...\n")
+            .expect("module stub should be written");
+        let new_wheel = project_dir.join("foo-1.0.0-py3-none-any.whl");
+        write_zip_archive(
+            &new_wheel,
+            &[
+                ("foo-stubs/__init__.pyi", "stable: int\n"),
+                ("foo-stubs/mod.pyi", "def parse() -> str: ...\n"),
+            ],
+        );
+
+        diff_api_surfaces(&old_dir, &new_wheel)
+            .expect("stub-only wheel paths should use runtime module names")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+}
+
+#[test]
 fn diff_api_surfaces_accepts_source_directory_inputs_when_stubs_are_absent() {
     let project_dir = temp_project_dir("diff_api_surfaces_accepts_source_directory_inputs");
     let report = {
