@@ -2280,6 +2280,66 @@ fn verify_publication_metadata_accepts_matching_requires_python_for_native_outpu
 }
 
 #[test]
+fn verify_publication_metadata_rejects_inconsistent_requires_python_sources() {
+    let project_dir = temp_project_dir(
+        "verify_publication_metadata_rejects_inconsistent_requires_python_sources",
+    );
+    let report = {
+        fs::create_dir_all(project_dir.join("build/app")).expect("build dir should be created");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\ntarget_python = \"3.13\"\n",
+        )
+        .expect("typepython.toml should be written");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\nrequires-python = \">=3.13\"\n",
+        )
+        .expect("pyproject.toml should be written");
+        fs::write(project_dir.join("build/app/__init__.py"), "type Pair[T = int] = tuple[T, T]\n")
+            .expect("runtime artifact should be written");
+        fs::write(project_dir.join("build/app/__init__.pyi"), "type Pair[T = int] = tuple[T, T]\n")
+            .expect("stub artifact should be written");
+        let wheel_path = project_dir.join("dist/demo-0.1.0-py3-none-any.whl");
+        write_zip_archive(
+            &wheel_path,
+            &[(
+                "demo-0.1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\nRequires-Python: >=3.14\n",
+            )],
+        );
+        let sdist_path = project_dir.join("dist/demo-0.1.0.tar.gz");
+        write_tar_gz_archive(
+            &sdist_path,
+            "demo-0.1.0",
+            &[("PKG-INFO", "Metadata-Version: 2.1\nRequires-Python: >=3.15\n")],
+        );
+
+        let config = load(&project_dir).expect("config should load");
+        verify_publication_metadata(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join("build/app/__init__.py")),
+                stub_path: Some(project_dir.join("build/app/__init__.pyi")),
+            }],
+            None,
+            &[
+                SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path },
+                SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: sdist_path },
+            ],
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.has_errors(), "inconsistent metadata must block verification");
+    let rendered = report.as_text();
+    assert!(rendered.contains("wheel metadata"), "{rendered}");
+    assert!(rendered.contains("sdist metadata"), "{rendered}");
+    assert!(rendered.contains("project metadata declares `>=3.13`"), "{rendered}");
+}
+
+#[test]
 fn verify_publication_metadata_accepts_typing_extensions_baseline_when_declared() {
     let project_dir = temp_project_dir(
         "verify_publication_metadata_accepts_typing_extensions_baseline_when_declared",

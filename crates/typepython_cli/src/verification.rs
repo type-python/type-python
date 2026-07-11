@@ -875,6 +875,7 @@ pub(crate) fn verify_publication_metadata(
     supplied_artifacts: &[SuppliedVerifyArtifact],
 ) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
+    let mut observed_metadata = Vec::new();
     let requirements = modules
         .map(|modules| publication_requirements_from_modules(artifacts, modules))
         .unwrap_or_else(|| publication_requirements_from_artifacts(artifacts));
@@ -885,15 +886,21 @@ pub(crate) fn verify_publication_metadata(
             &requirements,
             &metadata,
         ));
+        observed_metadata.push((String::from("project metadata"), metadata));
     }
 
     for artifact in supplied_artifacts {
         match supplied_artifact_package_metadata(artifact) {
-            Ok(Some(metadata)) => diagnostics.diagnostics.extend(publication_metadata_diagnostics(
-                &format!("{} metadata `{}`", artifact.kind.label(), artifact.path.display()),
-                &requirements,
-                &metadata,
-            )),
+            Ok(Some(metadata)) => {
+                let label =
+                    format!("{} metadata `{}`", artifact.kind.label(), artifact.path.display());
+                diagnostics.diagnostics.extend(publication_metadata_diagnostics(
+                    &label,
+                    &requirements,
+                    &metadata,
+                ));
+                observed_metadata.push((label, metadata));
+            }
             Ok(None) => {}
             Err(error) => diagnostics.push(Diagnostic::error(
                 "TPY5003",
@@ -905,6 +912,9 @@ pub(crate) fn verify_publication_metadata(
             )),
         }
     }
+    diagnostics
+        .diagnostics
+        .extend(publication_requires_python_consistency_diagnostics(&observed_metadata));
 
     diagnostics
 }
@@ -1302,6 +1312,50 @@ fn requires_python_compatibility(
     } else {
         Ok(RequiresPythonCompatibility::AllowsUnsupported)
     }
+}
+
+fn publication_requires_python_consistency_diagnostics(
+    metadata: &[(String, PackageMetadata)],
+) -> Vec<Diagnostic> {
+    let Some((reference_label, reference)) = metadata.first() else {
+        return Vec::new();
+    };
+    metadata
+        .iter()
+        .skip(1)
+        .filter_map(|(label, candidate)| {
+            let equivalent = requires_python_specifiers_equivalent(
+                reference.requires_python.as_deref(),
+                candidate.requires_python.as_deref(),
+            )?;
+            (!equivalent).then(|| {
+                Diagnostic::error(
+                    "TPY5003",
+                    format!(
+                        "{label} declares Requires-Python {} but {reference_label} declares {}",
+                        format_optional_requires_python(candidate.requires_python.as_deref()),
+                        format_optional_requires_python(reference.requires_python.as_deref()),
+                    ),
+                )
+            })
+        })
+        .collect()
+}
+
+fn requires_python_specifiers_equivalent(left: Option<&str>, right: Option<&str>) -> Option<bool> {
+    match (left, right) {
+        (None, None) => Some(true),
+        (Some(left), Some(right)) => {
+            let left = left.parse::<VersionSpecifiers>().ok()?;
+            let right = right.parse::<VersionSpecifiers>().ok()?;
+            Some(release_specifiers_to_ranges(left) == release_specifiers_to_ranges(right))
+        }
+        (Some(_), None) | (None, Some(_)) => Some(false),
+    }
+}
+
+fn format_optional_requires_python(specifier: Option<&str>) -> String {
+    specifier.map_or_else(|| String::from("no value"), |specifier| format!("`{specifier}`"))
 }
 
 fn typing_extensions_lower_bound(requirements: &[String]) -> Option<(u16, u16)> {
@@ -4025,6 +4079,20 @@ mod unit_tests {
                 "{requires_python:?}: {diagnostics:?}"
             );
         }
+    }
+
+    #[test]
+    fn requires_python_consistency_uses_semantic_ranges() {
+        assert_eq!(
+            requires_python_specifiers_equivalent(Some(">=3.13,<4"), Some("<4.0, >=3.13.0")),
+            Some(true)
+        );
+        assert_eq!(
+            requires_python_specifiers_equivalent(Some(">=3.13"), Some(">=3.14")),
+            Some(false)
+        );
+        assert_eq!(requires_python_specifiers_equivalent(None, Some(">=3.13")), Some(false));
+        assert_eq!(requires_python_specifiers_equivalent(Some("^3.13"), Some(">=3.13")), None);
     }
 
     #[test]
