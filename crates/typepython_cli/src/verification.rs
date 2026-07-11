@@ -2554,25 +2554,13 @@ pub(crate) fn verify_runtime_public_name_parity_for_artifact(
     let Some(module_name) = logical_module_name_from_runtime_path(out_root, runtime_path) else {
         return diagnostics;
     };
-    if let Err(error) = verify_runtime_module_importability(config, out_root, &module_name) {
-        diagnostics.push(Diagnostic::error(
-            "TPY5003",
-            format!(
-                "runtime module `{}` from `{}` is not importable: {}",
-                module_name,
-                runtime_path.display(),
-                error,
-            ),
-        ));
-        return diagnostics;
-    }
-    let runtime_names = match runtime_public_names_from_import(config, out_root, &module_name) {
-        Ok(names) => names,
+    let import_result = match probe_runtime_module(config, out_root, &module_name) {
+        Ok(result) => result,
         Err(error) => {
             diagnostics.push(Diagnostic::error(
                 "TPY5003",
                 format!(
-                    "unable to inspect runtime public names for `{}` from `{}`: {error}",
+                    "unable to probe runtime module `{}` from `{}`: {error}",
                     module_name,
                     runtime_path.display(),
                 ),
@@ -2580,6 +2568,32 @@ pub(crate) fn verify_runtime_public_name_parity_for_artifact(
             return diagnostics;
         }
     };
+    if !import_result.importable {
+        diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "runtime module `{}` from `{}` is not importable: {}",
+                module_name,
+                runtime_path.display(),
+                import_result
+                    .error
+                    .unwrap_or_else(|| format!("module `{module_name}` could not be imported")),
+            ),
+        ));
+        return diagnostics;
+    }
+    let Some(runtime_names) = import_result.public_names else {
+        diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "runtime module `{}` from `{}` did not report public names",
+                module_name,
+                runtime_path.display(),
+            ),
+        ));
+        return diagnostics;
+    };
+    let runtime_names = runtime_names.into_iter().collect();
     let authoritative_names = match authoritative_public_names(stub_path) {
         Ok(names) => names,
         Err(error) => {
@@ -2625,13 +2639,13 @@ fn runtime_public_names(runtime_path: &Path) -> std::result::Result<BTreeSet<Str
     public_names_from_module_file(runtime_path)
 }
 
-fn verify_runtime_module_importability(
+fn probe_runtime_module(
     config: &ConfigHandle,
     out_root: &Path,
     module_name: &str,
-) -> std::result::Result<(), String> {
-    let probe_dir = runtime_import_probe_dir(module_name)?;
+) -> std::result::Result<RuntimeImportabilityResult, String> {
     let import_root = runtime_import_root(config, out_root)?;
+    let probe_dir = runtime_import_probe_dir(module_name)?;
     let interpreter = resolve_python_executable(config);
     let output = ProcessCommand::new(&interpreter)
         .current_dir(&probe_dir)
@@ -2656,57 +2670,8 @@ fn verify_runtime_module_importability(
             output.status, stderr_suffix
         ));
     }
-    let result = serde_json::from_slice::<RuntimeImportabilityResult>(&output.stdout)
-        .map_err(|error| format!("unable to parse runtime importability output: {error}"))?;
-    if result.importable {
-        Ok(())
-    } else {
-        Err(result.error.unwrap_or_else(|| format!("module `{module_name}` could not be imported")))
-    }
-}
-
-fn runtime_public_names_from_import(
-    config: &ConfigHandle,
-    out_root: &Path,
-    module_name: &str,
-) -> std::result::Result<BTreeSet<String>, String> {
-    let probe_dir = runtime_import_probe_dir(module_name)?;
-    let import_root = runtime_import_root(config, out_root)?;
-    let interpreter = resolve_python_executable(config);
-    let output = ProcessCommand::new(&interpreter)
-        .current_dir(&probe_dir)
-        .args(["-B", "-c", RUNTIME_IMPORTABILITY_SCRIPT])
-        .arg(&import_root)
-        .arg(module_name)
-        .output()
-        .map_err(|error| {
-            format!(
-                "unable to inspect runtime public names with `{}`: {error}",
-                interpreter.display()
-            )
-        });
-    let _ = fs::remove_dir_all(&probe_dir);
-    let output = output?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stderr_suffix =
-            if stderr.trim().is_empty() { String::new() } else { format!(": {}", stderr.trim()) };
-        return Err(format!(
-            "runtime public-name probe exited with status {}{}",
-            output.status, stderr_suffix
-        ));
-    }
-    let result = serde_json::from_slice::<RuntimeImportabilityResult>(&output.stdout)
-        .map_err(|error| format!("unable to parse runtime public-name output: {error}"))?;
-    if !result.importable {
-        return Err(result
-            .error
-            .unwrap_or_else(|| format!("module `{module_name}` could not be imported")));
-    }
-    result
-        .public_names
-        .map(|names| names.into_iter().collect())
-        .ok_or_else(|| format!("runtime module `{module_name}` did not report public names"))
+    serde_json::from_slice::<RuntimeImportabilityResult>(&output.stdout)
+        .map_err(|error| format!("unable to parse runtime importability output: {error}"))
 }
 
 fn runtime_import_root(

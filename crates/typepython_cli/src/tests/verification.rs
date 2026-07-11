@@ -4267,6 +4267,50 @@ fn verify_runtime_module_importability_accepts_relative_output_root() {
 }
 
 #[test]
+fn verify_runtime_public_name_parity_imports_each_module_once() {
+    let project_dir =
+        temp_project_dir("verify_runtime_public_name_parity_imports_each_module_once");
+    let (diagnostics, import_count) = {
+        let package_root = project_dir.join(".typepython/build/app");
+        fs::create_dir_all(&package_root).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        let import_marker = project_dir.join("import-count.txt");
+        let marker_literal = serde_json::to_string(&import_marker.display().to_string())
+            .expect("marker path should serialize");
+        fs::write(
+            package_root.join("__init__.py"),
+            format!(
+                "with open({marker_literal}, 'a', encoding='utf-8') as marker:\n    marker.write('x')\n__all__ = ['build_user']\n\ndef build_user() -> int:\n    return 1\n"
+            ),
+        )
+        .expect("runtime artifact should be written");
+        fs::write(
+            package_root.join("__init__.pyi"),
+            "__all__ = ['build_user']\n\ndef build_user() -> int: ...\n",
+        )
+        .expect("stub artifact should be written");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        let diagnostics = verify_runtime_public_name_parity_for_artifact(
+            &config,
+            &project_dir.join(".typepython/build"),
+            &EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(package_root.join("__init__.py")),
+                stub_path: Some(package_root.join("__init__.pyi")),
+            },
+        );
+        let import_count = fs::read_to_string(&import_marker).expect("module should be imported");
+        (diagnostics, import_count)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    assert_eq!(import_count, "x");
+}
+
+#[test]
 fn verify_runtime_public_name_parity_uses_configured_interpreter_environment() {
     let project_dir = temp_project_dir(
         "verify_runtime_public_name_parity_uses_configured_interpreter_environment",
