@@ -1013,7 +1013,7 @@ impl PythonSurfaceExtractor<'_> {
         for statement in suite {
             match statement {
                 Stmt::FunctionDef(function)
-                    if self.top_level_name_is_exported(function.name.as_str()) =>
+                    if self.top_level_function_is_exported(function.name.as_str()) =>
                 {
                     self.insert_function(function.name.as_str(), function, "function", None, false);
                 }
@@ -1678,6 +1678,10 @@ impl PythonSurfaceExtractor<'_> {
 
     fn top_level_name_is_exported(&self, name: &str) -> bool {
         self.explicit_exports.map_or_else(|| public_name(name), |names| names.contains(name))
+    }
+
+    fn top_level_function_is_exported(&self, name: &str) -> bool {
+        name == "__getattr__" || self.top_level_name_is_exported(name)
     }
 
     fn import_is_exported(&self, name: &str, has_explicit_alias: bool) -> bool {

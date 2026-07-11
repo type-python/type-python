@@ -1142,6 +1142,36 @@ fn diff_api_surfaces_uses_static_all_for_private_and_reexported_names() {
 }
 
 #[test]
+fn diff_api_surfaces_tracks_module_getattr_fallback() {
+    let project_dir = temp_project_dir("diff_api_surfaces_tracks_module_getattr_fallback");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(
+            old_dir.join("app.pyi"),
+            concat!(
+                "from typing import Any\n",
+                "__all__ = []\n",
+                "def __getattr__(name: str) -> Any: ...\n",
+            ),
+        )
+        .expect("old surface should be written");
+        fs::write(new_dir.join("app.pyi"), "__all__ = []\n")
+            .expect("new surface should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should track module __getattr__")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.removed.len(), 1);
+    assert_eq!(report.removed[0].symbol, "__getattr__");
+    assert_eq!(report.removed[0].kind, "function");
+    assert_eq!(report.semver_recommendation, "major");
+}
+
+#[test]
 fn diff_api_surfaces_extracts_guarded_definitions() {
     let project_dir = temp_project_dir("diff_api_surfaces_extracts_guarded_definitions");
     let report = {
