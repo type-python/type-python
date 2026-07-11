@@ -19,6 +19,7 @@ clap.workspace = true
 csv.workspace = true
 flate2.workspace = true
 glob.workspace = true
+goblin.workspace = true
 littrs-ruff-python-ast = "0.6.2"
 littrs-ruff-python-parser = "0.6.2"
 notify.workspace = true

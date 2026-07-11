@@ -290,6 +290,7 @@ typepython verify [OPTIONS]
 - Public API completeness: all exported names have known types (when `typing.require_known_public_types = true`)
 - Runtime/type surface consistency: names in `.py` match names in `.pyi`
 - Wheel/sdist structure validation
+- Native wheel payload validation against declared platform tags, including Mach-O/ELF/PE architecture checks and macOS deployment floors
 - Optional API surface diff gate: `--api-diff OLD_SURFACE` compares a previous source, stub, wheel, or sdist surface against the current build output
 - `py.typed` marker presence
 - Packaging metadata consistency: `Requires-Python` and `typing_extensions` declarations keep pace with emitted native/backport requirements

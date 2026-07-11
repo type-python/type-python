@@ -45,6 +45,7 @@ use crate::pipeline::{
     runtime_write_diagnostic, should_emit_build_outputs,
 };
 use crate::type_health::{TypeHealthReport, build_type_health_report_for_target};
+use crate::wheel_binary::wheel_native_binary_errors;
 use crate::{
     CLI_JSON_SCHEMA_VERSION, CommandSummary, RUNTIME_IMPORTABILITY_SCRIPT, bytecode_path_for,
     exit_code, load_project, load_project_without_python_executable_validation, print_summary,
@@ -1737,6 +1738,17 @@ fn wheel_metadata_diagnostics(
         diagnostics.extend(wheel_diagnostics);
         identity
     });
+    if let Some(wheel_identity) = &wheel_identity {
+        diagnostics.extend(
+            wheel_native_binary_errors(entries, &wheel_identity.tags).into_iter().map(|detail| {
+                archive_metadata_error(
+                    artifact,
+                    &wheel_path,
+                    &format!("has incompatible native payload: {detail}"),
+                )
+            }),
+        );
+    }
     if let Some(record) = entries.get(&record_path)
         && let Err(error) = validate_wheel_record(entries, &record_path, record)
     {
@@ -4139,6 +4151,70 @@ mod unit_tests {
                 .expect_err("invalid RECORD should be rejected");
             assert!(error.contains(expected), "expected `{expected}` in `{error}`");
         }
+    }
+
+    #[test]
+    fn wheel_metadata_rejects_native_binary_platform_lie() {
+        let binary_path = "typepython/bin/typepython";
+        let metadata_path = "type_python-1.0.dist-info/METADATA";
+        let wheel_path = "type_python-1.0.dist-info/WHEEL";
+        let record_path = "type_python-1.0.dist-info/RECORD";
+        let binary = synthetic_arm64_macho((11, 0, 0));
+        let metadata = b"Metadata-Version: 2.1\nName: type-python\nVersion: 1.0\n";
+        let wheel =
+            b"Wheel-Version: 1.0\nRoot-Is-Purelib: false\nTag: py3-none-macosx_10_9_universal2\n";
+        let record = format!(
+            "{binary_path},{},{}\n{metadata_path},{},{}\n{wheel_path},{},{}\n{record_path},,\n",
+            record_hash("sha256", &binary),
+            binary.len(),
+            record_hash("sha256", metadata),
+            metadata.len(),
+            record_hash("sha256", wheel),
+            wheel.len(),
+        );
+        let entries = BTreeMap::from([
+            (binary_path.to_owned(), binary),
+            (metadata_path.to_owned(), metadata.to_vec()),
+            (wheel_path.to_owned(), wheel.to_vec()),
+            (record_path.to_owned(), record.into_bytes()),
+        ]);
+        let artifact = SuppliedVerifyArtifact {
+            kind: SuppliedArtifactKind::Wheel,
+            path: PathBuf::from("type_python-1.0-py3-none-macosx_10_9_universal2.whl"),
+        };
+
+        let rendered = wheel_metadata_diagnostics(&artifact, &entries)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("incompatible native payload"), "{rendered}");
+        assert!(rendered.contains("x86_64/amd64"), "{rendered}");
+        assert!(!rendered.contains("invalid `type_python-1.0.dist-info/RECORD`"), "{rendered}");
+    }
+
+    fn synthetic_arm64_macho(minimum: (u16, u8, u8)) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for value in [
+            0xfeedfacf,
+            goblin::mach::constants::cputype::CPU_TYPE_ARM64,
+            0,
+            2,
+            1,
+            24,
+            0,
+            0,
+            0x32,
+            24,
+            goblin::mach::load_command::PLATFORM_MACOS,
+            (u32::from(minimum.0) << 16) | (u32::from(minimum.1) << 8) | u32::from(minimum.2),
+            0,
+            0,
+        ] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes
     }
 
     #[test]

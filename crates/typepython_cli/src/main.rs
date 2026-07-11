@@ -10,6 +10,7 @@ mod migration;
 mod pipeline;
 mod type_health;
 mod verification;
+mod wheel_binary;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
