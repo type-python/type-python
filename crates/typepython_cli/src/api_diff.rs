@@ -802,7 +802,7 @@ fn public_symbols(
     }
 
     let parsed = parse_module(source).context("invalid Python syntax")?;
-    let explicit_exports = static_all_names(parsed.suite());
+    let explicit_exports = static_all_names(parsed.suite())?;
     let mut extractor = PythonSurfaceExtractor {
         source,
         tokens: parsed.tokens(),
@@ -1491,10 +1491,10 @@ fn is_property(function: &ruff_python_ast::StmtFunctionDef) -> bool {
     })
 }
 
-fn static_all_names(suite: &[Stmt]) -> Option<BTreeSet<String>> {
+fn static_all_names(suite: &[Stmt]) -> Result<Option<BTreeSet<String>>> {
     let mut known_sequences = BTreeMap::<String, Vec<String>>::new();
     let mut exports = None::<Vec<String>>;
-    let mut saw_all = false;
+    let mut has_all = false;
 
     for statement in suite {
         match statement {
@@ -1507,7 +1507,7 @@ fn static_all_names(suite: &[Stmt]) -> Option<BTreeSet<String>> {
                         known_sequences.remove(name);
                     }
                     if name == "__all__" {
-                        saw_all = true;
+                        has_all = true;
                         exports = resolved.clone();
                     }
                 }
@@ -1524,7 +1524,7 @@ fn static_all_names(suite: &[Stmt]) -> Option<BTreeSet<String>> {
                         known_sequences.remove(name.id.as_str());
                     }
                     if name.id.as_str() == "__all__" {
-                        saw_all = true;
+                        has_all = true;
                         exports = resolved;
                     }
                 }
@@ -1533,7 +1533,7 @@ fn static_all_names(suite: &[Stmt]) -> Option<BTreeSet<String>> {
                 if matches!(assign.op, Operator::Add)
                     && matches!(assign.target.as_ref(), Expr::Name(name) if name.id.as_str() == "__all__") =>
             {
-                saw_all = true;
+                has_all = true;
                 if let (Some(current), Some(mut additional)) = (
                     exports.as_mut(),
                     resolve_string_sequence(assign.value.as_ref(), &known_sequences),
@@ -1545,11 +1545,70 @@ fn static_all_names(suite: &[Stmt]) -> Option<BTreeSet<String>> {
                     known_sequences.remove("__all__");
                 }
             }
+            Stmt::Expr(expression) => {
+                let Expr::Call(call) = expression.value.as_ref() else {
+                    continue;
+                };
+                let Expr::Attribute(attribute) = call.func.as_ref() else {
+                    continue;
+                };
+                let Expr::Name(receiver) = attribute.value.as_ref() else {
+                    continue;
+                };
+                let receiver = receiver.id.as_str();
+                if !matches!(attribute.attr.as_str(), "append" | "extend") {
+                    continue;
+                }
+                let updated =
+                    if call.arguments.args.len() == 1 && call.arguments.keywords.is_empty() {
+                        known_sequences.get(receiver).cloned().and_then(|mut current| {
+                            match attribute.attr.as_str() {
+                                "append" => {
+                                    let Expr::StringLiteral(value) = &call.arguments.args[0] else {
+                                        return None;
+                                    };
+                                    current.push(value.value.to_str().to_owned());
+                                }
+                                "extend" => current.extend(resolve_string_sequence(
+                                    &call.arguments.args[0],
+                                    &known_sequences,
+                                )?),
+                                _ => return None,
+                            }
+                            Some(current)
+                        })
+                    } else {
+                        None
+                    };
+                if let Some(values) = &updated {
+                    known_sequences.insert(receiver.to_owned(), values.clone());
+                } else {
+                    known_sequences.remove(receiver);
+                }
+                if receiver == "__all__" {
+                    has_all = true;
+                    exports = updated;
+                }
+            }
+            Stmt::Delete(delete) => {
+                for name in delete.targets.iter().flat_map(simple_target_names) {
+                    known_sequences.remove(name);
+                    if name == "__all__" {
+                        has_all = false;
+                        exports = None;
+                    }
+                }
+            }
             _ => {}
         }
     }
 
-    saw_all.then(|| exports.map(|names| names.into_iter().collect())).flatten()
+    if !has_all {
+        return Ok(None);
+    }
+    exports
+        .map(|names| Some(names.into_iter().collect()))
+        .ok_or_else(|| anyhow::anyhow!("unable to statically resolve module `__all__`"))
 }
 
 fn resolve_string_sequence(
@@ -1557,9 +1616,9 @@ fn resolve_string_sequence(
     known_sequences: &BTreeMap<String, Vec<String>>,
 ) -> Option<Vec<String>> {
     match expression {
-        Expr::List(list) => literal_string_elements(&list.elts),
-        Expr::Tuple(tuple) => literal_string_elements(&tuple.elts),
-        Expr::Set(set) => literal_string_elements(&set.elts),
+        Expr::List(list) => resolve_string_elements(&list.elts, known_sequences),
+        Expr::Tuple(tuple) => resolve_string_elements(&tuple.elts, known_sequences),
+        Expr::Set(set) => resolve_string_elements(&set.elts, known_sequences),
         Expr::Name(name) => known_sequences.get(name.id.as_str()).cloned(),
         Expr::BinOp(binary) if matches!(binary.op, Operator::Add) => {
             let mut left = resolve_string_sequence(binary.left.as_ref(), known_sequences)?;
@@ -1570,14 +1629,21 @@ fn resolve_string_sequence(
     }
 }
 
-fn literal_string_elements(elements: &[Expr]) -> Option<Vec<String>> {
-    elements
-        .iter()
-        .map(|element| match element {
-            Expr::StringLiteral(string) => Some(string.value.to_str().to_owned()),
-            _ => None,
-        })
-        .collect()
+fn resolve_string_elements(
+    elements: &[Expr],
+    known_sequences: &BTreeMap<String, Vec<String>>,
+) -> Option<Vec<String>> {
+    let mut values = Vec::new();
+    for element in elements {
+        match element {
+            Expr::StringLiteral(string) => values.push(string.value.to_str().to_owned()),
+            Expr::Starred(starred) => {
+                values.extend(resolve_string_sequence(starred.value.as_ref(), known_sequences)?);
+            }
+            _ => return None,
+        }
+    }
+    Some(values)
 }
 
 fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymbol>> {

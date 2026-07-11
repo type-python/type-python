@@ -903,6 +903,63 @@ fn diff_api_surfaces_compares_typepython_class_members() {
 }
 
 #[test]
+fn diff_api_surfaces_tracks_static_all_mutations() {
+    let project_dir = temp_project_dir("diff_api_surfaces_tracks_static_all_mutations");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(
+            old_dir.join("app.py"),
+            concat!(
+                "EXTRA = ['extended']\n",
+                "__all__ = ['kept']\n",
+                "__all__.append('appended')\n",
+                "__all__.extend([*EXTRA])\n",
+                "def kept(): pass\n",
+                "def appended(): pass\n",
+                "def extended(): pass\n",
+            ),
+        )
+        .expect("old source should be written");
+        fs::write(new_dir.join("app.py"), "__all__ = ['kept']\ndef kept(): pass\n")
+            .expect("new source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should evaluate static __all__ mutations")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.removed.iter().map(|change| change.symbol.as_str()).collect::<BTreeSet<_>>(),
+        BTreeSet::from(["appended", "extended"])
+    );
+}
+
+#[test]
+fn diff_api_surfaces_rejects_dynamic_all_mutations() {
+    let project_dir = temp_project_dir("diff_api_surfaces_rejects_dynamic_all_mutations");
+    let error = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old dir should be created");
+        fs::create_dir_all(&new_dir).expect("new dir should be created");
+        fs::write(old_dir.join("app.py"), "__all__ = []\n__all__.extend(dynamic_exports())\n")
+            .expect("old source should be written");
+
+        format!(
+            "{:#}",
+            diff_api_surfaces(&old_dir, &new_dir)
+                .expect_err("dynamic __all__ should not fall back to guessed exports")
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(error.contains("unable to statically resolve module `__all__`"), "{error}");
+}
+
+#[test]
 fn diff_api_surfaces_reports_py_typed_metadata_regression() {
     let project_dir = temp_project_dir("diff_api_surfaces_reports_py_typed_metadata_regression");
     let report = {
