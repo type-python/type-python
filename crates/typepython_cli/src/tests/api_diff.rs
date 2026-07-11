@@ -1357,6 +1357,39 @@ fn diff_api_surfaces_ignores_redundant_reexport_aliases() {
 }
 
 #[test]
+fn diff_api_surfaces_applies_public_name_deletions() {
+    let project_dir = temp_project_dir("diff_api_surfaces_applies_public_name_deletions");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::write(old_dir.join("app.py"), "from .core import Public\nclass Box:\n    value: int\n")
+            .expect("old surface should be written");
+        fs::write(
+            new_dir.join("app.py"),
+            concat!(
+                "from .core import Public\n",
+                "del Public\n",
+                "class Box:\n",
+                "    value: int\n",
+                "    del value\n",
+            ),
+        )
+        .expect("new surface should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should apply del statements")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.removed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["Box.value", "Public"]
+    );
+    assert_eq!(report.semver_recommendation, "major");
+}
+
+#[test]
 fn diff_api_surfaces_compares_typepython_class_members() {
     let project_dir = temp_project_dir("diff_api_surfaces_compares_typepython_class_members");
     let report = {

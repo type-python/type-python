@@ -1077,6 +1077,11 @@ impl PythonSurfaceExtractor<'_> {
                 }
                 Stmt::Import(import) => self.insert_imports(import),
                 Stmt::ImportFrom(import) => self.insert_from_imports(import),
+                Stmt::Delete(delete) => {
+                    for name in delete.targets.iter().flat_map(simple_target_names) {
+                        self.remove_symbol(name);
+                    }
+                }
                 Stmt::If(if_statement) => self.extract_if_statement(if_statement),
                 Stmt::Try(try_statement) => self.extract_try_statement(try_statement),
                 _ => {}
@@ -1368,6 +1373,11 @@ impl PythonSurfaceExtractor<'_> {
                         );
                     }
                 }
+                Stmt::Delete(delete) => {
+                    for name in delete.targets.iter().flat_map(simple_target_names) {
+                        self.remove_symbol(&format!("{key}.{name}"));
+                    }
+                }
                 Stmt::If(if_statement) => {
                     self.extract_class_if_statement(key, if_statement, class_overload_bindings);
                 }
@@ -1601,6 +1611,12 @@ impl PythonSurfaceExtractor<'_> {
 
     fn insert_value(&mut self, key: &str, kind: &str, signature: String) {
         self.symbols.insert(key.to_owned(), PublicSymbol::new(kind, signature));
+    }
+
+    fn remove_symbol(&mut self, key: &str) {
+        self.symbols.remove(key);
+        self.grouped_signatures.remove(key);
+        self.overloads.remove(key);
     }
 
     fn insert_instance_attributes(
