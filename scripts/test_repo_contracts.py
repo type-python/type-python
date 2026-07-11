@@ -573,7 +573,10 @@ class RepoContractsTests(unittest.TestCase):
         self.assertIn("CLI JSON Output Schema", diagnostics)
         self.assertIn("Current schema version: `1`", json_schema)
         self.assertIn("typepython check --format json", json_schema)
+        self.assertIn("typepython wheel-audit --format json", json_schema)
         self.assertIn("typepython adapter validate --format json", json_schema)
+        self.assertIn("typepython wheel-audit", cli_reference)
+        self.assertIn("wheel-audit failure", diagnostics)
         self.assertIn("must not remove or change the meaning", json_schema)
         self.assertIn("1-based span coordinates", json_schema)
 

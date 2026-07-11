@@ -49,7 +49,10 @@ typepython = ["bin/*", "py.typed"]
 build = "cp312-*"
 skip = ["*-musllinux_*"]
 build-verbosity = 1
-test-command = "python {project}/scripts/quickstart_smoke.py"
+test-command = [
+  "python -m typepython wheel-audit \"{wheel}\"",
+  "python {project}/scripts/quickstart_smoke.py",
+]
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux2014"

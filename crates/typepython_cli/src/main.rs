@@ -44,7 +44,7 @@ use crate::pipeline::{
     run_lsp, run_with_pipeline, watch_targets,
 };
 use crate::type_health::run_type_health;
-use crate::verification::run_verify;
+use crate::verification::{run_verify, run_wheel_audit};
 
 const CONFIG_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/typepython.toml"));
@@ -204,6 +204,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Command::Clean(args) => clean_project(args),
         Command::Lsp(args) => run_lsp(args),
         Command::Verify(args) => run_verify(args),
+        Command::WheelAudit(args) => run_wheel_audit(args),
         Command::Compat(args) => run_compat(args),
         Command::ApiDiff(args) => run_api_diff(args),
         Command::TypeHealth(args) => run_type_health(args),

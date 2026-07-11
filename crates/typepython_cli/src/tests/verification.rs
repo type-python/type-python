@@ -4505,6 +4505,25 @@ fn verify_command_parses_supplied_artifact_flags() {
 }
 
 #[test]
+fn wheel_audit_command_requires_wheels_and_parses_format() {
+    let cli = Cli::parse_from([
+        "typepython",
+        "wheel-audit",
+        "dist/linux.whl",
+        "dist/macos.whl",
+        "--format",
+        "json",
+    ]);
+    let super::Command::WheelAudit(args) = cli.command else {
+        panic!("expected wheel-audit command");
+    };
+    assert_eq!(args.wheels, vec![PathBuf::from("dist/linux.whl"), PathBuf::from("dist/macos.whl")]);
+    assert_eq!(args.format, OutputFormat::Json);
+
+    assert!(Cli::try_parse_from(["typepython", "wheel-audit"]).is_err());
+}
+
+#[test]
 fn run_verify_api_diff_fails_on_public_surface_regression() {
     let project_dir = temp_project_dir("run_verify_api_diff_fails_on_public_surface_regression");
     let verify_result = {

@@ -128,6 +128,7 @@ typepython watch     --project .             # rebuild on save (~80 ms debounce)
 typepython lsp       --project .             # JSON-RPC LSP over stdio
 
 typepython verify    --project .             # structural .py / .pyi parity
+typepython wheel-audit dist/*.whl             # project-independent wheel/native audit
 typepython compat    --project . --profile library-portable
 typepython api-diff  old-stubs new-stubs     # public typing API drift
 typepython type-health --project . --fail-under 85
@@ -184,6 +185,7 @@ Two pieces of the toolchain are aimed squarely at people who *publish* typed Pyt
 ```bash
 typepython build       --project .
 typepython verify      --project . --checker-preset all
+typepython wheel-audit dist/*.whl
 typepython compat      --project . --profile library-portable
 typepython api-diff    dist/previous.whl .typepython/build
 typepython type-health --project . --fail-under 85

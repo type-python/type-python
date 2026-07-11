@@ -208,6 +208,14 @@ jobs:
         shell: bash
         run: python -m twine check wheelhouse/*.whl
 
+      - name: Install built wheel audit CLI
+        shell: bash
+        run: python -m pip install --no-index --no-deps --force-reinstall wheelhouse/*.whl
+
+      - name: Audit wheel platform and native payload
+        shell: bash
+        run: python -I -m typepython wheel-audit wheelhouse/*.whl
+
       - name: Upload wheel artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -215,10 +223,67 @@ jobs:
           path: wheelhouse/*.whl
           if-no-files-found: error
 
+  audit-wheels:
+    needs: build-wheels
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download Linux wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distribution-linux-x86_64
+          path: dist/linux
+
+      - name: Download Windows wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distribution-windows-amd64
+          path: dist/windows
+
+      - name: Download macOS x86_64 wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distribution-macos-x86_64
+          path: dist/macos-x86_64
+
+      - name: Download macOS arm64 wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distribution-macos-arm64
+          path: dist/macos-arm64
+
+      - name: Install Linux wheel audit CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t linux_wheels < <(find dist/linux -maxdepth 1 -type f -name '*.whl' -print)
+          if [[ ${#linux_wheels[@]} -ne 1 ]]; then
+            printf 'expected exactly one Linux x86_64 wheel, found %s\n' "${#linux_wheels[@]}" >&2
+            exit 1
+          fi
+          if [[ "${linux_wheels[0]}" != *linux*x86_64.whl ]]; then
+            printf 'Linux audit artifact has an unexpected wheel tag: %s\n' "${linux_wheels[0]}" >&2
+            exit 1
+          fi
+          python -m pip install --no-index --no-deps --force-reinstall "${linux_wheels[0]}"
+
+      - name: Audit all wheel platforms and native payloads
+        shell: bash
+        run: python -I -m typepython wheel-audit dist/*/*.whl
+
   publish:
     needs:
       - build-sdist
       - build-wheels
+      - audit-wheels
     runs-on: ubuntu-24.04
     environment:
       name: pypi

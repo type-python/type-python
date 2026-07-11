@@ -1,6 +1,6 @@
 # CLI JSON Output Schema
 
-All project-oriented `--format json` command outputs use a versioned top-level
+All supported `--format json` command outputs use a versioned top-level
 envelope. Consumers should branch on `schema_version` before relying on command
 payload fields.
 
@@ -24,6 +24,7 @@ Current schema version: `1`.
 - `typepython build --format json`
 - `typepython watch --format json`
 - `typepython verify --format json`
+- `typepython wheel-audit --format json`
 - `typepython compat --format json`
 - `typepython api-diff --format json`
 - `typepython type-health --format json`
@@ -34,6 +35,11 @@ Commands may add command-specific top-level fields in schema version `1`
 (`portability`, `pep561`, `api_diff`, `type_health`, `report`, and similar), but
 they must not remove or change the meaning of `schema_version`, `summary`, or
 `diagnostics` without bumping the schema version.
+
+For `typepython wheel-audit`, `summary` contains `command` (`"wheel-audit"`), `wheel_count`,
+the ordered `wheels` path array, and `passed`. Artifact validation errors remain normal
+`TPY5003` diagnostics, so a completed audit returns the standard envelope even when its process
+exit status is `1`.
 
 If argument parsing, tracing initialization, or project configuration fails before
 a command summary can be built, `--format json` still emits a valid envelope to

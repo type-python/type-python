@@ -117,6 +117,8 @@ class PackagingContractTests(unittest.TestCase):
         pypi_readme = read_text("README-PyPI.md")
 
         self.assertRegex(pyproject, r'build = "cp312-\*"')
+        self.assertIn("wheel-audit", pyproject)
+        self.assertIn("{wheel}", pyproject)
         self.assertIn("macos_binary_platform_tag", setup)
         self.assertIn('self._typepython_tag = ("py3", "none", plat)', setup)
         self.assertIn("Rust 1.94.0", setup)
@@ -136,6 +138,28 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn("sdist-smoke", makefile.split("beta-release-gate:", 1)[1])
         self.assertIn("scripts/sdist_smoke.py dist/*.tar.gz", rust_workflow)
         self.assertIn("scripts/sdist_smoke.py dist/*.tar.gz", publish_workflow)
+        build_wheels_job = publish_workflow.split("  build-wheels:", 1)[1].split(
+            "  audit-wheels:", 1
+        )[0]
+        self.assertIn("wheel-audit wheelhouse/*.whl", build_wheels_job)
+        self.assertLess(
+            build_wheels_job.index("wheel-audit wheelhouse/*.whl"),
+            build_wheels_job.index("Upload wheel artifacts"),
+        )
+        audit_job = publish_workflow.split("  audit-wheels:", 1)[1].split(
+            "  publish:", 1
+        )[0]
+        self.assertIn("python -I -m typepython wheel-audit dist/*/*.whl", audit_job)
+        self.assertIn("path: dist/linux", audit_job)
+        self.assertIn("find dist/linux", audit_job)
+        self.assertIn(
+            'pip install --no-index --no-deps --force-reinstall "${linux_wheels[0]}"',
+            audit_job,
+        )
+        self.assertNotIn("id-token: write", audit_job)
+        publish_job = publish_workflow.split("  publish:", 1)[1]
+        self.assertIn("- audit-wheels", publish_job)
+        self.assertIn("gh-action-pypi-publish", publish_job)
         self.assertIn('"crates/typepython_cli/src/main.rs"', sdist_smoke)
         self.assertIn('"stdlib/BASELINE.toml"', sdist_smoke)
         self.assertIn('"templates/typepython.toml"', sdist_smoke)
@@ -144,6 +168,8 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn("validate_sdist_contents(source_root)", sdist_smoke)
         self.assertIn('"quickstart_smoke.py"', sdist_smoke)
         self.assertIn("source-distribution smoke", " ".join(packaging.split()).lower())
+        self.assertIn("wheel-audit", packaging)
+        self.assertIn("auditwheel", packaging)
 
         for text in (packaging, getting_started, beta, readme, pypi_readme):
             normalized = " ".join(text.split())

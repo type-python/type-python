@@ -11,6 +11,7 @@ typepython [COMMAND] [OPTIONS]
 Project-oriented commands use these shared options:
 
 - `check`, `build`, `watch`, `verify`, `compat`, and `migrate` accept `--project PATH` and `--format text|json`
+- `wheel-audit` accepts one or more wheel paths and `--format text|json`; it does not load a project
 - `api-diff` accepts two artifact paths and `--format text|json`
 - `adapter validate` accepts an adapter manifest path and `--format text|json`
 - `clean` accepts `--project PATH`
@@ -337,6 +338,41 @@ Every entry must provide a non-empty `checker`, `contains`, and `reason`, plus a
 `expires` date in `YYYY-MM-DD` form. Verification fails before invoking external checkers when an
 entry is expired or malformed; an empty match substring is rejected because it would allow every
 diagnostic from that checker.
+
+---
+
+### `typepython wheel-audit`
+
+Audit built wheel files without loading a TypePython project. This is the artifact-only release
+gate used after a wheel has been built or downloaded.
+
+```bash
+typepython wheel-audit WHEEL... [--format text|json]
+```
+
+| Argument / flag   | Description                                       |
+| ----------------- | ------------------------------------------------- |
+| `WHEEL...`        | One or more `.whl` files; at least one is required |
+| `--format FORMAT` | Output format: `text` or `json`                    |
+
+The command reuses the same bounded archive reader and wheel diagnostics as
+`typepython verify --wheel`. It checks METADATA, WHEEL, RECORD integrity, filename/tag identity,
+and native payload compatibility. Mach-O, ELF, and PE files are parsed as bytes without executing
+the audited payloads; macOS deployment targets are checked against the declared macOS floor.
+When multiple wheels are supplied, they must share the same normalized distribution name and
+version and semantically equivalent `Requires-Python` ranges; equivalent reordered or normalized
+PEP 440 specifiers are accepted.
+Linux manylinux or musllinux policy repair remains the responsibility of auditwheel/cibuildwheel;
+`wheel-audit` independently checks the resulting ELF format, width, byte order, and architecture.
+
+Exit status is `0` when every wheel passes, `1` when an artifact diagnostic is an error, and `2`
+for command-line usage or internal failures. Text and JSON reports cover all supplied wheels, and
+one failing wheel makes the aggregate command fail.
+
+```bash
+typepython wheel-audit dist/*.whl
+typepython wheel-audit dist/linux.whl dist/macos.whl --format json
+```
 
 ---
 

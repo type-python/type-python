@@ -383,7 +383,8 @@ During development, option 3 means you can run `python -m typepython check --pro
 - Build release artifacts from a clean checkout. The source distribution uses `MANIFEST.in` with `graft` rules over the Rust workspace and bundled stdlib snapshot, so untracked files under packaged directories can be swept into a locally-built sdist.
 - Use `make bump-version VERSION=X.Y.Z` for version updates. This synchronizes `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, and `typepython/__init__.py` in one step. `./scripts/bootstrap-rust.sh X.Y.Z` is also accepted for release-prep sessions that should confirm the pinned Rust toolchain before applying the same version sync.
 - Validate both artifacts before publishing: `python -m build --sdist --wheel`,
-  `python -m twine check dist/*`, and `make sdist-smoke`. The sdist smoke must
+  `python -m twine check dist/*`, `typepython wheel-audit dist/*.whl`, and
+  `make sdist-smoke`. The sdist smoke must
   build from the unpacked archive so missing `MANIFEST.in` grafts cannot be
   hidden by files in the checkout.
 - If you intend `pip install type-python` to work without a Rust toolchain, publish platform wheels for each supported target in addition to the sdist. The release workflow uses `cibuildwheel` to publish Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64 wheels.
@@ -400,7 +401,9 @@ The repository publishes to PyPI through GitHub Actions Trusted Publishing in th
 6. The `publish` workflow validates the tag/version match, builds the sdist,
    rebuilds and smoke-tests a wheel from that unpacked sdist, builds wheel
    artifacts with `cibuildwheel`, smoke-tests each wheel with a Quick Start
-   install/build flow, runs `twine check`, and then publishes to PyPI.
+   install/build flow, audits wheel tags against native payloads before artifact upload and again
+   in an unprivileged aggregate job, rejects cross-wheel distribution identity or
+   `Requires-Python` drift, runs `twine check`, and then publishes to PyPI.
 
 Linux wheel publishing uses the `manylinux2014` image through `cibuildwheel`, which gives PyPI-compatible Linux wheel tags for the bundled CLI binary. If you expand wheel coverage to more architectures later, keep that manylinux or musllinux compatibility requirement in place.
 

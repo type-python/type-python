@@ -37,7 +37,7 @@ use crate::archive::{
     ArchiveMemberPaths, ArchivePathKind, ArchiveReadBudget, BoundedArchiveReader,
     sdist_tar_entry_is_file, validate_wheel_record_path,
 };
-use crate::cli::{OutputFormat, VerifyArgs};
+use crate::cli::{OutputFormat, VerifyArgs, WheelAuditArgs};
 use crate::discovery::normalize_glob_path;
 use crate::pipeline::{
     build_diagnostics, ensure_output_dirs, materialize_build_outputs,
@@ -219,6 +219,130 @@ impl SuppliedArtifactKind {
         match self {
             Self::Wheel => "wheel",
             Self::Sdist => "sdist",
+        }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct WheelAuditSummary {
+    command: &'static str,
+    wheel_count: usize,
+    wheels: Vec<String>,
+    passed: bool,
+}
+
+pub(crate) fn run_wheel_audit(args: WheelAuditArgs) -> Result<ExitCode> {
+    let diagnostics = wheel_audit_diagnostics(&args.wheels);
+    let rendered = render_wheel_audit_report(args.format, &args.wheels, &diagnostics)?;
+    print!("{rendered}");
+    Ok(exit_code(&diagnostics))
+}
+
+fn wheel_audit_diagnostics(wheels: &[PathBuf]) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+    let mut supplied_identities = Vec::new();
+    let mut observed_metadata = Vec::new();
+    for path in wheels {
+        let artifact =
+            SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: path.clone() };
+        match read_supplied_artifact_entries(&artifact) {
+            Ok(archive) => {
+                diagnostics
+                    .diagnostics
+                    .extend(wheel_metadata_diagnostics(&artifact, &archive.entries));
+                if let Some(identity) =
+                    supplied_archive_distribution_identity(&artifact, &archive.entries)
+                {
+                    supplied_identities.push((artifact.clone(), identity));
+                }
+                match supplied_archive_package_metadata(&artifact, &archive.entries) {
+                    Ok(Some(metadata)) => {
+                        let label = format!("wheel metadata `{}`", path.display());
+                        diagnostics.diagnostics.extend(publication_metadata_diagnostics(
+                            &label,
+                            &PublicationRequirements::default(),
+                            &metadata,
+                        ));
+                        observed_metadata.push((label, metadata));
+                    }
+                    Ok(None) => {}
+                    Err(error) => diagnostics.push(Diagnostic::error(
+                        "TPY5003",
+                        format!(
+                            "unable to inspect packaging metadata in wheel artifact `{}`: {error}",
+                            path.display()
+                        ),
+                    )),
+                }
+            }
+            Err(error) => diagnostics.push(Diagnostic::error(
+                "TPY5003",
+                format!("unable to inspect wheel artifact `{}`: {error}", path.display()),
+            )),
+        }
+    }
+    if let Some((first_artifact, first_identity)) = supplied_identities.first() {
+        for (artifact, identity) in supplied_identities.iter().skip(1) {
+            if identity != first_identity {
+                diagnostics.push(Diagnostic::error(
+                    "TPY5003",
+                    format!(
+                        "wheel artifact `{}` identity `{}-{}` does not match wheel artifact `{}` identity `{}-{}`",
+                        artifact.path.display(),
+                        identity.normalized_name,
+                        identity.normalized_version,
+                        first_artifact.path.display(),
+                        first_identity.normalized_name,
+                        first_identity.normalized_version,
+                    ),
+                ));
+            }
+        }
+    }
+    diagnostics
+        .diagnostics
+        .extend(publication_requires_python_consistency_diagnostics(&observed_metadata));
+    diagnostics
+}
+
+fn render_wheel_audit_report(
+    format: OutputFormat,
+    wheels: &[PathBuf],
+    diagnostics: &DiagnosticReport,
+) -> Result<String> {
+    let summary = WheelAuditSummary {
+        command: "wheel-audit",
+        wheel_count: wheels.len(),
+        wheels: wheels.iter().map(|path| path.display().to_string()).collect(),
+        passed: !diagnostics.has_errors(),
+    };
+    match format {
+        OutputFormat::Text => {
+            let mut rendered = format!(
+                "wheel-audit:\n  audited wheels: {}\n  result: {}\n",
+                summary.wheel_count,
+                if summary.passed { "passed" } else { "failed" }
+            );
+            for wheel in &summary.wheels {
+                rendered.push_str(&format!("  wheel: {wheel}\n"));
+            }
+            if !diagnostics.is_empty() {
+                rendered.push_str(&diagnostics.as_text());
+            }
+            if !rendered.ends_with('\n') {
+                rendered.push('\n');
+            }
+            Ok(rendered)
+        }
+        OutputFormat::Json => {
+            let mut rendered = serde_json::to_string_pretty(&serde_json::json!({
+                "schema_version": CLI_JSON_SCHEMA_VERSION,
+                "summary": summary,
+                "diagnostics": diagnostics,
+            }))
+            .context("unable to serialize wheel audit report")?;
+            rendered.push('\n');
+            Ok(rendered)
         }
     }
 }
@@ -1166,12 +1290,25 @@ fn supplied_artifact_package_metadata(
     artifact: &SuppliedVerifyArtifact,
 ) -> std::result::Result<Option<PackageMetadata>, String> {
     let archive = read_supplied_artifact_entries(artifact)?;
-    let entries = &archive.entries;
+    supplied_archive_package_metadata(artifact, &archive.entries)
+}
+
+fn supplied_archive_package_metadata(
+    artifact: &SuppliedVerifyArtifact,
+    entries: &BTreeMap<String, Vec<u8>>,
+) -> std::result::Result<Option<PackageMetadata>, String> {
     let metadata = match artifact.kind {
-        SuppliedArtifactKind::Wheel => entries
-            .iter()
-            .find(|(path, _)| path.ends_with(".dist-info/METADATA"))
-            .map(|(_, bytes)| bytes),
+        SuppliedArtifactKind::Wheel => {
+            let mut metadata =
+                entries.iter().filter(|(path, _)| path.ends_with(".dist-info/METADATA"));
+            let Some((_, bytes)) = metadata.next() else {
+                return Ok(None);
+            };
+            if metadata.next().is_some() {
+                return Ok(None);
+            }
+            Some(bytes)
+        }
         SuppliedArtifactKind::Sdist => entries.get("PKG-INFO"),
     };
     let Some(metadata) = metadata else {
@@ -1721,6 +1858,17 @@ fn wheel_metadata_diagnostics(
     let wheel_path = format!("{dist_info}/WHEEL");
     let record_path = format!("{dist_info}/RECORD");
     let mut diagnostics = Vec::new();
+    let metadata_file_count =
+        entries.keys().filter(|path| path.ends_with(".dist-info/METADATA")).count();
+    if metadata_file_count != 1 {
+        diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "wheel artifact `{}` must contain exactly one `.dist-info/METADATA` file; found {metadata_file_count}",
+                artifact.path.display(),
+            ),
+        ));
+    }
     diagnostics.extend(required_archive_file_diagnostics(
         artifact,
         entries,
@@ -4192,6 +4340,230 @@ mod unit_tests {
         assert!(rendered.contains("incompatible native payload"), "{rendered}");
         assert!(rendered.contains("x86_64/amd64"), "{rendered}");
         assert!(!rendered.contains("invalid `type_python-1.0.dist-info/RECORD`"), "{rendered}");
+    }
+
+    #[test]
+    fn wheel_audit_runs_without_a_project_and_renders_text_and_json() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("test clock should be valid")
+            .as_nanos();
+        let root =
+            env::temp_dir().join(format!("typepython-wheel-audit-{}-{unique}", std::process::id()));
+        fs::create_dir_all(&root).expect("test directory should be created");
+        let valid_wheel = root.join("demo-1.0-py3-none-any.whl");
+        let invalid_wheel = root.join("demo-1.0-py3-none-macosx_10_9_universal2.whl");
+        write_test_wheel(&valid_wheel, test_wheel_entries("any", None));
+        write_test_wheel(
+            &invalid_wheel,
+            test_wheel_entries("macosx_10_9_universal2", Some(synthetic_arm64_macho((11, 0, 0)))),
+        );
+
+        let valid_diagnostics = wheel_audit_diagnostics(std::slice::from_ref(&valid_wheel));
+        assert!(valid_diagnostics.is_empty(), "{}", valid_diagnostics.as_text());
+        let text = render_wheel_audit_report(
+            OutputFormat::Text,
+            std::slice::from_ref(&valid_wheel),
+            &valid_diagnostics,
+        )
+        .expect("text report should render");
+        assert!(text.contains("wheel-audit:"), "{text}");
+        assert!(text.contains("result: passed"), "{text}");
+
+        let invalid_diagnostics = wheel_audit_diagnostics(std::slice::from_ref(&invalid_wheel));
+        assert!(invalid_diagnostics.has_errors(), "wheel platform lie should fail");
+        let json = render_wheel_audit_report(
+            OutputFormat::Json,
+            std::slice::from_ref(&invalid_wheel),
+            &invalid_diagnostics,
+        )
+        .expect("JSON report should render");
+        let payload: serde_json::Value =
+            serde_json::from_str(&json).expect("wheel audit JSON should parse");
+        assert_eq!(payload["schema_version"], serde_json::json!(CLI_JSON_SCHEMA_VERSION));
+        assert_eq!(payload["summary"]["command"], "wheel-audit");
+        assert_eq!(payload["summary"]["wheel_count"], 1);
+        assert_eq!(payload["summary"]["passed"], false);
+        assert!(payload["diagnostics"]["diagnostics"].as_array().is_some_and(|items| {
+            items.iter().any(|item| {
+                item["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("incompatible native payload"))
+            })
+        }));
+
+        let valid_exit = run_wheel_audit(WheelAuditArgs {
+            wheels: vec![valid_wheel],
+            format: OutputFormat::Text,
+        })
+        .expect("valid wheel audit should run");
+        let invalid_exit = run_wheel_audit(WheelAuditArgs {
+            wheels: vec![invalid_wheel],
+            format: OutputFormat::Json,
+        })
+        .expect("invalid wheel audit should still produce a report");
+        assert_eq!(valid_exit, ExitCode::SUCCESS);
+        assert_eq!(invalid_exit, ExitCode::from(1));
+        fs::remove_dir_all(root).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn wheel_audit_rejects_cross_wheel_identity_and_requires_python_drift() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("test clock should be valid")
+            .as_nanos();
+        let root = env::temp_dir()
+            .join(format!("typepython-wheel-audit-consistency-{}-{unique}", std::process::id()));
+        fs::create_dir_all(&root).expect("test directory should be created");
+
+        let version_one = root.join("demo-1.0-py3-none-any.whl");
+        let version_two = root.join("demo-2.0-py3-none-any.whl");
+        write_test_wheel(&version_one, test_wheel_entries_with_metadata("1.0", None, "any", None));
+        write_test_wheel(&version_two, test_wheel_entries_with_metadata("2.0", None, "any", None));
+
+        let identity_diagnostics =
+            wheel_audit_diagnostics(&[version_one.clone(), version_two.clone()]);
+        let identity_text = identity_diagnostics.as_text();
+        assert!(identity_diagnostics.has_errors(), "{identity_text}");
+        assert!(identity_text.contains("identity `demo-2`"), "{identity_text}");
+        assert!(identity_text.contains("identity `demo-1`"), "{identity_text}");
+
+        let python_39_dir = root.join("python-39");
+        let python_310_dir = root.join("python-310");
+        fs::create_dir_all(&python_39_dir).expect("Python 3.9 wheel directory should be created");
+        fs::create_dir_all(&python_310_dir).expect("Python 3.10 wheel directory should be created");
+        let python_39 = python_39_dir.join("demo-1.0-py3-none-any.whl");
+        let python_310 = python_310_dir.join("demo-1.0-py3-none-any.whl");
+        write_test_wheel(
+            &python_39,
+            test_wheel_entries_with_metadata("1.0", Some(">=3.9"), "any", None),
+        );
+        write_test_wheel(
+            &python_310,
+            test_wheel_entries_with_metadata("1.0", Some(">=3.10"), "any", None),
+        );
+
+        let python_diagnostics = wheel_audit_diagnostics(&[python_39, python_310]);
+        let python_text = python_diagnostics.as_text();
+        assert!(python_diagnostics.has_errors(), "{python_text}");
+        assert!(python_text.contains("Requires-Python `>=3.10`"), "{python_text}");
+        assert!(python_text.contains("declares `>=3.9`"), "{python_text}");
+
+        let equivalent_one_dir = root.join("equivalent-one");
+        let equivalent_two_dir = root.join("equivalent-two");
+        fs::create_dir_all(&equivalent_one_dir)
+            .expect("first equivalent wheel directory should be created");
+        fs::create_dir_all(&equivalent_two_dir)
+            .expect("second equivalent wheel directory should be created");
+        let equivalent_one = equivalent_one_dir.join("demo-1.0-py3-none-any.whl");
+        let equivalent_two = equivalent_two_dir.join("demo-1.0.0-py3-none-any.whl");
+        write_test_wheel(
+            &equivalent_one,
+            test_wheel_entries_with_metadata("1.0", Some(">=3.9,<4"), "any", None),
+        );
+        write_test_wheel(
+            &equivalent_two,
+            test_wheel_entries_with_metadata("1.0.0", Some("<4.0, >=3.9.0"), "any", None),
+        );
+        let equivalent_diagnostics = wheel_audit_diagnostics(&[equivalent_one, equivalent_two]);
+        assert!(
+            equivalent_diagnostics.is_empty(),
+            "normalized identity and semantically equivalent Requires-Python should pass: {}",
+            equivalent_diagnostics.as_text()
+        );
+
+        let missing_metadata_dir = root.join("missing-metadata");
+        fs::create_dir_all(&missing_metadata_dir)
+            .expect("missing metadata wheel directory should be created");
+        let missing_metadata = missing_metadata_dir.join("demo-1.0-py3-none-any.whl");
+        let mut missing_entries = test_wheel_entries("any", None);
+        missing_entries.remove("demo-1.0.dist-info/METADATA");
+        replace_test_wheel_record(&mut missing_entries, "demo-1.0.dist-info/RECORD");
+        write_test_wheel(&missing_metadata, missing_entries);
+        let missing_diagnostics = wheel_audit_diagnostics(std::slice::from_ref(&missing_metadata));
+        let missing_text = missing_diagnostics.as_text();
+        assert!(missing_diagnostics.has_errors(), "{missing_text}");
+        assert!(
+            missing_text.contains("must contain exactly one `.dist-info/METADATA` file; found 0"),
+            "{missing_text}"
+        );
+
+        let duplicate_metadata_dir = root.join("duplicate-metadata");
+        fs::create_dir_all(&duplicate_metadata_dir)
+            .expect("duplicate metadata wheel directory should be created");
+        let duplicate_metadata = duplicate_metadata_dir.join("demo-1.0-py3-none-any.whl");
+        let mut duplicate_entries = test_wheel_entries("any", None);
+        let metadata = duplicate_entries["demo-1.0.dist-info/METADATA"].clone();
+        duplicate_entries
+            .insert(String::from("demo-1.0.dist-info/shadow.dist-info/METADATA"), metadata);
+        replace_test_wheel_record(&mut duplicate_entries, "demo-1.0.dist-info/RECORD");
+        write_test_wheel(&duplicate_metadata, duplicate_entries);
+        let duplicate_diagnostics =
+            wheel_audit_diagnostics(std::slice::from_ref(&duplicate_metadata));
+        let duplicate_text = duplicate_diagnostics.as_text();
+        assert!(duplicate_diagnostics.has_errors(), "{duplicate_text}");
+        assert!(
+            duplicate_text.contains("must contain exactly one `.dist-info/METADATA` file; found 2"),
+            "{duplicate_text}"
+        );
+
+        fs::remove_dir_all(root).expect("test directory should be removed");
+    }
+
+    fn test_wheel_entries(platform: &str, binary: Option<Vec<u8>>) -> BTreeMap<String, Vec<u8>> {
+        test_wheel_entries_with_metadata("1.0", None, platform, binary)
+    }
+
+    fn test_wheel_entries_with_metadata(
+        version: &str,
+        requires_python: Option<&str>,
+        platform: &str,
+        binary: Option<Vec<u8>>,
+    ) -> BTreeMap<String, Vec<u8>> {
+        let metadata_path = format!("demo-{version}.dist-info/METADATA");
+        let wheel_path = format!("demo-{version}.dist-info/WHEEL");
+        let record_path = format!("demo-{version}.dist-info/RECORD");
+        let mut metadata = format!("Metadata-Version: 2.1\nName: demo\nVersion: {version}\n");
+        if let Some(requires_python) = requires_python {
+            metadata.push_str(&format!("Requires-Python: {requires_python}\n"));
+        }
+        let wheel = format!(
+            "Wheel-Version: 1.0\nRoot-Is-Purelib: {}\nTag: py3-none-{platform}\n",
+            if binary.is_some() { "false" } else { "true" }
+        )
+        .into_bytes();
+        let mut entries =
+            BTreeMap::from([(metadata_path.clone(), metadata.into_bytes()), (wheel_path, wheel)]);
+        if let Some(binary) = binary {
+            entries.insert(String::from("typepython/bin/typepython"), binary);
+        }
+        replace_test_wheel_record(&mut entries, &record_path);
+        entries
+    }
+
+    fn replace_test_wheel_record(entries: &mut BTreeMap<String, Vec<u8>>, record_path: &str) {
+        entries.remove(record_path);
+        let mut record = entries
+            .iter()
+            .map(|(path, contents)| {
+                format!("{path},{},{}\n", record_hash("sha256", contents), contents.len())
+            })
+            .collect::<String>();
+        record.push_str(&format!("{record_path},,\n"));
+        entries.insert(record_path.to_owned(), record.into_bytes());
+    }
+
+    fn write_test_wheel(path: &Path, entries: BTreeMap<String, Vec<u8>>) {
+        let file = fs::File::create(path).expect("test wheel should be created");
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::FileOptions::default();
+        for (entry_path, contents) in entries {
+            writer.start_file(entry_path, options).expect("test wheel entry should start");
+            std::io::Write::write_all(&mut writer, &contents)
+                .expect("test wheel entry should be written");
+        }
+        writer.finish().expect("test wheel should finish");
     }
 
     fn synthetic_arm64_macho(minimum: (u16, u8, u8)) -> Vec<u8> {

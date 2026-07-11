@@ -406,7 +406,7 @@ Severity controlled by `typing.report_deprecated`: `"error"`, `"warning"`, or `"
 | --------- | -------- | ---------------------------------------------------------------------------------------------- |
 | `TPY5001` | error    | Stub (`.pyi`) generation failure                                                               |
 | `TPY5002` | error    | Best-effort emit was disabled by `no_emit_on_error = true` after semantic errors were reported |
-| `TPY5003` | error    | Verify failure for emitted artifacts or unsupported runtime-validator annotations               |
+| `TPY5003` | error    | Verify or wheel-audit failure for emitted/published artifacts, native platform identity, or unsupported runtime-validator annotations |
 
 **TPY5002 example:**
 

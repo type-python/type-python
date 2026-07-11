@@ -25,6 +25,8 @@ pub(crate) enum Command {
     Lsp(RunArgs),
     /// Verify emitted artifacts and incremental state.
     Verify(VerifyArgs),
+    /// Audit wheel metadata and native payloads without loading a project.
+    WheelAudit(WheelAuditArgs),
     /// Validate emitted artifacts across downstream Python type checkers.
     Compat(CompatArgs),
     /// Compare two public typing surfaces and report likely API drift.
@@ -44,6 +46,7 @@ impl Command {
                 args.format
             }
             Self::Verify(args) => args.run.format,
+            Self::WheelAudit(args) => args.format,
             Self::Compat(args) => args.run.format,
             Self::ApiDiff(args) => args.format,
             Self::TypeHealth(args) => args.run.format,
@@ -163,6 +166,16 @@ pub(crate) struct VerifyArgs {
         help = "Run package-maintainer type-health checks during verification and fail on type metadata debt"
     )]
     pub(crate) publication_type_health: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct WheelAuditArgs {
+    /// Wheel artifacts to audit.
+    #[arg(value_name = "WHEEL", required = true, num_args = 1..)]
+    pub(crate) wheels: Vec<PathBuf>,
+    /// Output format.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub(crate) format: OutputFormat,
 }
 
 #[derive(Debug, Args)]

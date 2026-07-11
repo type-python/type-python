@@ -17,8 +17,18 @@ Current policy:
 - cibuildwheel builds on `cp312-*` hosts;
 - `setup.py` marks the wheel as platform-specific;
 - `bdist_wheel.get_tag()` returns `py3-none-<platform>`;
+- every repaired wheel runs `typepython wheel-audit {wheel}` before it leaves cibuildwheel, and an
+  unprivileged aggregate job repeats the byte-level audit across all collected platform wheels and
+  rejects cross-wheel normalized name/version or semantic `Requires-Python` drift;
 - supported release wheels must run `scripts/quickstart_smoke.py` without
   requiring `cargo` or access to the build checkout at runtime.
+
+The wheel audit parses Mach-O, ELF, and PE payloads without executing files from the audited
+archives. It checks native format, width, byte order, architecture, and the macOS deployment floor.
+The Linux manylinux/glibc policy remains enforced by cibuildwheel's auditwheel repair step, and
+Windows wheel tags do not encode a minimum Windows version. The aggregate job installs the Linux
+wheel only as the audit tool, runs without PyPI OIDC permission, and statically checks every Linux,
+Windows, and macOS wheel as one consistent release set before the privileged publish job can start.
 
 ## Source Distribution
 
