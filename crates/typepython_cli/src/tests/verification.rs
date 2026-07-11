@@ -208,6 +208,54 @@ fn run_verify_bootstraps_outputs_after_clean_project() {
 }
 
 #[test]
+fn run_verify_ignores_runtime_feature_examples_in_docstrings() {
+    let project_dir = temp_project_dir("run_verify_ignores_runtime_feature_examples_in_docstrings");
+    let result = {
+        init_project(super::InitArgs {
+            dir: project_dir.clone(),
+            force: false,
+            embed_pyproject: false,
+        })
+        .expect("init should succeed");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\nrequires-python = \">=3.10\"\n",
+        )
+        .expect("pyproject.toml should be written");
+        fs::write(
+            project_dir.join("src/app/__init__.tpy"),
+            concat!(
+                "\"\"\"Examples:\n",
+                "type Pair[T = int] = tuple[T, T]\n",
+                "\"\"\"\n",
+                "def stable() -> int:\n",
+                "    return 1\n",
+            ),
+        )
+        .expect("source should be written");
+
+        run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+            api_diff_old: None,
+            checkers: Vec::new(),
+            checker_preset: None,
+            checker_allowlist: None,
+            unsafe_runtime_imports: false,
+            publication_type_health: false,
+        })
+        .expect("verify should run")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(result, ExitCode::SUCCESS);
+}
+
+#[test]
 fn run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled() {
     let project_dir =
         temp_project_dir("run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled");
@@ -1905,6 +1953,51 @@ fn verify_publication_metadata_reports_requires_python_mismatch_for_native_outpu
     assert!(rendered.contains("TPY5003"));
     assert!(rendered.contains("Requires-Python"));
     assert!(rendered.contains("at least `3.13`"));
+}
+
+#[test]
+fn verify_publication_metadata_ignores_feature_text_in_strings_and_comments() {
+    let project_dir =
+        temp_project_dir("verify_publication_metadata_ignores_feature_text_in_strings");
+    let rendered = {
+        fs::create_dir_all(project_dir.join("build/app")).expect("build dir should be created");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("typepython.toml should be written");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\nrequires-python = \">=3.10\"\n",
+        )
+        .expect("pyproject.toml should be written");
+        let source = concat!(
+            "\"\"\"type Pair[T = int] = tuple[T, T]\n",
+            "from typing import ReadOnly\n",
+            "typing_extensions.TypeIs\n",
+            "\"\"\"\n",
+            "# class Box[T]: ...\n",
+            "def stable() -> int:\n",
+            "    return 1\n",
+        );
+        fs::write(project_dir.join("build/app/__init__.py"), source)
+            .expect("runtime artifact should be written");
+        fs::write(project_dir.join("build/app/__init__.pyi"), source)
+            .expect("stub artifact should be written");
+
+        let config = load(&project_dir).expect("config should load");
+        verify_publication_metadata(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join("build/app/__init__.py")),
+                stub_path: Some(project_dir.join("build/app/__init__.pyi")),
+            }],
+            None,
+            &[],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(!rendered.contains("TPY5003"), "{rendered}");
 }
 
 #[test]

@@ -12,7 +12,10 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use flate2::read::GzDecoder;
 use rayon::prelude::*;
 use regex::Regex;
-use ruff_python_ast::{Expr, Stmt};
+use ruff_python_ast::{
+    Expr, Stmt, TypeParam,
+    visitor::{self, Visitor},
+};
 use ruff_python_parser::parse_module;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use tar::Archive as TarArchive;
@@ -297,7 +300,7 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
             verify_publication_metadata(
                 &config,
                 &snapshot.emit_plan,
-                None,
+                Some(&snapshot.lowered_modules),
                 &supplied_verify_artifacts(&args),
             )
             .diagnostics,
@@ -948,49 +951,106 @@ fn publication_requirements_from_modules(
 }
 
 fn publication_requirements_from_source(source: &str) -> PublicationRequirements {
-    let mut requirements = PublicationRequirements::default();
+    let Ok(parsed) = parse_module(source) else {
+        return PublicationRequirements::default();
+    };
+    let mut collector = PublicationRequirementCollector::default();
+    collector.visit_body(parsed.suite());
+    collector.requirements
+}
 
-    if source.contains("typing_extensions.") || source.contains("from typing_extensions import ") {
-        requirements.needs_typing_extensions = true;
-    }
-    if source.contains("typing.ReadOnly")
-        || source.contains("from typing import ReadOnly")
-        || source.contains("typing.TypeIs")
-        || source.contains("from typing import TypeIs")
-        || source.contains("typing.NoDefault")
-        || source.contains("from typing import NoDefault")
-        || source.contains("warnings.deprecated")
-        || source.contains("from warnings import deprecated")
-    {
-        requirements.min_python =
-            max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_13));
+#[derive(Default)]
+struct PublicationRequirementCollector {
+    requirements: PublicationRequirements,
+}
+
+impl PublicationRequirementCollector {
+    fn require_python_3_12(&mut self) {
+        self.requirements.min_python =
+            max_python_target(self.requirements.min_python, Some(PythonTarget::PYTHON_3_12));
     }
 
-    for line in source.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("type ") {
-            requirements.min_python =
-                max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_12));
-            if native_type_params_include_default(trimmed) {
-                requirements.min_python =
-                    max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_13));
-            }
+    fn require_python_3_13(&mut self) {
+        self.requirements.min_python =
+            max_python_target(self.requirements.min_python, Some(PythonTarget::PYTHON_3_13));
+    }
+
+    fn record_type_params(&mut self, type_params: Option<&ruff_python_ast::TypeParams>) {
+        let Some(type_params) = type_params else {
+            return;
+        };
+        self.require_python_3_12();
+        if type_params.iter().any(type_param_has_default) {
+            self.require_python_3_13();
         }
-        if (trimmed.starts_with("def ")
-            || trimmed.starts_with("async def ")
-            || trimmed.starts_with("class "))
-            && native_header_uses_type_params(trimmed)
+    }
+}
+
+impl<'a> Visitor<'a> for PublicationRequirementCollector {
+    fn visit_stmt(&mut self, statement: &'a Stmt) {
+        match statement {
+            Stmt::Import(import) => {
+                if import
+                    .names
+                    .iter()
+                    .any(|alias| alias.name.as_str().split('.').next() == Some("typing_extensions"))
+                {
+                    self.requirements.needs_typing_extensions = true;
+                }
+            }
+            Stmt::ImportFrom(import) => {
+                let module = import.module.as_ref().map(ruff_python_ast::Identifier::as_str);
+                if import.level == 0 && module == Some("typing_extensions") {
+                    self.requirements.needs_typing_extensions = true;
+                }
+                if import.level == 0
+                    && ((module == Some("typing")
+                        && import.names.iter().any(|alias| {
+                            matches!(alias.name.as_str(), "ReadOnly" | "TypeIs" | "NoDefault")
+                        }))
+                        || (module == Some("warnings")
+                            && import
+                                .names
+                                .iter()
+                                .any(|alias| alias.name.as_str() == "deprecated")))
+                {
+                    self.require_python_3_13();
+                }
+            }
+            Stmt::TypeAlias(type_alias) => {
+                self.require_python_3_12();
+                self.record_type_params(type_alias.type_params.as_deref());
+            }
+            Stmt::FunctionDef(function) => {
+                self.record_type_params(function.type_params.as_deref());
+            }
+            Stmt::ClassDef(class_def) => {
+                self.record_type_params(class_def.type_params.as_deref());
+            }
+            _ => {}
+        }
+        visitor::walk_stmt(self, statement);
+    }
+
+    fn visit_expr(&mut self, expression: &'a Expr) {
+        if let Expr::Attribute(attribute) = expression
+            && let Expr::Name(owner) = attribute.value.as_ref()
+            && ((owner.id.as_str() == "typing"
+                && matches!(attribute.attr.as_str(), "ReadOnly" | "TypeIs" | "NoDefault"))
+                || (owner.id.as_str() == "warnings" && attribute.attr.as_str() == "deprecated"))
         {
-            requirements.min_python =
-                max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_12));
-            if native_type_params_include_default(trimmed) {
-                requirements.min_python =
-                    max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_13));
-            }
+            self.require_python_3_13();
         }
+        visitor::walk_expr(self, expression);
     }
+}
 
-    requirements
+fn type_param_has_default(type_param: &TypeParam) -> bool {
+    match type_param {
+        TypeParam::TypeVar(type_var) => type_var.default.is_some(),
+        TypeParam::TypeVarTuple(type_var_tuple) => type_var_tuple.default.is_some(),
+        TypeParam::ParamSpec(param_spec) => param_spec.default.is_some(),
+    }
 }
 
 fn native_header_uses_type_params(line: &str) -> bool {
