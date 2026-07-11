@@ -674,6 +674,9 @@ fn run_type_health_writes_lock_and_enforces_threshold() {
 
     assert_eq!(success, ExitCode::SUCCESS);
     assert_eq!(failure, ExitCode::FAILURE);
+    let parsed_lock: toml::Value =
+        toml::from_str(&lock).expect("generated type lock should be valid TOML");
+    assert_eq!(parsed_lock["score"].as_integer(), Some(95));
     assert!(lock.contains("score = 95"));
     assert!(lock.contains("[inputs]"));
     assert!(lock.contains("target_python = \"3.12\""));
