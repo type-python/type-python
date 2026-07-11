@@ -903,6 +903,53 @@ fn diff_api_surfaces_compares_typepython_class_members() {
 }
 
 #[test]
+fn diff_api_surfaces_honors_typepython_all_exports() {
+    let project_dir = temp_project_dir("diff_api_surfaces_honors_typepython_all_exports");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        fs::create_dir_all(&old_dir).expect("old source dir should be created");
+        fs::create_dir_all(&new_dir).expect("new source dir should be created");
+        fs::write(
+            old_dir.join("app.tpy"),
+            concat!(
+                "__all__ = ['Model', '_private', 'gone']\n",
+                "data class Model:\n",
+                "    id: int\n",
+                "hidden: int = 1\n",
+                "_private: int = 1\n",
+                "gone: int = 1\n",
+            ),
+        )
+        .expect("old TypePython source should be written");
+        fs::write(
+            new_dir.join("app.tpy"),
+            concat!(
+                "__all__ = ['Model', '_private']\n",
+                "data class Model:\n",
+                "    id: int\n",
+                "_private: str = 'value'\n",
+            ),
+        )
+        .expect("new TypePython source should be written");
+
+        diff_api_surfaces(&old_dir, &new_dir).expect("api diff should honor TypePython __all__")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(
+        report.removed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["gone"]
+    );
+    assert_eq!(
+        report.changed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
+        vec!["_private"]
+    );
+    assert!(report.added.is_empty());
+    assert!(report.removed.iter().chain(&report.changed).all(|change| change.symbol != "hidden"));
+}
+
+#[test]
 fn diff_api_surfaces_tracks_static_all_mutations() {
     let project_dir = temp_project_dir("diff_api_surfaces_tracks_static_all_mutations");
     let report = {

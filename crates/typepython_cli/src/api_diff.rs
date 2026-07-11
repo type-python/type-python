@@ -1657,11 +1657,14 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
         anyhow::bail!("invalid TypePython syntax");
     }
 
+    let explicit_exports = typepython_static_all_names(source, &syntax.statements)?;
     let mut symbols = BTreeMap::new();
     let mut overloads = BTreeMap::<String, Vec<String>>::new();
     for statement in &syntax.statements {
         match statement {
-            typepython_syntax::SyntaxStatement::TypeAlias(alias) if public_name(&alias.name) => {
+            typepython_syntax::SyntaxStatement::TypeAlias(alias)
+                if typepython_name_is_exported(&alias.name, explicit_exports.as_ref()) =>
+            {
                 symbols.insert(
                     alias.name.clone(),
                     PublicSymbol {
@@ -1676,7 +1679,7 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
                 );
             }
             typepython_syntax::SyntaxStatement::FunctionDef(function)
-                if public_name(&function.name) =>
+                if typepython_name_is_exported(&function.name, explicit_exports.as_ref()) =>
             {
                 if !overloads.contains_key(&function.name) {
                     symbols.insert(
@@ -1689,7 +1692,7 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
                 }
             }
             typepython_syntax::SyntaxStatement::OverloadDef(function)
-                if public_name(&function.name) =>
+                if typepython_name_is_exported(&function.name, explicit_exports.as_ref()) =>
             {
                 let signatures = overloads.entry(function.name.clone()).or_default();
                 signatures.push(format!("@overload\n{}", render_typepython_function(function)));
@@ -1702,28 +1705,28 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
                 );
             }
             typepython_syntax::SyntaxStatement::ClassDef(class_def)
-                if public_name(&class_def.name) =>
+                if typepython_name_is_exported(&class_def.name, explicit_exports.as_ref()) =>
             {
                 insert_typepython_class_symbols(&mut symbols, class_def, "class");
             }
             typepython_syntax::SyntaxStatement::DataClass(class_def)
-                if public_name(&class_def.name) =>
+                if typepython_name_is_exported(&class_def.name, explicit_exports.as_ref()) =>
             {
                 insert_typepython_class_symbols(&mut symbols, class_def, "data class");
             }
             typepython_syntax::SyntaxStatement::Interface(class_def)
-                if public_name(&class_def.name) =>
+                if typepython_name_is_exported(&class_def.name, explicit_exports.as_ref()) =>
             {
                 insert_typepython_class_symbols(&mut symbols, class_def, "interface");
             }
             typepython_syntax::SyntaxStatement::SealedClass(class_def)
-                if public_name(&class_def.name) =>
+                if typepython_name_is_exported(&class_def.name, explicit_exports.as_ref()) =>
             {
                 insert_typepython_class_symbols(&mut symbols, class_def, "sealed class");
             }
             typepython_syntax::SyntaxStatement::Import(import) => {
                 for binding in &import.bindings {
-                    if public_name(&binding.local_name) {
+                    if typepython_name_is_exported(&binding.local_name, explicit_exports.as_ref()) {
                         symbols.insert(
                             binding.local_name.clone(),
                             PublicSymbol {
@@ -1739,7 +1742,9 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
             }
             typepython_syntax::SyntaxStatement::Value(value) if value.owner_name.is_none() => {
                 for name in &value.names {
-                    if name != "__all__" && public_name(name) {
+                    if name != "__all__"
+                        && typepython_name_is_exported(name, explicit_exports.as_ref())
+                    {
                         let detail = value
                             .annotation_expr
                             .as_ref()
@@ -1760,7 +1765,63 @@ fn typepython_public_symbols(source: &str) -> Result<BTreeMap<String, PublicSymb
             _ => {}
         }
     }
+    if let Some(exports) = explicit_exports {
+        for name in exports {
+            symbols.entry(name.clone()).or_insert_with(|| PublicSymbol {
+                kind: String::from("export"),
+                signature: format!("__all__: {name}"),
+            });
+        }
+    }
     Ok(symbols)
+}
+
+fn typepython_name_is_exported(name: &str, exports: Option<&BTreeSet<String>>) -> bool {
+    exports.map_or_else(|| public_name(name), |exports| exports.contains(name))
+}
+
+fn typepython_static_all_names(
+    source: &str,
+    statements: &[typepython_syntax::SyntaxStatement],
+) -> Result<Option<BTreeSet<String>>> {
+    if let Ok(parsed) = parse_module(source) {
+        return static_all_names(parsed.suite());
+    }
+
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut saw_all = false;
+    let mut exports = None;
+    for statement in statements {
+        let typepython_syntax::SyntaxStatement::Value(value) = statement else {
+            continue;
+        };
+        if value.owner_name.is_some() || !value.names.iter().any(|name| name == "__all__") {
+            continue;
+        }
+        saw_all = true;
+        let start = value.line.saturating_sub(1);
+        let mut candidate = String::new();
+        let mut resolved = None;
+        for line in lines.iter().skip(start) {
+            if !candidate.is_empty() {
+                candidate.push('\n');
+            }
+            candidate.push_str(line);
+            let Ok(parsed) = parse_module(&candidate) else {
+                continue;
+            };
+            resolved = static_all_names(parsed.suite())?;
+            break;
+        }
+        exports = resolved;
+    }
+    if saw_all {
+        exports
+            .map(Some)
+            .ok_or_else(|| anyhow::anyhow!("unable to statically resolve TypePython `__all__`"))
+    } else {
+        Ok(None)
+    }
 }
 
 fn insert_typepython_class_symbols(
