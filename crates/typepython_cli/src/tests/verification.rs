@@ -390,6 +390,49 @@ fn run_verify_reports_external_checker_failure() {
 }
 
 #[test]
+fn checker_allowlist_cannot_hide_checker_spawn_failure() {
+    let project_dir = temp_project_dir("checker_allowlist_cannot_hide_checker_spawn_failure");
+    let verify_result = {
+        init_project(super::InitArgs {
+            dir: project_dir.clone(),
+            force: false,
+            embed_pyproject: false,
+        })
+        .expect("init should succeed");
+        fs::write(
+            project_dir.join("checker-allowlist.toml"),
+            concat!(
+                "[[disagreements]]\n",
+                "checker = \"typepython-checker-that-does-not-exist\"\n",
+                "contains = \"unable to run external checker\"\n",
+                "reason = \"must never mask infrastructure failures\"\n",
+                "expires = \"2099-12-31\"\n",
+            ),
+        )
+        .expect("allowlist should be written");
+
+        run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+            api_diff_old: None,
+            checkers: vec![String::from("typepython-checker-that-does-not-exist")],
+            checker_preset: None,
+            checker_allowlist: Some(PathBuf::from("checker-allowlist.toml")),
+            unsafe_runtime_imports: false,
+            publication_type_health: false,
+        })
+        .expect("verify should complete with checker diagnostics")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(verify_result, ExitCode::from(1));
+}
+
+#[test]
 fn run_verify_reports_python_companion_stub_signature_mismatch() {
     let project_dir =
         temp_project_dir("run_verify_reports_python_companion_stub_signature_mismatch");

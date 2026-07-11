@@ -2428,8 +2428,12 @@ fn verify_external_checker(
     );
     let mut command = ProcessCommand::new(&invocation.program);
     command.args(&invocation.args).current_dir(&config.config_dir);
-    let diagnostic = checker_diagnostic_from_output(&invocation.label, out_root, command.output())?;
-    Some(allowlisted_checker_diagnostic(&invocation.label, diagnostic, allowlist))
+    match checker_failure_from_output(&invocation.label, out_root, command.output())? {
+        CheckerFailure::Infrastructure(diagnostic) => Some(diagnostic),
+        CheckerFailure::Rejection(diagnostic) => {
+            Some(allowlisted_checker_diagnostic(&invocation.label, diagnostic, allowlist))
+        }
+    }
 }
 
 pub(crate) fn allowlisted_checker_diagnostic(
@@ -3598,22 +3602,33 @@ fn module_level_surface_names(syntax: &typepython_syntax::SyntaxTree) -> BTreeSe
         .collect()
 }
 
-fn checker_diagnostic_from_output(
+enum CheckerFailure {
+    Infrastructure(Diagnostic),
+    Rejection(Diagnostic),
+}
+
+fn checker_failure_from_output(
     checker: &str,
     out_root: &Path,
     output: std::io::Result<Output>,
-) -> Option<Diagnostic> {
+) -> Option<CheckerFailure> {
     let output = match output {
         Ok(output) => output,
         Err(error) => {
-            return Some(Diagnostic::error(
+            return Some(CheckerFailure::Infrastructure(Diagnostic::error(
                 "TPY5003",
                 format!("unable to run external checker `{checker}`: {error}"),
-            ));
+            )));
         }
     };
     if output.status.success() {
         return None;
+    }
+    if output.status.code().is_none() {
+        return Some(CheckerFailure::Infrastructure(Diagnostic::error(
+            "TPY5003",
+            format!("external checker `{checker}` terminated without an exit code"),
+        )));
     }
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
@@ -3624,14 +3639,14 @@ fn checker_diagnostic_from_output(
         .join("\n");
     let suffix = if details.is_empty() { String::new() } else { format!(":\n{details}") };
 
-    Some(Diagnostic::error(
+    Some(CheckerFailure::Rejection(Diagnostic::error(
         "TPY5003",
         format!(
             "external checker `{checker}` rejected emitted build output under `{}`{}",
             out_root.display(),
             suffix
         ),
-    ))
+    )))
 }
 
 fn surface_parity_diagnostics(
@@ -3977,8 +3992,8 @@ mod unit_tests {
     }
 
     #[test]
-    fn checker_diagnostic_from_output_includes_streams() {
-        let diagnostic = checker_diagnostic_from_output(
+    fn checker_failure_from_output_classifies_rejections_and_infrastructure() {
+        let CheckerFailure::Rejection(diagnostic) = checker_failure_from_output(
             "pyright",
             Path::new("/tmp/build"),
             Ok(Output {
@@ -3987,11 +4002,23 @@ mod unit_tests {
                 stderr: b"stderr details\n".to_vec(),
             }),
         )
-        .expect("failing checker should produce a diagnostic");
+        .expect("failing checker should produce a diagnostic") else {
+            panic!("non-zero checker exit must be classified as a rejection");
+        };
 
         assert!(diagnostic.message.contains("external checker `pyright` rejected"));
         assert!(diagnostic.message.contains("stdout details"));
         assert!(diagnostic.message.contains("stderr details"));
+
+        let CheckerFailure::Infrastructure(diagnostic) = checker_failure_from_output(
+            "missing-checker",
+            Path::new("/tmp/build"),
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "missing executable")),
+        )
+        .expect("spawn failure should produce a diagnostic") else {
+            panic!("spawn failure must be classified as infrastructure");
+        };
+        assert!(diagnostic.message.contains("unable to run external checker"));
     }
 
     #[test]
