@@ -32,6 +32,7 @@ class AnnotationSupport:
 
 class AnnotationConsumer(str, Enum):
     TYPING_GET_TYPE_HINTS = "typing.get_type_hints"
+    TYPING_EXTENSIONS_GET_TYPE_HINTS = "typing_extensions.get_type_hints"
     TYPING_EXTENSIONS_GET_ANNOTATIONS = "typing_extensions.get_annotations"
     INSPECT_GET_ANNOTATIONS = "inspect.get_annotations"
     ANNOTATIONLIB_GET_ANNOTATIONS = "annotationlib.get_annotations"
@@ -1240,6 +1241,8 @@ def _match_pattern_names(pattern: ast.AST) -> set[str]:
 def _call_consumer(dotted: str | None) -> AnnotationConsumer | None:
     if dotted == "typing.get_type_hints":
         return AnnotationConsumer.TYPING_GET_TYPE_HINTS
+    if dotted == "typing_extensions.get_type_hints":
+        return AnnotationConsumer.TYPING_EXTENSIONS_GET_TYPE_HINTS
     if dotted == "typing_extensions.get_annotations":
         return AnnotationConsumer.TYPING_EXTENSIONS_GET_ANNOTATIONS
     if dotted == "inspect.get_annotations":
