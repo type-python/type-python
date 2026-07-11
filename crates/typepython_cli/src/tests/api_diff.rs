@@ -354,6 +354,33 @@ fn diff_api_surfaces_accepts_typepython_source_directory_inputs() {
     assert_eq!(report.added[0].symbol, "Added");
 }
 
+#[cfg(unix)]
+#[test]
+fn diff_api_surfaces_does_not_follow_nested_symlinks() {
+    let project_dir = temp_project_dir("diff_api_surfaces_does_not_follow_nested_symlinks");
+    let report = {
+        let old_dir = project_dir.join("old");
+        let new_dir = project_dir.join("new");
+        let outside = project_dir.join("outside");
+        fs::create_dir_all(&old_dir).expect("old surface should be created");
+        fs::create_dir_all(&new_dir).expect("new surface should be created");
+        fs::create_dir_all(&outside).expect("outside directory should be created");
+        fs::write(outside.join("external.pyi"), "escaped: int\n")
+            .expect("outside stub should be written");
+        fs::write(outside.join("py.typed"), "").expect("outside marker should be written");
+        std::os::unix::fs::symlink(&outside, old_dir.join("linked"))
+            .expect("nested symlink should be created");
+
+        diff_api_surfaces(&old_dir, &new_dir)
+            .expect("api diff should ignore nested symlink targets")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(report.added.is_empty());
+    assert!(report.removed.is_empty());
+    assert!(report.changed.is_empty());
+}
+
 #[test]
 fn diff_api_surfaces_canonicalizes_multiline_overload_signatures() {
     let project_dir =

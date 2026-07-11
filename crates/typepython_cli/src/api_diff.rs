@@ -571,12 +571,21 @@ fn contains_py_typed_marker(root: &Path) -> Result<bool> {
         return Ok(root.file_name().and_then(|name| name.to_str()) == Some("py.typed"));
     }
     for entry in fs::read_dir(root).with_context(|| format!("unable to read {}", root.display()))? {
-        let path = entry?.path();
-        if path.is_dir() {
+        let entry = entry?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("unable to inspect {}", entry.path().display()))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if file_type.is_dir() {
             if contains_py_typed_marker(&path)? {
                 return Ok(true);
             }
-        } else if path.file_name().and_then(|name| name.to_str()) == Some("py.typed") {
+        } else if file_type.is_file()
+            && path.file_name().and_then(|name| name.to_str()) == Some("py.typed")
+        {
             return Ok(true);
         }
     }
@@ -625,10 +634,19 @@ fn collect_pyi_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
         return Ok(());
     }
     for entry in fs::read_dir(root).with_context(|| format!("unable to read {}", root.display()))? {
-        let path = entry?.path();
-        if path.is_dir() {
+        let entry = entry?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("unable to inspect {}", entry.path().display()))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if file_type.is_dir() {
             collect_pyi_files(&path, files)?;
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some("pyi") {
+        } else if file_type.is_file()
+            && path.extension().and_then(|ext| ext.to_str()) == Some("pyi")
+        {
             files.push(path);
         }
     }
@@ -644,10 +662,19 @@ fn collect_source_surface_files(root: &Path, files: &mut Vec<PathBuf>) -> Result
         return Ok(());
     }
     for entry in fs::read_dir(root).with_context(|| format!("unable to read {}", root.display()))? {
-        let path = entry?.path();
-        if path.is_dir() {
+        let entry = entry?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("unable to inspect {}", entry.path().display()))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if file_type.is_dir() {
             collect_source_surface_files(&path, files)?;
-        } else if matches!(path.extension().and_then(|ext| ext.to_str()), Some("py" | "tpy")) {
+        } else if file_type.is_file()
+            && matches!(path.extension().and_then(|ext| ext.to_str()), Some("py" | "tpy"))
+        {
             files.push(path);
         }
     }
