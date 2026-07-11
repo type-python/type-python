@@ -123,6 +123,7 @@ fn check_callable_assignment_uses_decorated_member_params() {
         crate::CheckerOptions::permissive_test_default(),
     );
     let assignment = typepython_binding::AssignmentSite {
+        call_source_range: None,
         name: String::from("handler"),
         destructuring_target_names: None,
         destructuring_index: None,

@@ -1160,6 +1160,7 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![function_declaration("build", Vec::new(), "int", Vec::new())],
                 calls: vec![typepython_binding::CallSite {
+                    source_range: None,
                     callee: String::from("helper"),
                     arg_count: 1,
                     arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![

@@ -442,7 +442,12 @@ fn module_newtype_base_semantic_type(
             && matches!(assignment.value_callee.as_deref(), Some("NewType" | "typing.NewType"))
     })?;
     let call = module.calls.iter().find(|call| {
-        call.line == assignment.line && matches!(call.callee.as_str(), "NewType" | "typing.NewType")
+        matches!(call.callee.as_str(), "NewType" | "typing.NewType")
+            && call.matches_source_call(
+                &call.callee,
+                assignment.line,
+                assignment.call_source_range,
+            )
     })?;
     let base_name = call.arg_values.get(1)?.value_name.as_deref()?;
     Some(SemanticType::Name(base_name.to_owned()))

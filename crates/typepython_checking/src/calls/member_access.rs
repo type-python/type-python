@@ -570,6 +570,7 @@ fn direct_method_call_variant_diagnostics(
 
     let direct_call = typepython_binding::CallSite {
         callee: format!("{}.{}", class_decl.name, call.method),
+        source_range: call.source_range,
         arg_count: call.arg_count,
         arg_values: call.arg_values.clone(),
         starred_arg_values: call.starred_arg_values.clone(),

@@ -485,6 +485,7 @@ pub(super) fn resolve_direct_expression_semantic_type(
     value_type: Option<&str>,
     is_awaited: bool,
     value_callee: Option<&str>,
+    call_source_range: Option<typepython_syntax::SourceRange>,
     value_name: Option<&str>,
     value_member_owner_name: Option<&str>,
     value_member_name: Option<&str>,
@@ -515,6 +516,7 @@ pub(super) fn resolve_direct_expression_semantic_type(
         value_type,
         is_awaited,
         value_callee,
+        call_source_range,
         value_name,
         value_member_owner_name,
         value_member_name,
@@ -552,6 +554,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
     value_type: Option<&str>,
     is_awaited: bool,
     value_callee: Option<&str>,
+    call_source_range: Option<typepython_syntax::SourceRange>,
     value_name: Option<&str>,
     value_member_owner_name: Option<&str>,
     value_member_name: Option<&str>,
@@ -578,11 +581,12 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
         .map(lower_type_text_or_name)
         .or_else(|| {
             value_callee.and_then(|callee| {
-                resolve_direct_callable_return_semantic_type_for_line_with_options(
+                resolve_direct_callable_return_semantic_type_for_call_with_options(
                     node,
                     nodes,
                     callee,
                     current_line,
+                    call_source_range,
                     options,
                 )
                 .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, callee))
@@ -614,6 +618,7 @@ pub(super) fn resolve_direct_expression_semantic_type_with_options(
                         current_owner_name,
                         current_owner_type_name,
                         current_line,
+                        call_source_range,
                         owner_name,
                         method_name,
                         value_method_through_instance,

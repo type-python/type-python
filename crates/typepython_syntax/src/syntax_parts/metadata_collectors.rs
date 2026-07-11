@@ -2040,7 +2040,7 @@ pub(super) fn collect_direct_call_context_sites_in_suite(
     for stmt in suite {
         let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
         if let Some(site) =
-            extract_direct_call_context_site(stmt, line, owner_name, owner_type_name)
+            extract_direct_call_context_site(source, stmt, line, owner_name, owner_type_name)
         {
             sites.push(site);
         }
@@ -2240,6 +2240,7 @@ impl<'source, 'sites, 'ast> visitor::Visitor<'ast>
         if let Some(callee) = extract_direct_call_context_callee(expr) {
             self.sites.push(DirectCallContextSite {
                 callee,
+                source_range: Some(source_range(self.source, expr.range())),
                 owner_name: Some(self.owner_name.clone()),
                 owner_type_name: self.owner_type_name.clone(),
                 positional_arg_count: extract_direct_call_positional_arg_count(expr).unwrap_or(0),
@@ -2254,6 +2255,7 @@ impl<'source, 'sites, 'ast> visitor::Visitor<'ast>
 }
 
 pub(super) fn extract_direct_call_context_site(
+    source: &str,
     stmt: &Stmt,
     line: usize,
     owner_name: Option<&str>,
@@ -2269,6 +2271,7 @@ pub(super) fn extract_direct_call_context_site(
 
     Some(DirectCallContextSite {
         callee: extract_direct_call_context_callee(expr)?,
+        source_range: extract_direct_call_context_source_range(source, expr),
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
         positional_arg_count: extract_direct_call_positional_arg_count(expr)?,
@@ -2277,6 +2280,13 @@ pub(super) fn extract_direct_call_context_site(
         has_unpacked_kwargs: direct_call_has_unpacked_kwargs(expr)?,
         line,
     })
+}
+
+fn extract_direct_call_context_source_range(source: &str, expr: &Expr) -> Option<SourceRange> {
+    if let Expr::Await(await_expr) = expr {
+        return extract_direct_call_context_source_range(source, &await_expr.value);
+    }
+    matches!(expr, Expr::Call(_)).then(|| source_range(source, expr.range()))
 }
 
 pub(super) fn extract_direct_call_context_callee(expr: &Expr) -> Option<String> {

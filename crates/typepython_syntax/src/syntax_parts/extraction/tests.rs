@@ -5,9 +5,9 @@ use super::{
     InvalidationKind, InvalidationStatement, LambdaMetadata, MatchCaseStatement, MatchPattern,
     MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind, NamedBlockStatement,
     ParseOptions, ParsePythonVersion, ParseTargetPlatform, ReturnStatement, SourceFile, SourceKind,
-    SyntaxStatement, TypeAliasStatement, TypeExpr, TypeIgnoreDirective, TypeParam, TypeParamKind,
-    TypedDictLiteralEntry, UnsafeStatement, ValueStatement, WithStatement, YieldStatement,
-    direct_expr_metadata_vec_from_type_texts, parse, parse_with_options,
+    SourceRange, SyntaxStatement, TypeAliasStatement, TypeExpr, TypeIgnoreDirective, TypeParam,
+    TypeParamKind, TypedDictLiteralEntry, UnsafeStatement, ValueStatement, WithStatement,
+    YieldStatement, direct_expr_metadata_vec_from_type_texts, parse, parse_with_options,
 };
 use std::path::PathBuf;
 
@@ -130,6 +130,7 @@ fn normalize_class_member(mut member: ClassMember) -> ClassMember {
 }
 
 fn normalize_value_statement(mut statement: ValueStatement) -> ValueStatement {
+    statement.call_source_range = None;
     if statement.annotation_expr.is_none() {
         statement.annotation_expr = statement.annotation.as_deref().and_then(TypeExpr::parse);
     }
@@ -154,6 +155,7 @@ fn normalize_value_statement(mut statement: ValueStatement) -> ValueStatement {
 }
 
 fn normalize_call_statement(mut statement: CallStatement) -> CallStatement {
+    statement.source_range = None;
     statement.arg_values = statement.arg_values.into_iter().map(normalize_direct_expr).collect();
     statement.starred_arg_values =
         statement.starred_arg_values.into_iter().map(normalize_direct_expr).collect();
@@ -165,6 +167,7 @@ fn normalize_call_statement(mut statement: CallStatement) -> CallStatement {
 }
 
 fn normalize_method_call_statement(mut statement: MethodCallStatement) -> MethodCallStatement {
+    statement.source_range = None;
     statement.arg_values = statement.arg_values.into_iter().map(normalize_direct_expr).collect();
     statement.starred_arg_values =
         statement.starred_arg_values.into_iter().map(normalize_direct_expr).collect();
@@ -176,6 +179,7 @@ fn normalize_method_call_statement(mut statement: MethodCallStatement) -> Method
 }
 
 fn normalize_return_statement(mut statement: ReturnStatement) -> ReturnStatement {
+    statement.call_source_range = None;
     statement.value_subscript_target =
         normalize_direct_expr_option(statement.value_subscript_target);
     statement.value_if_true = normalize_direct_expr_option(statement.value_if_true);
@@ -193,6 +197,7 @@ fn normalize_return_statement(mut statement: ReturnStatement) -> ReturnStatement
 }
 
 fn normalize_yield_statement(mut statement: YieldStatement) -> YieldStatement {
+    statement.call_source_range = None;
     statement.value_subscript_target =
         normalize_direct_expr_option(statement.value_subscript_target);
     statement.value_if_true = normalize_direct_expr_option(statement.value_if_true);
@@ -268,6 +273,7 @@ fn normalize_typed_dict_literal_entries(
 }
 
 fn normalize_direct_expr(mut metadata: DirectExprMetadata) -> DirectExprMetadata {
+    metadata.call_source_range = None;
     metadata.value_subscript_target = normalize_direct_expr_option(metadata.value_subscript_target);
     metadata.value_if_true = normalize_direct_expr_option(metadata.value_if_true);
     metadata.value_if_false = normalize_direct_expr_option(metadata.value_if_false);
@@ -854,6 +860,7 @@ fn parse_leaves_python_files_without_extension_analysis() {
                 line: 1,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("unsafe"),
                 owner_type_name: None,
                 value_type_expr: None,
@@ -1073,6 +1080,7 @@ fn parse_accepts_generic_python_headers_in_typepython_source() {
                 line: 4,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("first"),
                 owner_type_name: None,
                 value_type_expr: None,
@@ -1173,6 +1181,7 @@ fn parse_accepts_generic_python_headers_with_constraints_and_defaults() {
                 line: 4,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("first"),
                 owner_type_name: None,
                 value_type_expr: None,
@@ -1331,6 +1340,7 @@ fn parse_extracts_imports_and_values_from_ast_body() {
                 line: 2,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("value")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("int")),
@@ -1369,6 +1379,7 @@ fn parse_extracts_imports_and_values_from_ast_body() {
                 line: 3,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("a"), String::from("b")],
                 destructuring_target_names: None,
                 annotation: None,
@@ -1424,6 +1435,7 @@ fn parse_extracts_annotated_assignment_direct_rhs_forms() {
         tree.statements,
         vec![
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("value")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("int")),
@@ -1462,6 +1474,7 @@ fn parse_extracts_annotated_assignment_direct_rhs_forms() {
                 line: 1,
             }),
             SyntaxStatement::Call(CallStatement {
+                source_range: None,
                 callee: String::from("helper"),
                 arg_count: 0,
                 arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -1472,6 +1485,7 @@ fn parse_extracts_annotated_assignment_direct_rhs_forms() {
                 line: 1,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("copy")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("str")),
@@ -1510,6 +1524,7 @@ fn parse_extracts_annotated_assignment_direct_rhs_forms() {
                 line: 2,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("field")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("str")),
@@ -1642,6 +1657,7 @@ fn parse_extracts_function_body_annotated_assignments() {
                 line: 1,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("result")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("int")),
@@ -1680,6 +1696,7 @@ fn parse_extracts_function_body_annotated_assignments() {
                 line: 2,
             }),
             SyntaxStatement::Call(CallStatement {
+                source_range: None,
                 callee: String::from("helper"),
                 arg_count: 0,
                 arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -1690,6 +1707,7 @@ fn parse_extracts_function_body_annotated_assignments() {
                 line: 3,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("item")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("str")),
@@ -1886,6 +1904,7 @@ fn parse_extracts_top_level_direct_calls() {
         tree.statements,
         vec![
             SyntaxStatement::Call(CallStatement {
+                source_range: None,
                 callee: String::from("Builder"),
                 arg_count: 0,
                 arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -1896,6 +1915,7 @@ fn parse_extracts_top_level_direct_calls() {
                 line: 1,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("value")],
                 destructuring_target_names: None,
                 annotation: None,
@@ -1934,6 +1954,7 @@ fn parse_extracts_top_level_direct_calls() {
                 line: 2,
             }),
             SyntaxStatement::Call(CallStatement {
+                source_range: None,
                 callee: String::from("Factory"),
                 arg_count: 0,
                 arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -1960,6 +1981,7 @@ fn parse_retains_direct_call_keyword_names() {
     assert_eq!(
         tree.statements,
         vec![SyntaxStatement::Call(CallStatement {
+            source_range: None,
             callee: String::from("build"),
             arg_count: 0,
             arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -1967,6 +1989,7 @@ fn parse_retains_direct_call_keyword_names() {
             keyword_names: vec![String::from("x"), String::from("y")],
             keyword_arg_values: vec![
                 DirectExprMetadata {
+                    call_source_range: None,
                     value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                     is_awaited: false,
                     value_callee: None,
@@ -1996,6 +2019,7 @@ fn parse_retains_direct_call_keyword_names() {
                     value_dict_entries: None,
                 },
                 DirectExprMetadata {
+                    call_source_range: None,
                     value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                     is_awaited: false,
                     value_callee: None,
@@ -2173,10 +2197,12 @@ fn parse_retains_direct_call_literal_arg_types() {
     assert_eq!(
         tree.statements,
         vec![SyntaxStatement::Call(CallStatement {
+            source_range: None,
             callee: String::from("build"),
             arg_count: 2,
             arg_values: vec![
                 DirectExprMetadata {
+                    call_source_range: None,
                     value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                     is_awaited: false,
                     value_callee: None,
@@ -2206,6 +2232,7 @@ fn parse_retains_direct_call_literal_arg_types() {
                     value_dict_entries: None,
                 },
                 DirectExprMetadata {
+                    call_source_range: None,
                     value_type_expr: Some(TypeExpr::Name(String::from("str"))),
                     is_awaited: false,
                     value_callee: None,
@@ -2381,9 +2408,11 @@ fn parse_retains_lambda_metadata_in_call_args() {
     assert_eq!(
         tree.statements,
         vec![SyntaxStatement::Call(CallStatement {
+            source_range: None,
             callee: String::from("build"),
             arg_count: 1,
             arg_values: vec![DirectExprMetadata {
+                call_source_range: None,
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
@@ -2417,6 +2446,7 @@ fn parse_retains_lambda_metadata_in_call_args() {
                         keyword_variadic: false,
                     }],
                     body: Box::new(DirectExprMetadata {
+                        call_source_range: None,
                         value_type_expr: None,
                         is_awaited: false,
                         value_callee: None,
@@ -2614,6 +2644,7 @@ fn parse_retains_ifexp_metadata() {
     assert_eq!(
         tree.statements,
         vec![SyntaxStatement::Value(ValueStatement {
+            call_source_range: None,
             names: vec![String::from("value")],
             destructuring_target_names: None,
             annotation: Some(String::from("int")),
@@ -2632,6 +2663,7 @@ fn parse_retains_ifexp_metadata() {
             value_subscript_string_key: None,
             value_subscript_index: None,
             value_if_true: Some(Box::new(DirectExprMetadata {
+                call_source_range: None,
                 value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                 is_awaited: false,
                 value_callee: None,
@@ -2661,6 +2693,7 @@ fn parse_retains_ifexp_metadata() {
                 value_dict_entries: None,
             })),
             value_if_false: Some(Box::new(DirectExprMetadata {
+                call_source_range: None,
                 value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                 is_awaited: false,
                 value_callee: None,
@@ -2794,6 +2827,7 @@ fn parse_extracts_nested_direct_calls() {
                 line: 1,
             }),
             SyntaxStatement::Call(CallStatement {
+                source_range: None,
                 callee: String::from("Factory"),
                 arg_count: 0,
                 arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -2833,6 +2867,7 @@ fn parse_extracts_direct_return_literals() {
                 line: 1,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value_type_expr: TypeExpr::parse("str"),
@@ -2894,6 +2929,7 @@ fn parse_extracts_direct_bool_and_none_return_literals() {
                 line: 1,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("truthy"),
                 owner_type_name: None,
                 value_type_expr: TypeExpr::parse("bool"),
@@ -2936,6 +2972,7 @@ fn parse_extracts_direct_bool_and_none_return_literals() {
                 line: 4,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("missing"),
                 owner_type_name: None,
                 value_type_expr: TypeExpr::parse("None"),
@@ -2995,6 +3032,7 @@ fn parse_extracts_direct_return_call_callee() {
                 line: 1,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value_type_expr: None,
@@ -3025,6 +3063,7 @@ fn parse_extracts_direct_return_call_callee() {
                 line: 2,
             }),
             SyntaxStatement::Call(CallStatement {
+                source_range: None,
                 callee: String::from("helper"),
                 arg_count: 1,
                 arg_values: direct_expr_metadata_vec_from_type_texts(vec![String::from("str")]),
@@ -3073,6 +3112,7 @@ fn parse_extracts_direct_return_member_access() {
                 line: 1,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value_type_expr: None,
@@ -3153,6 +3193,7 @@ fn parse_extracts_direct_method_calls() {
         tree.statements,
         vec![
             SyntaxStatement::MethodCall(MethodCallStatement {
+                source_range: None,
                 current_owner_name: None,
                 current_owner_type_name: None,
                 owner_name: String::from("Box"),
@@ -3160,6 +3201,7 @@ fn parse_extracts_direct_method_calls() {
                 through_instance: false,
                 arg_count: 1,
                 arg_values: vec![DirectExprMetadata {
+                    call_source_range: None,
                     value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                     is_awaited: false,
                     value_callee: None,
@@ -3195,6 +3237,7 @@ fn parse_extracts_direct_method_calls() {
                 line: 1,
             }),
             SyntaxStatement::MethodCall(MethodCallStatement {
+                source_range: None,
                 current_owner_name: None,
                 current_owner_type_name: None,
                 owner_name: String::from("Box"),
@@ -3205,6 +3248,7 @@ fn parse_extracts_direct_method_calls() {
                 starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 keyword_names: vec![String::from("x")],
                 keyword_arg_values: vec![DirectExprMetadata {
+                    call_source_range: None,
                     value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                     is_awaited: false,
                     value_callee: None,
@@ -3484,6 +3528,7 @@ fn parse_marks_decorated_class_methods_as_overload_members() {
                 line: 3,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("parse"),
                 owner_type_name: Some(String::from("Parser")),
                 value_type_expr: TypeExpr::parse("int"),
@@ -3540,6 +3585,7 @@ fn parse_marks_final_value_declarations() {
                 line: 1,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("MAX_SIZE")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("Final")),
@@ -3917,6 +3963,7 @@ fn parse_marks_classvar_value_declarations() {
                 line: 1,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("VALUE")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("ClassVar[int]")),
@@ -4083,6 +4130,7 @@ fn parse_allows_async_constructs_in_python_passthrough_source() {
                 line: 1,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("fetch"),
                 owner_type_name: None,
                 value_type_expr: TypeExpr::parse("int"),
@@ -4144,6 +4192,7 @@ fn parse_retains_direct_await_in_python_passthrough_source() {
                 line: 1,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("fetch"),
                 owner_type_name: None,
                 value_type_expr: TypeExpr::parse("int"),
@@ -4186,6 +4235,7 @@ fn parse_retains_direct_await_in_python_passthrough_source() {
                 line: 4,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value_type_expr: None,
@@ -4247,6 +4297,7 @@ fn parse_retains_direct_yield_in_python_passthrough_source() {
                 line: 1,
             }),
             SyntaxStatement::Yield(YieldStatement {
+                call_source_range: None,
                 owner_name: String::from("produce"),
                 owner_type_name: None,
                 value_type_expr: TypeExpr::parse("int"),
@@ -4289,6 +4340,7 @@ fn parse_retains_direct_yield_in_python_passthrough_source() {
                 line: 4,
             }),
             SyntaxStatement::Yield(YieldStatement {
+                call_source_range: None,
                 owner_name: String::from("relay"),
                 owner_type_name: None,
                 value_type_expr: None,
@@ -4523,6 +4575,7 @@ fn parse_retains_simple_for_loop_metadata() {
                 line: 1,
             }),
             SyntaxStatement::For(ForStatement {
+                call_source_range: None,
                 target_name: String::from("item"),
                 target_names: Vec::new(),
                 owner_name: Some(String::from("build")),
@@ -4540,6 +4593,7 @@ fn parse_retains_simple_for_loop_metadata() {
                 line: 2,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value_type_expr: None,
@@ -4610,6 +4664,7 @@ fn parse_retains_tuple_for_loop_metadata() {
                 line: 1,
             }),
             SyntaxStatement::For(ForStatement {
+                call_source_range: None,
                 target_name: String::new(),
                 target_names: vec![String::from("a"), String::from("b")],
                 owner_name: Some(String::from("build")),
@@ -4627,6 +4682,7 @@ fn parse_retains_tuple_for_loop_metadata() {
                 line: 2,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value_type_expr: None,
@@ -4697,6 +4753,7 @@ fn parse_retains_simple_with_metadata() {
                 line: 1,
             }),
             SyntaxStatement::With(WithStatement {
+                call_source_range: None,
                 target_name: Some(String::from("value")),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
@@ -4713,6 +4770,7 @@ fn parse_retains_simple_with_metadata() {
                 line: 2,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value_type_expr: None,
@@ -4783,6 +4841,7 @@ fn parse_retains_with_item_without_target() {
                 line: 1,
             }),
             SyntaxStatement::With(WithStatement {
+                call_source_range: None,
                 target_name: None,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
@@ -4851,6 +4910,7 @@ fn parse_retains_multiple_with_items() {
                 line: 1,
             }),
             SyntaxStatement::With(WithStatement {
+                call_source_range: None,
                 target_name: Some(String::from("x")),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
@@ -4867,6 +4927,7 @@ fn parse_retains_multiple_with_items() {
                 line: 2,
             }),
             SyntaxStatement::With(WithStatement {
+                call_source_range: None,
                 target_name: Some(String::from("y")),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
@@ -4883,6 +4944,7 @@ fn parse_retains_multiple_with_items() {
                 line: 2,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value_type_expr: None,
@@ -4944,6 +5006,7 @@ fn parse_retains_except_handler_binding() {
                 line: 1,
             }),
             SyntaxStatement::Call(CallStatement {
+                source_range: None,
                 callee: String::from("risky"),
                 arg_count: 0,
                 arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -4962,6 +5025,7 @@ fn parse_retains_except_handler_binding() {
                 end_line: 5,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value_type_expr: None,
@@ -5061,6 +5125,7 @@ fn parse_retains_function_signature_shapes() {
                 line: 6,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value_type_expr: TypeExpr::parse("str"),
@@ -5392,6 +5457,7 @@ fn parse_marks_method_kinds_from_decorators() {
                 line: 1,
             }),
             SyntaxStatement::Return(ReturnStatement {
+                call_source_range: None,
                 owner_name: String::from("name"),
                 owner_type_name: Some(String::from("Box")),
                 value_type_expr: TypeExpr::parse("str"),
@@ -5440,6 +5506,7 @@ fn parse_retains_match_statement_metadata() {
     assert_eq!(
         tree.statements,
         vec![SyntaxStatement::Match(MatchStatement {
+            call_source_range: None,
             owner_name: None,
             owner_type_name: None,
             subject_type_expr: None,
@@ -5823,4 +5890,119 @@ fn collect_direct_call_context_sites_handles_typepython_surface_syntax() {
             .any(|site| site.callee == "print" && site.owner_name.as_deref() == Some("forward")),
         "{sites:?}"
     );
+}
+
+#[test]
+fn parse_preserves_distinct_ranges_for_same_line_calls_and_contexts() {
+    let source = "first: int = parse(1); second: str = parse(\"x\")\n";
+    let first_start = source.find("parse(1)").expect("first call should exist");
+    let second_start = source.find("parse(\"x\")").expect("second call should exist");
+    let expected = vec![
+        SourceRange { start: first_start, end: first_start + "parse(1)".len() },
+        SourceRange { start: second_start, end: second_start + "parse(\"x\")".len() },
+    ];
+    let tree = parse(SourceFile {
+        path: PathBuf::from("module.py"),
+        kind: SourceKind::Python,
+        logical_module: String::new(),
+        text: source.to_owned(),
+    });
+
+    assert!(tree.diagnostics.is_empty(), "{:?}", tree.diagnostics);
+    let call_ranges = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::Call(statement) if statement.callee == "parse" => {
+                statement.source_range
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let assignment_ranges = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::Value(statement)
+                if statement.value_callee.as_deref() == Some("parse") =>
+            {
+                statement.call_source_range
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let context_ranges = crate::collect_direct_call_context_sites(source)
+        .into_iter()
+        .filter(|site| site.callee == "parse")
+        .filter_map(|site| site.source_range)
+        .collect::<Vec<_>>();
+
+    assert_eq!(call_ranges, expected);
+    assert_eq!(assignment_ranges, expected);
+    assert_eq!(context_ranges, expected);
+}
+
+#[test]
+fn surface_rewrite_preserves_call_identity_after_rewritten_lines() {
+    let source = concat!(
+        "sealed class Expr:\n",
+        "    pass\n\n",
+        "class Num(Expr):  value: int\n\n",
+        "def forward(value: int) -> None:\n",
+        "    parse(value)\n",
+    );
+    let tree = parse(SourceFile {
+        path: PathBuf::from("module.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: source.to_owned(),
+    });
+    let call = tree
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            SyntaxStatement::Call(call) if call.callee == "parse" => Some(call),
+            _ => None,
+        })
+        .expect("parsed call should exist");
+    let context = crate::collect_direct_call_context_sites(source)
+        .into_iter()
+        .find(|site| site.callee == "parse")
+        .expect("call context should exist");
+
+    assert!(call.source_range.is_some());
+    assert_eq!(call.line, context.line);
+    assert_eq!(call.source_range, context.source_range);
+}
+
+#[test]
+fn prior_surface_rewrite_keeps_two_same_line_call_identities_distinct() {
+    let source = concat!(
+        "sealed class Box:\n",
+        "    pass\n\n",
+        "first: int = parse(1); second: str = parse(\"x\")\n",
+    );
+    let tree = parse(SourceFile {
+        path: PathBuf::from("module.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: source.to_owned(),
+    });
+    let call_ranges = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::Call(call) if call.callee == "parse" => call.source_range,
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let context_ranges = crate::collect_direct_call_context_sites(source)
+        .into_iter()
+        .filter(|site| site.callee == "parse")
+        .filter_map(|site| site.source_range)
+        .collect::<Vec<_>>();
+
+    ::std::assert_eq!(call_ranges.len(), 2, "{:?}", tree.statements);
+    assert_ne!(call_ranges[0], call_ranges[1]);
+    assert_eq!(call_ranges, context_ranges);
 }

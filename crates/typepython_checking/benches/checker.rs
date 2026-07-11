@@ -102,6 +102,7 @@ fn type_var_tuple(name: &str) -> GenericTypeParam {
 
 fn call_site(callee: &str, arg_types: Vec<String>, line: usize) -> CallSite {
     CallSite {
+        source_range: None,
         callee: callee.to_owned(),
         arg_count: arg_types.len(),
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(arg_types),
@@ -120,6 +121,7 @@ fn assignment_from_call(
     line: usize,
 ) -> AssignmentSite {
     AssignmentSite {
+        call_source_range: None,
         annotation_expr: None,
         value: None,
         name,

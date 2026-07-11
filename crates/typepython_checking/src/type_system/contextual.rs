@@ -79,6 +79,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_options
         None,
         metadata.is_awaited,
         metadata.value_callee.as_deref(),
+        metadata.call_source_range,
         metadata.value_name.as_deref(),
         metadata.value_member_owner_name.as_deref(),
         metadata.value_member_name.as_deref(),
@@ -869,12 +870,13 @@ pub(super) fn resolve_callable_assignment_semantic_signature_with_context(
             .into_iter()
             .map(|param| param.annotation_or_dynamic())
             .collect::<Vec<_>>();
-        let actual_return = resolve_direct_callable_return_semantic_type_for_line_with_context(
+        let actual_return = resolve_direct_callable_return_semantic_type_for_call_with_context(
             context,
             node,
             nodes,
             value_name,
             assignment.line,
+            None,
         )
         .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, value_name))?;
         return Some((actual_params, actual_return));
@@ -968,12 +970,13 @@ pub(super) fn resolve_direct_member_callable_semantic_signature_with_context(
     through_instance: bool,
 ) -> Option<(Vec<SemanticType>, SemanticType)> {
     let owner_type = if through_instance {
-        resolve_direct_callable_return_semantic_type_for_line_with_context(
+        resolve_direct_callable_return_semantic_type_for_call_with_context(
             context,
             node,
             nodes,
             owner_name,
             current_line,
+            None,
         )
         .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, owner_name))
         .or_else(|| Some(lower_type_text_or_name(owner_name)))

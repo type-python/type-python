@@ -794,6 +794,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
     current_owner_name: Option<&str>,
     current_owner_type_name: Option<&str>,
     current_line: usize,
+    call_source_range: Option<typepython_syntax::SourceRange>,
     owner_name: &str,
     method_name: &str,
     through_instance: bool,
@@ -804,6 +805,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             node,
             nodes,
             current_line,
+            call_source_range,
             current_owner_name,
             current_owner_type_name,
             owner_name,
@@ -855,6 +857,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
                         current_owner_name,
                         current_owner_type_name,
                         current_line,
+                        call_source_range,
                         owner_name,
                         method_name,
                         through_instance,
@@ -869,6 +872,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
                         current_owner_name,
                         current_owner_type_name,
                         current_line,
+                        call_source_range,
                         owner_name,
                         method_name,
                         through_instance,
@@ -887,6 +891,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
         current_owner_name,
         current_owner_type_name,
         current_line,
+        call_source_range,
         owner_name,
         method_name,
         through_instance,
@@ -906,6 +911,7 @@ fn resolve_direct_method_return_on_owner_type(
     current_owner_name: Option<&str>,
     current_owner_type_name: Option<&str>,
     current_line: usize,
+    call_source_range: Option<typepython_syntax::SourceRange>,
     owner_name: &str,
     method_name: &str,
     through_instance: bool,
@@ -928,13 +934,17 @@ fn resolve_direct_method_return_on_owner_type(
         .any(|method| method.declaration.kind == DeclarationKind::Overload)
     {
         let call = node.method_calls.iter().find(|call| {
-            call.owner_name == owner_name
-                && call.method == method_name
-                && call.through_instance == through_instance
-                && call.line == current_line
+            call.matches_source_call(
+                owner_name,
+                method_name,
+                through_instance,
+                current_line,
+                call_source_range,
+            )
         })?;
         let call = typepython_binding::CallSite {
             callee: format!("{}.{}", class_decl.name, method_name),
+            source_range: call.source_range,
             arg_count: call.arg_count,
             arg_values: call.arg_values.clone(),
             starred_arg_values: call.starred_arg_values.clone(),
@@ -970,13 +980,17 @@ fn resolve_direct_method_return_on_owner_type(
     } else {
         let method = methods.first()?;
         if let Some(call) = node.method_calls.iter().find(|call| {
-            call.owner_name == owner_name
-                && call.method == method_name
-                && call.through_instance == through_instance
-                && call.line == current_line
+            call.matches_source_call(
+                owner_name,
+                method_name,
+                through_instance,
+                current_line,
+                call_source_range,
+            )
         }) {
             let call = typepython_binding::CallSite {
                 callee: format!("{}.{}", class_decl.name, method_name),
+                source_range: call.source_range,
                 arg_count: call.arg_count,
                 arg_values: call.arg_values.clone(),
                 starred_arg_values: call.starred_arg_values.clone(),

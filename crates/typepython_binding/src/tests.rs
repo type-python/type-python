@@ -10,7 +10,7 @@ use typepython_diagnostics::DiagnosticReport;
 use typepython_syntax::{
     ClassMember, ClassMemberKind, DirectExprMetadata, FunctionParam, FunctionStatement,
     ImportStatement, MethodKind, NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement,
-    SyntaxTree, TypeAliasStatement, TypeParam, TypeParamKind, ValueStatement,
+    SyntaxTree, TypeAliasStatement, TypeParam, TypeParamKind, ValueStatement, parse,
 };
 
 fn metadata_type_alias(text: &str, line: usize) -> DeclarationMetadata {
@@ -151,9 +151,11 @@ fn declaration_text_accessors_prefer_structured_metadata() {
 #[test]
 fn call_site_arg_type_accessors_prefer_direct_expr_metadata() {
     let call = CallSite {
+        source_range: None,
         callee: String::from("build"),
         arg_count: 1,
         arg_values: vec![DirectExprMetadata {
+            call_source_range: None,
             value_type_expr: Some(typepython_syntax::TypeExpr::Generic {
                 head: String::from("list"),
                 args: vec![typepython_syntax::TypeExpr::Name(String::from("int"))],
@@ -190,6 +192,7 @@ fn call_site_arg_type_accessors_prefer_direct_expr_metadata() {
         ]),
         keyword_names: vec![String::from("count")],
         keyword_arg_values: vec![DirectExprMetadata {
+            call_source_range: None,
             value_type_expr: Some(typepython_syntax::TypeExpr::Name(String::from("int"))),
             is_awaited: false,
             value_callee: None,
@@ -540,6 +543,7 @@ fn bind_collects_imports_and_values_from_syntax_tree() {
                 line: 1,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("value"), String::from("count")],
                 destructuring_target_names: None,
                 annotation: None,
@@ -676,6 +680,7 @@ fn bind_collects_assignment_sites_from_syntax_tree() {
         },
         statements: vec![
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("value")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("int")),
@@ -714,6 +719,7 @@ fn bind_collects_assignment_sites_from_syntax_tree() {
                 line: 1,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("copy")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("str")),
@@ -760,8 +766,10 @@ fn bind_collects_assignment_sites_from_syntax_tree() {
         table.assignments,
         vec![
             AssignmentSite {
+                call_source_range: None,
                 annotation_expr: Some(BoundTypeExpr::new("int")),
                 value: Some(DirectExprMetadata {
+                    call_source_range: None,
                     value_type_expr: None,
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -825,8 +833,10 @@ fn bind_collects_assignment_sites_from_syntax_tree() {
                 line: 1,
             },
             AssignmentSite {
+                call_source_range: None,
                 annotation_expr: Some(BoundTypeExpr::new("str")),
                 value: Some(DirectExprMetadata {
+                    call_source_range: None,
                     value_type_expr: None,
                     is_awaited: false,
                     value_callee: None,
@@ -925,6 +935,7 @@ fn bind_keeps_local_assignments_out_of_declarations() {
                 line: 1,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("result")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("int")),
@@ -972,8 +983,10 @@ fn bind_keeps_local_assignments_out_of_declarations() {
     assert_eq!(
         table.assignments,
         vec![AssignmentSite {
+            call_source_range: None,
             annotation_expr: Some(BoundTypeExpr::new("int")),
             value: Some(DirectExprMetadata {
+                call_source_range: None,
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
@@ -1062,6 +1075,7 @@ fn bind_collects_local_bare_assignments() {
                 line: 1,
             }),
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("result")],
                 destructuring_target_names: None,
                 annotation: None,
@@ -1109,8 +1123,10 @@ fn bind_collects_local_bare_assignments() {
     assert_eq!(
         table.assignments,
         vec![AssignmentSite {
+            call_source_range: None,
             annotation_expr: None,
             value: Some(DirectExprMetadata {
+                call_source_range: None,
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: Some(String::from("helper")),
@@ -1186,6 +1202,7 @@ fn bind_tracks_destructuring_assignment_indexes() {
             text: String::new(),
         },
         statements: vec![SyntaxStatement::Value(ValueStatement {
+            call_source_range: None,
             names: vec![String::from("left"), String::from("right")],
             destructuring_target_names: Some(vec![String::from("left"), String::from("right")]),
             annotation: None,
@@ -1248,6 +1265,7 @@ fn bind_collects_yield_sites_from_syntax_tree() {
             text: String::new(),
         },
         statements: vec![SyntaxStatement::Yield(typepython_syntax::YieldStatement {
+            call_source_range: None,
             owner_name: String::from("produce"),
             owner_type_name: None,
             value_type_expr: typepython_syntax::TypeExpr::parse("int"),
@@ -1284,7 +1302,9 @@ fn bind_collects_yield_sites_from_syntax_tree() {
     assert_eq!(
         table.yields,
         vec![YieldSite {
+            call_source_range: None,
             value: Some(DirectExprMetadata {
+                call_source_range: None,
                 value_type_expr: Some(typepython_syntax::TypeExpr::Name(String::from("int"))),
                 is_awaited: false,
                 value_callee: None,
@@ -1354,6 +1374,7 @@ fn bind_collects_for_sites_from_syntax_tree() {
             text: String::new(),
         },
         statements: vec![SyntaxStatement::For(typepython_syntax::ForStatement {
+            call_source_range: None,
             target_name: String::from("item"),
             target_names: Vec::new(),
             owner_name: Some(String::from("build")),
@@ -1377,7 +1398,9 @@ fn bind_collects_for_sites_from_syntax_tree() {
     assert_eq!(
         table.for_loops,
         vec![ForSite {
+            call_source_range: None,
             iter: Some(DirectExprMetadata {
+                call_source_range: None,
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
@@ -1434,6 +1457,7 @@ fn bind_collects_match_sites_from_syntax_tree() {
             text: String::new(),
         },
         statements: vec![SyntaxStatement::Match(typepython_syntax::MatchStatement {
+            call_source_range: None,
             owner_name: Some(String::from("build")),
             owner_type_name: None,
             subject_type_expr: None,
@@ -1461,7 +1485,9 @@ fn bind_collects_match_sites_from_syntax_tree() {
     assert_eq!(
         table.matches,
         vec![MatchSite {
+            call_source_range: None,
             subject: Some(DirectExprMetadata {
+                call_source_range: None,
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
@@ -1614,6 +1640,7 @@ fn bind_collects_with_sites_from_syntax_tree() {
             text: String::new(),
         },
         statements: vec![SyntaxStatement::With(typepython_syntax::WithStatement {
+            call_source_range: None,
             target_name: Some(String::from("value")),
             owner_name: Some(String::from("build")),
             owner_type_name: None,
@@ -1636,7 +1663,9 @@ fn bind_collects_with_sites_from_syntax_tree() {
     assert_eq!(
         table.with_statements,
         vec![WithSite {
+            call_source_range: None,
             context: Some(DirectExprMetadata {
+                call_source_range: None,
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
@@ -1910,6 +1939,7 @@ fn bind_marks_final_values_and_fields() {
         },
         statements: vec![
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("MAX_SIZE")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("Final")),
@@ -2062,6 +2092,7 @@ fn bind_marks_classvar_values_and_fields() {
         },
         statements: vec![
             SyntaxStatement::Value(ValueStatement {
+                call_source_range: None,
                 names: vec![String::from("VALUE")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("ClassVar[int]")),
@@ -3376,6 +3407,7 @@ fn bind_excludes_rebind_like_value_from_declarations() {
             text: String::new(),
         },
         statements: vec![SyntaxStatement::Value(ValueStatement {
+            call_source_range: None,
             names: vec![String::from("count")],
             destructuring_target_names: None,
             annotation: None,
@@ -3399,6 +3431,7 @@ fn bind_excludes_rebind_like_value_from_declarations() {
             value_bool_left: None,
             value_bool_right: None,
             value_binop_left: Some(Box::new(DirectExprMetadata {
+                call_source_range: None,
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
@@ -3461,6 +3494,7 @@ fn bind_collects_match_literal_and_unsupported_patterns() {
             text: String::new(),
         },
         statements: vec![SyntaxStatement::Match(typepython_syntax::MatchStatement {
+            call_source_range: None,
             owner_name: Some(String::from("route")),
             owner_type_name: None,
             subject_type_expr: None,
@@ -3559,6 +3593,7 @@ fn bind_collects_yield_from_sites() {
             text: String::new(),
         },
         statements: vec![SyntaxStatement::Yield(typepython_syntax::YieldStatement {
+            call_source_range: None,
             owner_name: String::from("delegate"),
             owner_type_name: None,
             value_type_expr: typepython_syntax::TypeExpr::parse("list[int]"),
@@ -3596,4 +3631,84 @@ fn bind_collects_yield_from_sites() {
     assert!(table.yields[0].is_yield_from);
     assert_eq!(table.yields[0].owner_name, "delegate");
     assert_eq!(table.yields[0].value_name, Some(String::from("items")));
+}
+
+#[test]
+fn bind_preserves_call_ranges_across_calls_assignments_and_returns() {
+    let source = concat!(
+        "first: int = parse(1); second: str = parse(\"x\")\n",
+        "third: int = parser.parse(1); fourth: str = parser.parse(\"x\")\n",
+        "def choose(): return parse(2); return parse(\"y\")\n",
+    );
+    let range = |call_text: &str| {
+        let absolute_start = source.find(call_text).expect("call should exist in source");
+        let line_start = source[..absolute_start].rfind('\n').map_or(0, |index| index + 1);
+        let start = absolute_start - line_start;
+        typepython_syntax::SourceRange { start, end: start + call_text.len() }
+    };
+    let table = bind(&parse(SourceFile {
+        path: PathBuf::from("src/app/module.py"),
+        kind: SourceKind::Python,
+        logical_module: String::from("app.module"),
+        text: source.to_owned(),
+    }));
+
+    let direct_ranges = table
+        .calls
+        .iter()
+        .filter(|call| call.callee == "parse")
+        .filter_map(|call| call.source_range)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        direct_ranges,
+        vec![range("parse(1)"), range("parse(\"x\")"), range("parse(2)"), range("parse(\"y\")")]
+    );
+    let method_ranges = table
+        .method_calls
+        .iter()
+        .filter(|call| call.owner_name == "parser" && call.method == "parse")
+        .filter_map(|call| call.source_range)
+        .collect::<Vec<_>>();
+    assert_eq!(method_ranges, vec![range("parser.parse(1)"), range("parser.parse(\"x\")")]);
+
+    let assignment_ranges = table
+        .assignments
+        .iter()
+        .map(|assignment| {
+            (
+                assignment.name.as_str(),
+                assignment.call_source_range,
+                assignment.value.as_ref().and_then(|value| value.call_source_range),
+                assignment.line,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        assignment_ranges,
+        vec![
+            ("first", Some(range("parse(1)")), Some(range("parse(1)")), 1),
+            ("second", Some(range("parse(\"x\")")), Some(range("parse(\"x\")")), 1),
+            ("third", Some(range("parser.parse(1)")), Some(range("parser.parse(1)")), 2),
+            ("fourth", Some(range("parser.parse(\"x\")")), Some(range("parser.parse(\"x\")")), 2,),
+        ]
+    );
+
+    let return_ranges = table
+        .returns
+        .iter()
+        .map(|return_site| {
+            (
+                return_site.call_source_range,
+                return_site.value_metadata().and_then(|value| value.call_source_range),
+                return_site.line,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        return_ranges,
+        vec![
+            (Some(range("parse(2)")), Some(range("parse(2)")), 3),
+            (Some(range("parse(\"y\")")), Some(range("parse(\"y\")")), 3),
+        ]
+    );
 }

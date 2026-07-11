@@ -322,6 +322,7 @@ fn check_reports_ambiguous_overload_resolution() {
             assignments: Vec::new(),
             summary_fingerprint: 1,
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("parse"),
                 arg_count: 1,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -424,6 +425,7 @@ fn method_overload_selection_honors_strict_nulls_option() {
         .map(|declaration| (declaration, None))
         .collect::<Vec<_>>();
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("Base.parse"),
         arg_count: 1,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -521,6 +523,7 @@ fn method_overload_selection_resolves_arguments_in_caller_scope() {
     argument.value_type_expr = None;
     argument.value_name = Some(String::from("value"));
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("Base.parse"),
         arg_count: 1,
         arg_values: vec![argument],
@@ -677,6 +680,7 @@ fn check_accepts_direct_overloaded_call_return_type_match() {
                 },
             ],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("parse"),
                 arg_count: 1,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -696,6 +700,7 @@ fn check_accepts_direct_overloaded_call_return_type_match() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -860,6 +865,7 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
                     with_statements: Vec::new(),
                     except_handlers: Vec::new(),
                     assignments: vec![typepython_binding::AssignmentSite {
+                        call_source_range: None,
                         name: String::from("result"),
                         destructuring_target_names: None,
                         destructuring_index: None,
@@ -898,6 +904,7 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
                     }],
                     summary_fingerprint: 1,
                     calls: vec![typepython_binding::CallSite {
+                        source_range: None,
                         callee: String::from("parse"),
                         arg_count: 1,
                         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
@@ -1026,6 +1033,7 @@ fn imported_module_method_return_semantic_type_stays_semantic() {
                     }],
                     calls: Vec::new(),
                     method_calls: vec![typepython_binding::MethodCallSite {
+                        source_range: None,
                         current_owner_name: None,
                         current_owner_type_name: None,
                         owner_name: String::from("helpers"),
@@ -1067,6 +1075,7 @@ fn imported_module_method_return_semantic_type_stays_semantic() {
             1,
             None,
             None,
+            None,
             "helpers",
             "box_value",
             crate::AssignabilityOptions::default(),
@@ -1091,6 +1100,7 @@ fn check_reports_non_applicable_overload_as_call_incompatibility() {
 #[test]
 fn overload_applicability_accepts_keyword_default_and_semantic_match() {
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("parse"),
         arg_count: 0,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -1131,6 +1141,7 @@ fn overload_applicability_accepts_keyword_default_and_semantic_match() {
 #[test]
 fn overload_applicability_rejects_positional_only_keyword() {
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("parse"),
         arg_count: 0,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -1170,6 +1181,7 @@ fn overload_applicability_rejects_positional_only_keyword() {
 #[test]
 fn overload_applicability_accepts_variadic_arguments() {
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("parse"),
         arg_count: 3,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -1212,6 +1224,7 @@ fn overload_applicability_accepts_variadic_arguments() {
 #[test]
 fn overload_applicability_accepts_nominal_subclass_arguments() {
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("parse"),
         arg_count: 1,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -1317,6 +1330,7 @@ fn overload_applicability_accepts_nominal_subclass_arguments() {
 #[test]
 fn overload_applicability_accepts_list_for_sequence_parameter() {
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("parse"),
         arg_count: 1,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -1387,6 +1401,7 @@ fn overload_applicability_uses_contextual_lambda_callable_types() {
     }
 
     let lambda_arg = typepython_syntax::DirectExprMetadata {
+        call_source_range: None,
         value_type_expr: None,
         is_awaited: false,
         value_callee: None,
@@ -1428,6 +1443,7 @@ fn overload_applicability_uses_contextual_lambda_callable_types() {
         value_dict_entries: None,
     };
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("choose"),
         arg_count: 1,
         arg_values: vec![lambda_arg],
@@ -1536,6 +1552,7 @@ fn overload_specificity_uses_instantiated_generic_candidate() {
         method_calls: Vec::new(),
     };
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("wrap"),
         arg_count: 1,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -1850,6 +1867,7 @@ fn resolved_direct_call_candidate_carries_signature_return_and_substitutions() {
     };
     let function = normalize_test_declaration(&function);
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("box_value"),
         arg_count: 1,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -2084,6 +2102,7 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
                 ],
                 calls: Vec::new(),
                 method_calls: vec![typepython_binding::MethodCallSite {
+                    source_range: None,
                     current_owner_name: None,
                     current_owner_type_name: None,
                     owner_name: String::from("user"),
@@ -2288,6 +2307,7 @@ fn check_accepts_stub_overloaded_method_return_type() {
                 with_statements: Vec::new(),
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("value"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -2327,6 +2347,7 @@ fn check_accepts_stub_overloaded_method_return_type() {
                 summary_fingerprint: 1,
                 calls: Vec::new(),
                 method_calls: vec![typepython_binding::MethodCallSite {
+                    source_range: None,
                     current_owner_name: None,
                     current_owner_type_name: None,
                     owner_name: String::from("user"),
@@ -2516,6 +2537,7 @@ fn check_accepts_generic_method_overload_specificity() {
                     ],
                     calls: Vec::new(),
                     method_calls: vec![typepython_binding::MethodCallSite {
+                        source_range: None,
                         current_owner_name: None,
                         current_owner_type_name: None,
                         owner_name: String::from("user"),
@@ -2545,6 +2567,7 @@ fn check_accepts_generic_method_overload_specificity() {
                     with_statements: Vec::new(),
                     except_handlers: Vec::new(),
                     assignments: vec![typepython_binding::AssignmentSite {
+                        call_source_range: None,
                         name: String::from("result"),
                         destructuring_target_names: None,
                         destructuring_index: None,
@@ -2668,6 +2691,7 @@ fn check_accepts_imported_defaulted_function_call() {
                     assignments: Vec::new(),
                     summary_fingerprint: 1,
                     calls: vec![typepython_binding::CallSite {
+                        source_range: None,
                         callee: String::from("f"),
                         arg_count: 1,
                         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(

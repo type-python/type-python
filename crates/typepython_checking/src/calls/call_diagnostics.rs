@@ -308,7 +308,7 @@ pub(super) fn direct_source_function_arity_diagnostic_in_scope_with_context(
     let call_scope = context
         .load_direct_call_context_sites(node)
         .into_iter()
-        .find(|site| site.line == call.line && site.callee == call.callee);
+        .find(|site| site.matches_source_call(&call.callee, call.line, call.source_range));
     let current_owner_name = current_owner_name
         .or_else(|| call_scope.as_ref().and_then(|site| site.owner_name.as_deref()));
     let current_owner_type_name = current_owner_type_name
@@ -437,7 +437,7 @@ pub(super) fn direct_source_function_keyword_diagnostics_in_scope_with_context(
     let call_scope = context
         .load_direct_call_context_sites(node)
         .into_iter()
-        .find(|site| site.line == call.line && site.callee == call.callee);
+        .find(|site| site.matches_source_call(&call.callee, call.line, call.source_range));
     let current_owner_name = current_owner_name
         .or_else(|| call_scope.as_ref().and_then(|site| site.owner_name.as_deref()));
     let current_owner_type_name = current_owner_type_name
@@ -698,7 +698,7 @@ pub(super) fn direct_source_function_type_diagnostics_in_scope_with_context(
     let call_scope = context
         .load_direct_call_context_sites(node)
         .into_iter()
-        .find(|site| site.line == call.line && site.callee == call.callee);
+        .find(|site| site.matches_source_call(&call.callee, call.line, call.source_range));
     let scope_owner_name = current_owner_name
         .or_else(|| call_scope.as_ref().and_then(|site| site.owner_name.as_deref()));
     let scope_owner_type_name = current_owner_type_name
@@ -2279,7 +2279,13 @@ pub(super) fn direct_unresolved_paramspec_call_diagnostics(
                 && let Some(bound_call) = node
                     .calls
                     .iter()
-                    .find(|call| call.callee == call_site.callee && call.line == call_site.line)
+                    .find(|call| {
+                        call.matches_source_call(
+                            &call_site.callee,
+                            call_site.line,
+                            call_site.source_range,
+                        )
+                    })
                 && let Some(failure) = direct_call_unresolved_typepack_failure(node, nodes, function, bound_call)
                     .or_else(|| direct_imported_call_unresolved_typepack_failure(node, nodes, bound_call))
             {

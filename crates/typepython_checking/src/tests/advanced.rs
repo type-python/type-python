@@ -568,6 +568,7 @@ fn check_reports_subclassing_final_class() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("flag"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -827,6 +828,7 @@ fn check_reports_overriding_final_method() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("missing"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -1067,6 +1069,7 @@ fn check_reports_incompatible_interface_member_signature() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("flag"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -1409,6 +1412,7 @@ fn check_reports_direct_instantiation_of_abstract_class() {
                 },
             ],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("Base"),
                 arg_count: 0,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -1535,6 +1539,7 @@ fn check_reports_direct_instantiation_of_imported_abstract_class() {
                         type_params: Vec::new(),
                     }],
                     calls: vec![typepython_binding::CallSite {
+                        source_range: None,
                         callee: String::from("Base"),
                         arg_count: 0,
                         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
@@ -1610,6 +1615,7 @@ fn check_reports_unresolved_same_project_imports() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("missing"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -1747,6 +1753,7 @@ fn check_reports_direct_call_arity_mismatch() {
                 type_params: Vec::new(),
             }],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("build"),
                 arg_count: 1,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -1809,6 +1816,7 @@ fn check_reports_direct_call_type_mismatch() {
                 type_params: Vec::new(),
             }],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("build"),
                 arg_count: 2,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -1877,6 +1885,7 @@ fn check_reports_direct_return_type_mismatch() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: Some(typepython_syntax::DirectExprMetadata::from_type_text("str")),
@@ -1954,6 +1963,7 @@ fn check_reports_direct_bool_return_type_mismatch() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: Some(typepython_syntax::DirectExprMetadata::from_type_text("str")),
@@ -2031,6 +2041,7 @@ fn check_reports_direct_none_return_type_mismatch() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: Some(typepython_syntax::DirectExprMetadata::from_type_text("int")),
@@ -2126,6 +2137,7 @@ fn check_accepts_direct_returned_call_result_type_match() {
                 },
             ],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("helper"),
                 arg_count: 0,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -2143,6 +2155,7 @@ fn check_accepts_direct_returned_call_result_type_match() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -2236,6 +2249,7 @@ fn check_reports_direct_returned_call_result_type_mismatch() {
                 },
             ],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("helper"),
                 arg_count: 0,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -2253,6 +2267,7 @@ fn check_reports_direct_returned_call_result_type_mismatch() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -2348,6 +2363,7 @@ fn check_accepts_direct_returned_constructor_type_match() {
                 },
             ],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("Box"),
                 arg_count: 0,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -2365,6 +2381,7 @@ fn check_accepts_direct_returned_constructor_type_match() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -2458,6 +2475,7 @@ fn check_reports_direct_returned_constructor_type_mismatch() {
                 },
             ],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("Box"),
                 arg_count: 0,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -2475,6 +2493,7 @@ fn check_reports_direct_returned_constructor_type_mismatch() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -2552,6 +2571,7 @@ fn check_accepts_direct_returned_parameter_type_match() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -2627,6 +2647,7 @@ fn check_reports_direct_returned_parameter_type_mismatch() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -2747,6 +2768,7 @@ fn check_accepts_direct_returned_member_type_match() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -2865,6 +2887,7 @@ fn check_reports_direct_returned_member_type_mismatch() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -2985,6 +3008,7 @@ fn check_accepts_direct_returned_constructor_member_type_match() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -3103,6 +3127,7 @@ fn check_reports_direct_returned_constructor_member_type_mismatch() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -3189,6 +3214,7 @@ fn check_reports_bool_annotated_assignment_type_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("flag"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -3273,6 +3299,7 @@ fn check_reports_none_annotated_assignment_type_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("missing"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -3316,6 +3343,125 @@ fn check_reports_none_annotated_assignment_type_mismatch() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
     assert!(rendered.contains("assigns `int` where `missing` expects `None`"));
+}
+
+#[test]
+fn check_distinguishes_same_line_generic_function_calls_by_source_range() {
+    let result = check_temp_typepython_source(
+        "def parse[T](value: T) -> T:\n    return value\n\nfirst: int = parse(1); second: str = parse(\"x\")\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_reports_each_same_line_generic_function_call_mismatch() {
+    let result = check_temp_typepython_source(
+        "def parse[T](value: T) -> T:\n    return value\n\nfirst: str = parse(1); second: int = parse(\"x\")\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 2, "{rendered}");
+    assert!(rendered.contains("assigns `int` where `first` expects `str`"), "{rendered}");
+    assert!(rendered.contains("assigns `str` where `second` expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_distinguishes_same_line_generic_calls_in_returns() {
+    let result = check_temp_typepython_source(concat!(
+        "def parse[T](value: T) -> T:\n",
+        "    return value\n\n",
+        "def use() -> int: return parse(1); return parse(\"x\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 1, "{rendered}");
+    assert!(rendered.contains("returns `str` where `use` expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_avoids_spurious_same_line_generic_return_mismatch() {
+    let result = check_temp_typepython_source(concat!(
+        "def parse[T](value: T) -> T:\n",
+        "    return value\n\n",
+        "def use() -> str: return parse(1); return parse(\"x\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 1, "{rendered}");
+    assert!(rendered.contains("returns `int` where `use` expects `str`"), "{rendered}");
+}
+
+#[test]
+fn check_distinguishes_same_line_generic_method_calls_by_source_range() {
+    let result = check_temp_typepython_source(concat!(
+        "class Parser:\n",
+        "    def parse[T](self, value: T) -> T:\n",
+        "        return value\n\n",
+        "def use(parser: Parser) -> None:\n",
+        "    first: int = parser.parse(1); second: str = parser.parse(\"x\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_reports_each_same_line_generic_method_call_mismatch() {
+    let result = check_temp_typepython_source(concat!(
+        "class Parser:\n",
+        "    def parse[T](self, value: T) -> T:\n",
+        "        return value\n\n",
+        "def use(parser: Parser) -> None:\n",
+        "    first: str = parser.parse(1); second: int = parser.parse(\"x\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 2, "{rendered}");
+    assert!(rendered.contains("assigns `int` where local `first`"), "{rendered}");
+    assert!(rendered.contains("assigns `str` where local `second`"), "{rendered}");
+}
+
+#[test]
+fn check_distinguishes_same_line_imported_method_calls_by_source_range() {
+    let result = check_two_module_typepython_sources_with_checker_options(
+        "def parse[T](value: T) -> T:\n    return value\n",
+        "import lib\n\nfirst: int = lib.parse(1); second: str = lib.parse(\"x\")\n",
+        crate::CheckerOptions::permissive_test_default(),
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_reports_each_same_line_imported_method_call_mismatch() {
+    let result = check_two_module_typepython_sources_with_checker_options(
+        "def parse[T](value: T) -> T:\n    return value\n",
+        "import lib\n\nfirst: str = lib.parse(1); second: int = lib.parse(\"x\")\n",
+        crate::CheckerOptions::permissive_test_default(),
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 2, "{rendered}");
+    assert!(rendered.contains("assigns `int` where `first` expects `str`"), "{rendered}");
+    assert!(rendered.contains("assigns `str` where `second` expects `int`"), "{rendered}");
+}
+
+#[test]
+fn check_preserves_cross_line_generic_call_results() {
+    let result = check_temp_typepython_source(concat!(
+        "def parse[T](value: T) -> T:\n",
+        "    return value\n\n",
+        "first: str = parse(1)\n",
+        "second: int = parse(\"x\")\n",
+    ));
+
+    let rendered = result.diagnostics.as_text();
+    assert_eq!(rendered.matches("error[TPY4001]").count(), 2, "{rendered}");
+    assert!(rendered.contains("assigns `int` where `first` expects `str`"), "{rendered}");
+    assert!(rendered.contains("assigns `str` where `second` expects `int`"), "{rendered}");
 }
 
 #[test]
@@ -3378,6 +3524,7 @@ fn check_accepts_direct_call_annotated_assignment_type_match() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("value"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -3481,6 +3628,7 @@ fn check_reports_direct_call_annotated_assignment_type_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("value"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -3586,6 +3734,7 @@ fn check_accepts_direct_name_annotated_assignment_type_match() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("target"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -3730,6 +3879,7 @@ fn check_reports_direct_member_annotated_assignment_type_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("target"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -3814,6 +3964,7 @@ fn check_reports_local_annotated_assignment_type_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("result"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -3911,6 +4062,7 @@ fn check_accepts_return_from_local_bare_assignment() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -3949,6 +4101,7 @@ fn check_accepts_return_from_local_bare_assignment() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("value"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -4058,6 +4211,7 @@ fn check_does_not_reuse_deleted_local_assignment_type() {
             except_handlers: Vec::new(),
             assignments: vec![
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("value"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -4095,6 +4249,7 @@ fn check_does_not_reuse_deleted_local_assignment_type() {
                     line: 2,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("result"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -4201,6 +4356,7 @@ fn check_reports_local_annotated_assignment_from_bare_assignment_mismatch() {
             except_handlers: Vec::new(),
             assignments: vec![
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("value"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -4238,6 +4394,7 @@ fn check_reports_local_annotated_assignment_from_bare_assignment_mismatch() {
                     line: 2,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("result"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -4364,6 +4521,7 @@ fn check_accepts_module_level_bare_assignment_name_reference() {
             except_handlers: Vec::new(),
             assignments: vec![
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("value"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -4401,6 +4559,7 @@ fn check_accepts_module_level_bare_assignment_name_reference() {
                     line: 1,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("result"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -4528,6 +4687,7 @@ fn check_does_not_reuse_deleted_module_assignment_type() {
             except_handlers: Vec::new(),
             assignments: vec![
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("value"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -4565,6 +4725,7 @@ fn check_does_not_reuse_deleted_module_assignment_type() {
                     line: 1,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("result"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -4690,6 +4851,7 @@ fn check_reports_module_level_bare_assignment_name_reference_mismatch() {
             except_handlers: Vec::new(),
             assignments: vec![
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("value"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -4727,6 +4889,7 @@ fn check_reports_module_level_bare_assignment_name_reference_mismatch() {
                     line: 1,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("result"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -4834,6 +4997,7 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
             except_handlers: Vec::new(),
             assignments: vec![
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("x"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -4871,6 +5035,7 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
                     line: 1,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("y"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -4908,6 +5073,7 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
                     line: 2,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("result"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -5003,6 +5169,7 @@ fn check_accepts_local_chained_bare_assignments_for_return() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -5042,6 +5209,7 @@ fn check_accepts_local_chained_bare_assignments_for_return() {
             except_handlers: Vec::new(),
             assignments: vec![
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("x"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -5079,6 +5247,7 @@ fn check_accepts_local_chained_bare_assignments_for_return() {
                     line: 1,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("y"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -5222,6 +5391,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
             except_handlers: Vec::new(),
             assignments: vec![
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("x"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -5259,6 +5429,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                     line: 1,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("y"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -5296,6 +5467,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                     line: 2,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("result"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -5393,6 +5565,7 @@ fn check_accepts_builtin_return_types_in_assignments_and_returns() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("count"),
                 owner_type_name: None,
                 value: None,
@@ -5431,6 +5604,7 @@ fn check_accepts_builtin_return_types_in_assignments_and_returns() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("size"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -6298,6 +6472,7 @@ fn check_reports_builtin_return_type_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("name"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -6403,6 +6578,7 @@ fn check_accepts_generic_alias_normalization() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("items"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -6506,6 +6682,7 @@ fn check_accepts_callable_assignment_compatibility() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("handler"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -6611,6 +6788,7 @@ fn check_callable_assignment_from_function(
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("handler"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -6702,6 +6880,7 @@ fn check_accepts_annotated_type_equivalence() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -6809,6 +6988,7 @@ fn check_reports_callable_assignment_compatibility_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("handler"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -6916,6 +7096,7 @@ fn check_accepts_callable_ellipsis_assignment_compatibility() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("handler"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -7019,6 +7200,7 @@ fn check_reports_callable_ellipsis_return_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("handler"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -7165,6 +7347,7 @@ fn check_accepts_callable_assignment_from_bound_method() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("handler"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -7309,6 +7492,7 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("handler"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -7457,6 +7641,7 @@ fn check_accepts_callable_assignment_from_bound_method_through_instance() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("handler"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -7601,6 +7786,7 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("handler"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -7689,6 +7875,7 @@ fn check_accepts_builtin_container_generic_any_match() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("items"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -7821,6 +8008,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("measure"),
                 owner_type_name: None,
                 value: None,
@@ -7860,6 +8048,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
             except_handlers: Vec::new(),
             assignments: vec![
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("anything"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -7897,6 +8086,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                     line: 1,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("maybe"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -7934,6 +8124,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                     line: 2,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("choice"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -8017,6 +8208,7 @@ fn check_reports_optional_direct_type_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("name"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -8132,6 +8324,7 @@ fn check_accepts_cast_builtin_return_type() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -8170,6 +8363,7 @@ fn check_accepts_cast_builtin_return_type() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("text"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -8261,6 +8455,7 @@ fn check_accepts_typing_typevar_assignment() {
                 },
             ],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("TypeVar"),
                 arg_count: 1,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -8289,6 +8484,7 @@ fn check_accepts_typing_typevar_assignment() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("T"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -8359,6 +8555,7 @@ fn check_reports_typing_typevar_argument_mismatch() {
                 type_params: Vec::new(),
             }],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("TypeVar"),
                 arg_count: 1,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -8448,6 +8645,7 @@ fn check_accepts_typing_extensions_typevar_assignment() {
                         },
                     ],
                     calls: vec![typepython_binding::CallSite {
+                        source_range: None,
                         callee: String::from("TypeVar"),
                         arg_count: 1,
                         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
@@ -8474,6 +8672,7 @@ fn check_accepts_typing_extensions_typevar_assignment() {
                     with_statements: Vec::new(),
                     except_handlers: Vec::new(),
                     assignments: vec![typepython_binding::AssignmentSite {
+                        call_source_range: None,
                         name: String::from("T"),
                         destructuring_target_names: None,
                         destructuring_index: None,
@@ -9168,6 +9367,7 @@ fn check_accepts_newtype_assignment() {
                 },
             ],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("NewType"),
                 arg_count: 2,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -9197,6 +9397,7 @@ fn check_accepts_newtype_assignment() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("UserId"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -9267,6 +9468,7 @@ fn check_reports_newtype_argument_mismatch() {
                 type_params: Vec::new(),
             }],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("NewType"),
                 arg_count: 2,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -10649,6 +10851,7 @@ fn check_accepts_async_function_call_as_awaitable() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("task"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -10752,6 +10955,7 @@ fn check_reports_async_function_call_non_awaitable_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("result"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -10849,6 +11053,7 @@ fn check_accepts_direct_await_of_async_function() {
             member_accesses: Vec::new(),
             returns: vec![
                 typepython_binding::ReturnSite {
+                    call_source_range: None,
                     owner_name: String::from("fetch"),
                     owner_type_name: None,
                     value: Some(typepython_syntax::DirectExprMetadata::from_type_text("int")),
@@ -10879,6 +11084,7 @@ fn check_accepts_direct_await_of_async_function() {
                     line: 2,
                 },
                 typepython_binding::ReturnSite {
+                    call_source_range: None,
                     owner_name: String::from("build"),
                     owner_type_name: None,
                     value: None,
@@ -10986,6 +11192,7 @@ fn check_reports_direct_await_mismatch() {
             member_accesses: Vec::new(),
             returns: vec![
                 typepython_binding::ReturnSite {
+                    call_source_range: None,
                     owner_name: String::from("fetch"),
                     owner_type_name: None,
                     value: Some(typepython_syntax::DirectExprMetadata::from_type_text("int")),
@@ -11016,6 +11223,7 @@ fn check_reports_direct_await_mismatch() {
                     line: 2,
                 },
                 typepython_binding::ReturnSite {
+                    call_source_range: None,
                     owner_name: String::from("build"),
                     owner_type_name: None,
                     value: None,
@@ -11097,6 +11305,7 @@ fn check_accepts_generator_yield_type() {
             member_accesses: Vec::new(),
             returns: Vec::new(),
             yields: vec![typepython_binding::YieldSite {
+                call_source_range: None,
                 owner_name: String::from("produce"),
                 owner_type_name: None,
                 value: Some(typepython_syntax::DirectExprMetadata::from_type_text("int")),
@@ -11210,6 +11419,7 @@ fn check_reports_generator_yield_type_mismatch() {
             member_accesses: Vec::new(),
             returns: Vec::new(),
             yields: vec![typepython_binding::YieldSite {
+                call_source_range: None,
                 owner_name: String::from("produce"),
                 owner_type_name: None,
                 value: Some(typepython_syntax::DirectExprMetadata::from_type_text("str")),
@@ -11389,6 +11599,7 @@ fn check_accepts_yield_from_iterable_type() {
             member_accesses: Vec::new(),
             returns: Vec::new(),
             yields: vec![typepython_binding::YieldSite {
+                call_source_range: None,
                 owner_name: String::from("relay"),
                 owner_type_name: None,
                 value: None,
@@ -11460,6 +11671,7 @@ fn check_reports_unknown_direct_call_keyword() {
                 type_params: Vec::new(),
             }],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("build"),
                 arg_count: 0,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -11578,6 +11790,7 @@ fn check_reports_unknown_method_call() {
             }],
             calls: Vec::new(),
             method_calls: vec![typepython_binding::MethodCallSite {
+                source_range: None,
                 current_owner_name: None,
                 current_owner_type_name: None,
                 owner_name: String::from("value"),
@@ -11643,6 +11856,7 @@ fn check_reports_unknown_direct_call_on_import() {
                 type_params: Vec::new(),
             }],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("external"),
                 arg_count: 0,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -11707,6 +11921,7 @@ fn check_reports_unknown_dotted_call_on_unresolved_import_when_imports_unknown()
                         type_params: Vec::new(),
                     }],
                     calls: vec![typepython_binding::CallSite {
+                        source_range: None,
                         callee: String::from("external.run"),
                         arg_count: 0,
                         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
@@ -11778,6 +11993,7 @@ fn check_allows_dotted_call_on_unresolved_import_when_imports_dynamic() {
                         type_params: Vec::new(),
                     }],
                     calls: vec![typepython_binding::CallSite {
+                        source_range: None,
                         callee: String::from("external.run"),
                         arg_count: 0,
                         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
@@ -12181,6 +12397,7 @@ fn check_reports_direct_method_call_arity_mismatch() {
             ],
             calls: Vec::new(),
             method_calls: vec![typepython_binding::MethodCallSite {
+                source_range: None,
                 current_owner_name: None,
                 current_owner_type_name: None,
                 owner_name: String::from("Box"),
@@ -12272,6 +12489,7 @@ fn check_reports_direct_constructor_arity_mismatch() {
                 },
             ],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("Box"),
                 arg_count: 1,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -12358,6 +12576,7 @@ fn check_reports_direct_constructor_type_mismatch() {
                 },
             ],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("Box"),
                 arg_count: 2,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -13025,6 +13244,7 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
                 },
             ],
             calls: vec![typepython_binding::CallSite {
+                source_range: None,
                 callee: String::from("consume"),
                 arg_count: 1,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -13969,6 +14189,7 @@ fn check_accepts_direct_method_call_result_return() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -14115,6 +14336,7 @@ fn check_accepts_direct_method_call_result_assignment() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("result"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -14259,6 +14481,7 @@ fn check_reports_direct_method_call_result_assignment_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("result"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -14377,6 +14600,7 @@ fn check_reports_direct_method_call_result_return_mismatch() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -14516,6 +14740,7 @@ fn check_accepts_direct_method_call_result_through_instance() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -14653,6 +14878,7 @@ fn check_reports_direct_method_call_result_through_instance_mismatch() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -14779,6 +15005,7 @@ fn check_accepts_for_loop_target_type_in_local_assignment() {
             invalidations: Vec::new(),
             matches: Vec::new(),
             for_loops: vec![typepython_binding::ForSite {
+                call_source_range: None,
                 target_name: String::from("item"),
                 target_names: Vec::new(),
                 owner_name: Some(String::from("build")),
@@ -14798,6 +15025,7 @@ fn check_accepts_for_loop_target_type_in_local_assignment() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("result"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -14877,6 +15105,7 @@ fn check_reports_for_loop_target_type_mismatch() {
             invalidations: Vec::new(),
             matches: Vec::new(),
             for_loops: vec![typepython_binding::ForSite {
+                call_source_range: None,
                 target_name: String::from("item"),
                 target_names: Vec::new(),
                 owner_name: Some(String::from("build")),
@@ -14896,6 +15125,7 @@ fn check_reports_for_loop_target_type_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("result"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -14971,6 +15201,7 @@ fn check_accepts_tuple_for_loop_target_type_in_return() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -15006,6 +15237,7 @@ fn check_accepts_tuple_for_loop_target_type_in_return() {
             invalidations: Vec::new(),
             matches: Vec::new(),
             for_loops: vec![typepython_binding::ForSite {
+                call_source_range: None,
                 target_name: String::new(),
                 target_names: vec![String::from("a"), String::from("b")],
                 owner_name: Some(String::from("build")),
@@ -15062,6 +15294,7 @@ fn check_accepts_sequence_for_loop_target_type_in_return() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -15097,6 +15330,7 @@ fn check_accepts_sequence_for_loop_target_type_in_return() {
             invalidations: Vec::new(),
             matches: Vec::new(),
             for_loops: vec![typepython_binding::ForSite {
+                call_source_range: None,
                 target_name: String::new(),
                 target_names: vec![String::from("a"), String::from("b")],
                 owner_name: Some(String::from("build")),
@@ -15153,6 +15387,7 @@ fn check_reports_tuple_for_loop_target_type_mismatch() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -15188,6 +15423,7 @@ fn check_reports_tuple_for_loop_target_type_mismatch() {
             invalidations: Vec::new(),
             matches: Vec::new(),
             for_loops: vec![typepython_binding::ForSite {
+                call_source_range: None,
                 target_name: String::new(),
                 target_names: vec![String::from("a"), String::from("b")],
                 owner_name: Some(String::from("build")),
@@ -15254,6 +15490,7 @@ fn check_reports_tuple_for_loop_target_arity_mismatch() {
             invalidations: Vec::new(),
             matches: Vec::new(),
             for_loops: vec![typepython_binding::ForSite {
+                call_source_range: None,
                 target_name: String::new(),
                 target_names: vec![String::from("a"), String::from("b")],
                 owner_name: Some(String::from("build")),
@@ -15377,6 +15614,7 @@ fn check_accepts_with_target_type_in_return() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -15413,6 +15651,7 @@ fn check_accepts_with_target_type_in_return() {
             matches: Vec::new(),
             for_loops: Vec::new(),
             with_statements: vec![typepython_binding::WithSite {
+                call_source_range: None,
                 target_name: Some(String::from("value")),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
@@ -15517,6 +15756,7 @@ fn check_reports_with_target_type_mismatch() {
             matches: Vec::new(),
             for_loops: Vec::new(),
             with_statements: vec![typepython_binding::WithSite {
+                call_source_range: None,
                 target_name: Some(String::from("value")),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
@@ -15573,6 +15813,7 @@ fn check_accepts_except_handler_binding_type() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -15655,6 +15896,7 @@ fn check_reports_except_handler_binding_type_mismatch() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -15739,6 +15981,7 @@ fn check_does_not_keep_except_binding_after_handler() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -15825,6 +16068,7 @@ fn check_accepts_tuple_except_handler_binding_type() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -15907,6 +16151,7 @@ fn check_reports_tuple_except_handler_binding_type_mismatch() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -15994,6 +16239,7 @@ fn check_accepts_bare_except_handler_binding_type() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -16076,6 +16322,7 @@ fn check_reports_bare_except_handler_binding_type_mismatch() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -16224,6 +16471,7 @@ fn check_reports_non_exhaustive_sealed_match() {
             asserts: Vec::new(),
             invalidations: Vec::new(),
             matches: vec![typepython_binding::MatchSite {
+                call_source_range: None,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
                 subject: None,
@@ -16353,6 +16601,7 @@ fn check_accepts_exhaustive_sealed_match_with_wildcard() {
             asserts: Vec::new(),
             invalidations: Vec::new(),
             matches: vec![typepython_binding::MatchSite {
+                call_source_range: None,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
                 subject: None,
@@ -16424,6 +16673,7 @@ fn check_accepts_if_is_not_none_narrowing_for_return() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -16511,6 +16761,7 @@ fn check_accepts_assert_is_not_none_narrowing_for_return() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -16594,6 +16845,7 @@ fn check_accepts_isinstance_tuple_narrowing_for_return() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -16702,6 +16954,7 @@ fn check_accepts_typeguard_true_branch_narrowing() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -16810,6 +17063,7 @@ fn check_accepts_typeis_false_branch_narrowing() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -16919,6 +17173,7 @@ fn check_accepts_typeis_post_if_fallthrough_narrowing() {
             member_accesses: Vec::new(),
             returns: vec![
                 typepython_binding::ReturnSite {
+                    call_source_range: None,
                     owner_name: String::from("build"),
                     owner_type_name: None,
                     value: Some(typepython_syntax::DirectExprMetadata::from_type_text("int")),
@@ -16949,6 +17204,7 @@ fn check_accepts_typeis_post_if_fallthrough_narrowing() {
                     line: 3,
                 },
                 typepython_binding::ReturnSite {
+                    call_source_range: None,
                     owner_name: String::from("build"),
                     owner_type_name: None,
                     value: None,
@@ -17037,6 +17293,7 @@ fn check_accepts_boolean_composition_narrowing() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -17172,6 +17429,7 @@ fn check_accepts_truthiness_narrowing_for_bool_optional() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -17258,6 +17516,7 @@ fn check_does_not_over_narrow_truthiness_for_int_optional() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -17346,6 +17605,7 @@ fn check_invalidates_narrowing_after_augassign() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -17441,6 +17701,7 @@ fn check_joins_branch_local_assignments_after_if() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -17491,6 +17752,7 @@ fn check_joins_branch_local_assignments_after_if() {
             except_handlers: Vec::new(),
             assignments: vec![
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("result"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -17528,6 +17790,7 @@ fn check_joins_branch_local_assignments_after_if() {
                     line: 3,
                 },
                 typepython_binding::AssignmentSite {
+                    call_source_range: None,
                     name: String::from("result"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -17659,6 +17922,7 @@ fn check_reports_deprecated_import_and_call_when_enabled() {
                         type_params: Vec::new(),
                     }],
                     calls: vec![typepython_binding::CallSite {
+                        source_range: None,
                         callee: String::from("old"),
                         arg_count: 0,
                         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
@@ -17771,6 +18035,7 @@ fn check_ignores_deprecated_uses_when_configured() {
                         type_params: Vec::new(),
                     }],
                     calls: vec![typepython_binding::CallSite {
+                        source_range: None,
                         callee: String::from("old"),
                         arg_count: 0,
                         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
@@ -18035,6 +18300,7 @@ fn check_accepts_self_return_through_inherited_method_call() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -18146,6 +18412,7 @@ fn check_accepts_self_parameter_annotation_in_method_call() {
             summary_fingerprint: 1,
             calls: Vec::new(),
             method_calls: vec![typepython_binding::MethodCallSite {
+                source_range: None,
                 current_owner_name: None,
                 current_owner_type_name: None,
                 owner_name: String::from("Box"),
@@ -18243,6 +18510,7 @@ fn check_accepts_self_typed_attribute_access() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -18361,6 +18629,7 @@ fn check_accepts_property_access_in_return() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -18488,6 +18757,7 @@ fn check_reports_property_access_assignment_mismatch() {
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
             assignments: vec![typepython_binding::AssignmentSite {
+                call_source_range: None,
                 name: String::from("value"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -18971,6 +19241,7 @@ fn check_accepts_inherited_property_access() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -19153,6 +19424,7 @@ fn check_accepts_mapping_subscript_read_type() {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -19166,6 +19438,7 @@ fn check_accepts_mapping_subscript_read_type() {
                 value_method_name: None,
                 value_method_through_instance: false,
                 value_subscript_target: Some(Box::new(typepython_syntax::DirectExprMetadata {
+                    call_source_range: None,
                     value_type_expr: None,
                     is_awaited: false,
                     value_callee: None,
@@ -19345,6 +19618,7 @@ fn check_accepts_enum_member_access_as_enum_type() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -19482,6 +19756,7 @@ fn check_accepts_strenum_member_access_as_enum_type() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -19646,6 +19921,7 @@ fn check_reports_non_exhaustive_enum_match() {
             asserts: Vec::new(),
             invalidations: Vec::new(),
             matches: vec![typepython_binding::MatchSite {
+                call_source_range: None,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
                 subject: None,
@@ -19812,6 +20088,7 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
             asserts: Vec::new(),
             invalidations: Vec::new(),
             matches: vec![typepython_binding::MatchSite {
+                call_source_range: None,
                 owner_name: Some(String::from("render")),
                 owner_type_name: None,
                 subject: None,
@@ -19966,6 +20243,7 @@ fn check_accepts_with_without_target() {
             matches: Vec::new(),
             for_loops: Vec::new(),
             with_statements: vec![typepython_binding::WithSite {
+                call_source_range: None,
                 target_name: None,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
@@ -20148,6 +20426,7 @@ fn check_accepts_multiple_with_items() {
             ],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("build"),
                 owner_type_name: None,
                 value: None,
@@ -20185,6 +20464,7 @@ fn check_accepts_multiple_with_items() {
             for_loops: Vec::new(),
             with_statements: vec![
                 typepython_binding::WithSite {
+                    call_source_range: None,
                     target_name: Some(String::from("x")),
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
@@ -20201,6 +20481,7 @@ fn check_accepts_multiple_with_items() {
                     line: 2,
                 },
                 typepython_binding::WithSite {
+                    call_source_range: None,
                     target_name: Some(String::from("y")),
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
@@ -20262,9 +20543,11 @@ fn inferred_return_trace_prefers_structured_return_metadata() {
         method_calls: Vec::new(),
         member_accesses: Vec::new(),
         returns: vec![typepython_binding::ReturnSite {
+            call_source_range: None,
             owner_name: String::from("build"),
             owner_type_name: None,
             value: Some(typepython_syntax::DirectExprMetadata {
+                call_source_range: None,
                 value_type_expr: Some(typepython_syntax::TypeExpr::Name(String::from("int"))),
                 is_awaited: false,
                 value_callee: None,
@@ -20467,6 +20750,7 @@ fn check_reports_deprecated_function_call_as_error() {
                         type_params: Vec::new(),
                     }],
                     calls: vec![typepython_binding::CallSite {
+                        source_range: None,
                         callee: String::from("old_func"),
                         arg_count: 0,
                         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
@@ -20720,6 +21004,7 @@ fn check_accepts_enum_exhaustive_match() {
             asserts: Vec::new(),
             invalidations: Vec::new(),
             matches: vec![typepython_binding::MatchSite {
+                call_source_range: None,
                 owner_name: Some(String::from("handle")),
                 owner_type_name: None,
                 subject: None,
@@ -20912,6 +21197,7 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
             asserts: Vec::new(),
             invalidations: Vec::new(),
             matches: vec![typepython_binding::MatchSite {
+                call_source_range: None,
                 owner_name: Some(String::from("triage")),
                 owner_type_name: None,
                 subject: None,
@@ -21031,6 +21317,7 @@ fn check_reports_for_loop_tuple_target_arity_mismatch() {
             invalidations: Vec::new(),
             matches: Vec::new(),
             for_loops: vec![typepython_binding::ForSite {
+                call_source_range: None,
                 target_name: String::new(),
                 target_names: vec![String::from("a"), String::from("b")],
                 owner_name: Some(String::from("process")),
@@ -21090,6 +21377,7 @@ fn check_reports_except_handler_binding_return_type_mismatch() {
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("run"),
                 owner_type_name: None,
                 value: None,
@@ -21187,6 +21475,7 @@ fn check_reports_unresolved_import_with_fallback_unknown() {
                         type_params: Vec::new(),
                     }],
                     calls: vec![typepython_binding::CallSite {
+                        source_range: None,
                         callee: String::from("remote.execute"),
                         arg_count: 0,
                         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(

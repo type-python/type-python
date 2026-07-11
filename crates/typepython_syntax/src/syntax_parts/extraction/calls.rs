@@ -69,6 +69,7 @@ pub(in super::super) fn extract_call_statement(
 
     Some(SyntaxStatement::Call(CallStatement {
         callee: name.id.as_str().to_owned(),
+        source_range: Some(source_range(source, call.range)),
         arg_count: args.arg_count,
         arg_values: args.arg_values,
         starred_arg_values: args.starred_arg_values,
@@ -109,6 +110,7 @@ pub(in super::super) fn extract_method_call_statement(
                 current_owner_type_name: current_owner_type_name.map(str::to_owned),
                 owner_name: name.id.as_str().to_owned(),
                 method: attribute.attr.as_str().to_owned(),
+                source_range: Some(source_range(source, call.range)),
                 through_instance: false,
                 arg_count: args.arg_count,
                 arg_values: args.arg_values,
@@ -129,6 +131,7 @@ pub(in super::super) fn extract_method_call_statement(
                 current_owner_type_name: current_owner_type_name.map(str::to_owned),
                 owner_name: name.id.as_str().to_owned(),
                 method: attribute.attr.as_str().to_owned(),
+                source_range: Some(source_range(source, call.range)),
                 through_instance: true,
                 arg_count: args.arg_count,
                 arg_values: args.arg_values,

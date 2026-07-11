@@ -346,7 +346,7 @@ pub(super) fn resolve_direct_call_candidate_with_context_detailed<'a>(
     let call_scope = context
         .load_direct_call_context_sites(node)
         .into_iter()
-        .find(|site| site.line == call.line && site.callee == call.callee);
+        .find(|site| site.matches_source_call(&call.callee, call.line, call.source_range));
     resolve_callable_candidate_from_semantics(
         Some(context),
         provider_node,
@@ -942,6 +942,7 @@ pub(super) fn synthetic_direct_expr_metadata(
     value_type: &str,
 ) -> typepython_syntax::DirectExprMetadata {
     typepython_syntax::DirectExprMetadata {
+        call_source_range: None,
         value_type_expr: typepython_syntax::TypeExpr::parse(value_type),
         is_awaited: false,
         value_callee: None,
@@ -979,6 +980,7 @@ pub(super) fn synthetic_decorator_application_call(
 ) -> typepython_binding::CallSite {
     typepython_binding::CallSite {
         callee: decorator_name.to_owned(),
+        source_range: None,
         arg_count: 1,
         arg_values: vec![synthetic_direct_expr_metadata(callable_annotation)],
         starred_arg_values: Vec::new(),
@@ -992,6 +994,7 @@ pub(super) fn synthetic_decorator_application_call(
 fn synthetic_single_positional_call(callee: &str) -> typepython_binding::CallSite {
     typepython_binding::CallSite {
         callee: callee.to_owned(),
+        source_range: None,
         arg_count: 1,
         arg_values: vec![typepython_syntax::DirectExprMetadata::from_type_text("")],
         starred_arg_values: Vec::new(),
@@ -1689,35 +1692,41 @@ pub(super) fn resolve_instantiated_callable_return_semantic_type_from_declaratio
     resolve_direct_call_candidate(node, nodes, declaration, call)?.return_type
 }
 
-pub(super) fn resolve_direct_callable_return_semantic_type_for_line_with_options(
+pub(super) fn resolve_direct_callable_return_semantic_type_for_call_with_options(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
     line: usize,
+    source_range: Option<typepython_syntax::SourceRange>,
     options: AssignabilityOptions,
 ) -> Option<SemanticType> {
     let context = checker_context_for_assignability_options(nodes, options);
-    resolve_direct_callable_return_semantic_type_for_line_with_context(
-        &context, node, nodes, callee, line,
+    resolve_direct_callable_return_semantic_type_for_call_with_context(
+        &context,
+        node,
+        nodes,
+        callee,
+        line,
+        source_range,
     )
 }
 
-pub(super) fn resolve_direct_callable_return_semantic_type_for_line_with_context(
+pub(super) fn resolve_direct_callable_return_semantic_type_for_call_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
     line: usize,
+    source_range: Option<typepython_syntax::SourceRange>,
 ) -> Option<SemanticType> {
     let options = context.assignability_options();
-    let call = node
-        .calls
-        .iter()
-        .find(|call| call.callee == callee && call.line == line)?;
+    let call = node.calls.iter().find(|call| {
+        call.matches_source_call(callee, line, source_range)
+    })?;
     let call_scope = context
         .load_direct_call_context_sites(node)
         .into_iter()
-        .find(|site| site.line == call.line && site.callee == call.callee);
+        .find(|site| site.matches_source_call(&call.callee, call.line, call.source_range));
     let current_owner_name = call_scope.as_ref().and_then(|site| site.owner_name.as_deref());
     let current_owner_type_name =
         call_scope.as_ref().and_then(|site| site.owner_type_name.as_deref());

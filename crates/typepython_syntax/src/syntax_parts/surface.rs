@@ -11,6 +11,17 @@ pub enum SourceKind {
     Stub,
 }
 
+/// Stable line-relative byte range identifying one source expression.
+///
+/// `start` is the byte column on the site's source line and `end` is that
+/// column plus the expression byte length. The site's existing line field
+/// completes the identity without depending on rewritten preceding lines.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub struct SourceRange {
+    pub start: usize,
+    pub end: usize,
+}
+
 impl SourceKind {
     /// Infers the source kind from a path suffix.
     #[must_use]
@@ -398,6 +409,7 @@ pub struct ValueStatement {
     pub value_type_expr: Option<TypeExpr>,
     pub is_awaited: bool,
     pub value_callee: Option<String>,
+    pub call_source_range: Option<SourceRange>,
     pub value_name: Option<String>,
     pub value_member_owner_name: Option<String>,
     pub value_member_name: Option<String>,
@@ -440,6 +452,7 @@ impl ValueStatement {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CallStatement {
     pub callee: String,
+    pub source_range: Option<SourceRange>,
     pub arg_count: usize,
     pub arg_values: Vec<DirectExprMetadata>,
     pub starred_arg_values: Vec<DirectExprMetadata>,
@@ -467,6 +480,7 @@ pub struct MethodCallStatement {
     pub current_owner_type_name: Option<String>,
     pub owner_name: String,
     pub method: String,
+    pub source_range: Option<SourceRange>,
     pub through_instance: bool,
     pub arg_count: usize,
     pub arg_values: Vec<DirectExprMetadata>,
@@ -485,6 +499,7 @@ pub struct ReturnStatement {
     pub value_type_expr: Option<TypeExpr>,
     pub is_awaited: bool,
     pub value_callee: Option<String>,
+    pub call_source_range: Option<SourceRange>,
     pub value_name: Option<String>,
     pub value_member_owner_name: Option<String>,
     pub value_member_name: Option<String>,
@@ -517,6 +532,7 @@ pub struct YieldStatement {
     pub owner_type_name: Option<String>,
     pub value_type_expr: Option<TypeExpr>,
     pub value_callee: Option<String>,
+    pub call_source_range: Option<SourceRange>,
     pub value_name: Option<String>,
     pub value_member_owner_name: Option<String>,
     pub value_member_name: Option<String>,
@@ -603,6 +619,7 @@ pub struct MatchStatement {
     pub subject_type_expr: Option<TypeExpr>,
     pub subject_is_awaited: bool,
     pub subject_callee: Option<String>,
+    pub call_source_range: Option<SourceRange>,
     pub subject_name: Option<String>,
     pub subject_member_owner_name: Option<String>,
     pub subject_member_name: Option<String>,
@@ -642,6 +659,7 @@ pub struct ForStatement {
     pub iter_type_expr: Option<TypeExpr>,
     pub iter_is_awaited: bool,
     pub iter_callee: Option<String>,
+    pub call_source_range: Option<SourceRange>,
     pub iter_name: Option<String>,
     pub iter_member_owner_name: Option<String>,
     pub iter_member_name: Option<String>,
@@ -661,6 +679,7 @@ pub struct WithStatement {
     pub context_type_expr: Option<TypeExpr>,
     pub context_is_awaited: bool,
     pub context_callee: Option<String>,
+    pub call_source_range: Option<SourceRange>,
     pub context_name: Option<String>,
     pub context_member_owner_name: Option<String>,
     pub context_member_name: Option<String>,
@@ -886,6 +905,7 @@ pub struct DirectExprMetadata {
     pub value_type_expr: Option<TypeExpr>,
     pub is_awaited: bool,
     pub value_callee: Option<String>,
+    pub call_source_range: Option<SourceRange>,
     pub value_name: Option<String>,
     pub value_member_owner_name: Option<String>,
     pub value_member_name: Option<String>,
@@ -919,6 +939,7 @@ impl DirectExprMetadata {
             value_type_expr: None,
             is_awaited: false,
             value_callee: None,
+            call_source_range: None,
             value_name: None,
             value_member_owner_name: None,
             value_member_name: None,
@@ -992,6 +1013,7 @@ pub struct TypedDictLiteralSite {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DirectCallContextSite {
     pub callee: String,
+    pub source_range: Option<SourceRange>,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
     pub positional_arg_count: usize,
@@ -999,6 +1021,23 @@ pub struct DirectCallContextSite {
     pub has_starred_args: bool,
     pub has_unpacked_kwargs: bool,
     pub line: usize,
+}
+
+impl DirectCallContextSite {
+    #[must_use]
+    pub fn matches_source_call(
+        &self,
+        callee: &str,
+        line: usize,
+        source_range: Option<SourceRange>,
+    ) -> bool {
+        self.callee == callee
+            && self.line == line
+            && match source_range {
+                Some(source_range) => self.source_range == Some(source_range),
+                None => true,
+            }
+    }
 }
 
 /// Expression use site that may contain value-consuming operations needing semantic checks.

@@ -712,7 +712,9 @@ pub(super) fn ambiguous_overload_call_diagnostics(
 
             let call_scope = call_context_sites
                 .iter()
-                .find(|site| site.line == call.line && site.callee == call.callee);
+                .find(|site| {
+                    site.matches_source_call(&call.callee, call.line, call.source_range)
+                });
             match resolve_direct_overload_selection_in_scope(
                 node,
                 nodes,
@@ -1689,7 +1691,7 @@ pub(super) fn direct_unknown_operation_diagnostics(
     for call in &node.calls {
         let call_context = direct_call_context_sites
             .iter()
-            .find(|site| site.line == call.line && site.callee == call.callee);
+            .find(|site| site.matches_source_call(&call.callee, call.line, call.source_range));
         for metadata in call
             .arg_values
             .iter()
@@ -2426,6 +2428,7 @@ fn direct_operation_owner_resolves_to_unknown(
             current_owner_name,
             current_owner_type_name,
             line,
+            None,
             owner_name,
         )
         .is_some_and(|resolved| semantic_type_is_unknown(&resolved));
@@ -2460,6 +2463,7 @@ fn resolve_direct_call_result_semantic_type_with_context(
     current_owner_name: Option<&str>,
     current_owner_type_name: Option<&str>,
     line: usize,
+    call_source_range: Option<typepython_syntax::SourceRange>,
     callee: &str,
 ) -> Option<SemanticType> {
     let has_contextual_local_binding = name_has_contextual_local_binding(
@@ -2506,8 +2510,13 @@ fn resolve_direct_call_result_semantic_type_with_context(
         return callable.callable_parts().map(|(_, return_type)| return_type.clone());
     }
 
-    resolve_direct_callable_return_semantic_type_for_line_with_context(
-        context, node, nodes, callee, line,
+    resolve_direct_callable_return_semantic_type_for_call_with_context(
+        context,
+        node,
+        nodes,
+        callee,
+        line,
+        call_source_range,
     )
     .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, callee))
 }
@@ -2556,6 +2565,7 @@ fn direct_expr_metadata_resolves_to_unknown(
             current_owner_name,
             current_owner_type_name,
             line,
+            metadata.call_source_range,
             callee,
         )
         .is_some_and(|resolved| semantic_type_is_unknown(&resolved))
@@ -2592,6 +2602,7 @@ fn direct_expr_metadata_resolves_to_unknown(
             current_owner_name,
             current_owner_type_name,
             line,
+            metadata.call_source_range,
             owner_name,
             method_name,
             metadata.value_method_through_instance,
@@ -3336,6 +3347,7 @@ pub(super) fn direct_expr_metadata_from_return_site(
         value_type_expr: None,
         is_awaited: false,
         value_callee: None,
+        call_source_range: None,
         value_name: None,
         value_member_owner_name: None,
         value_member_name: None,
@@ -3370,6 +3382,7 @@ pub(super) fn direct_expr_metadata_from_yield_site(
         value_type_expr: None,
         is_awaited: false,
         value_callee: None,
+        call_source_range: None,
         value_name: None,
         value_member_owner_name: None,
         value_member_name: None,

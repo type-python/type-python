@@ -151,6 +151,7 @@ pub(super) fn resolve_imported_module_method_return_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     current_line: usize,
+    call_source_range: Option<typepython_syntax::SourceRange>,
     current_owner_name: Option<&str>,
     current_owner_type_name: Option<&str>,
     owner_name: &str,
@@ -170,10 +171,13 @@ pub(super) fn resolve_imported_module_method_return_semantic_type(
     let method_return =
         if methods.iter().any(|declaration| declaration.kind == DeclarationKind::Overload) {
             let call = node.method_calls.iter().find(|call| {
-                call.owner_name == owner_name
-                    && call.method == method_name
-                    && !call.through_instance
-                    && call.line == current_line
+                call.matches_source_call(
+                    owner_name,
+                    method_name,
+                    false,
+                    current_line,
+                    call_source_range,
+                )
             })?;
             let call = imported_module_method_call_site(module_node, call);
             let overloads = methods
@@ -195,10 +199,13 @@ pub(super) fn resolve_imported_module_method_return_semantic_type(
             }
         } else {
             let call = node.method_calls.iter().find(|call| {
-                call.owner_name == owner_name
-                    && call.method == method_name
-                    && !call.through_instance
-                    && call.line == current_line
+                call.matches_source_call(
+                    owner_name,
+                    method_name,
+                    false,
+                    current_line,
+                    call_source_range,
+                )
             })?;
             let call = imported_module_method_call_site(module_node, call);
             resolve_direct_call_candidate_detailed_in_scope_with_options(
@@ -222,6 +229,7 @@ pub(super) fn imported_module_method_call_site(
 ) -> typepython_binding::CallSite {
     typepython_binding::CallSite {
         callee: format!("{}.{}", module_node.module_key, call.method),
+        source_range: call.source_range,
         arg_count: call.arg_count,
         arg_values: call.arg_values.clone(),
         starred_arg_values: call.starred_arg_values.clone(),

@@ -94,6 +94,7 @@ fn check_infers_generic_function_call_through_union_actual() {
         keyword_variadic: false,
     }];
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("maybe"),
         arg_count: 1,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -176,9 +177,11 @@ fn check_generic_inference_prefers_arg_metadata_over_arg_type_text() {
         keyword_variadic: false,
     }];
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("wrap"),
         arg_count: 1,
         arg_values: vec![typepython_syntax::DirectExprMetadata {
+            call_source_range: None,
             value_type_expr: Some(typepython_syntax::TypeExpr::Generic {
                 head: String::from("list"),
                 args: vec![typepython_syntax::TypeExpr::Name(String::from("int"))],
@@ -277,6 +280,7 @@ fn check_infers_typevartuple_from_variadic_call_arguments() {
     let function = normalize_test_declaration(&function);
     let signature = crate::declaration_signature_sites(&function);
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("collect"),
         arg_count: 2,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -354,6 +358,7 @@ fn check_infers_paramspec_from_callable_argument() {
     let function = normalize_test_declaration(&function);
     let signature = crate::declaration_signature_sites(&function);
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("wrap"),
         arg_count: 1,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -494,6 +499,7 @@ fn check_instantiates_variadic_typevartuple_signature_and_return() {
     };
     let function = normalize_test_declaration(&function);
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("collect"),
         arg_count: 2,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -582,6 +588,7 @@ fn check_infers_typevartuple_inside_tuple_annotation() {
     let function = normalize_test_declaration(&function);
     let signature = crate::declaration_signature_sites(&function);
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("collect"),
         arg_count: 1,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
@@ -703,6 +710,7 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
             ],
             calls: Vec::new(),
             method_calls: vec![typepython_binding::MethodCallSite {
+                source_range: None,
                 current_owner_name: None,
                 current_owner_type_name: None,
                 owner_name: String::from("box"),
@@ -723,6 +731,7 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
             }],
             member_accesses: Vec::new(),
             returns: vec![typepython_binding::ReturnSite {
+                call_source_range: None,
                 owner_name: String::from("run"),
                 owner_type_name: None,
                 value: None,

@@ -546,9 +546,11 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
     }
 
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("choose"),
         arg_count: 1,
         arg_values: vec![typepython_syntax::DirectExprMetadata {
+            call_source_range: None,
             value_type_expr: Some(typepython_syntax::TypeExpr::Generic {
                 head: String::from("dict"),
                 args: vec![

@@ -3299,6 +3299,7 @@ fn direct_expression_semantic_type_unwraps_awaited_call_results() {
             None,
             None,
             None,
+            None,
             false,
             None,
             None,
@@ -3370,6 +3371,7 @@ fn semantic_member_method_and_subscript_resolution_preserve_structured_types() {
             None,
             None,
             1,
+            None,
             "Box",
             "get",
             false,
@@ -3531,6 +3533,7 @@ fn semantic_metadata_resolution_reuses_expression_semantic_path() {
     let graph = build(&[binding]);
     let node = &graph.nodes[0];
     let metadata = typepython_syntax::DirectExprMetadata {
+        call_source_range: None,
         value_type_expr: None,
         is_awaited: true,
         value_callee: Some(String::from("fetch")),
@@ -3606,6 +3609,7 @@ fn semantic_contextual_lambda_resolution_builds_callable_types() {
             keyword_variadic: false,
         }],
         body: Box::new(typepython_syntax::DirectExprMetadata {
+            call_source_range: None,
             value_type_expr: Some(typepython_syntax::TypeExpr::Name(String::from("str"))),
             is_awaited: false,
             value_callee: None,
@@ -3673,9 +3677,11 @@ fn call_diagnostics_resolve_argument_types_through_semantic_path() {
     let graph = build(&[binding]);
     let node = &graph.nodes[0];
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("consume"),
         arg_count: 1,
         arg_values: vec![typepython_syntax::DirectExprMetadata {
+            call_source_range: None,
             value_type_expr: None,
             is_awaited: true,
             value_callee: Some(String::from("fetch")),

@@ -1863,6 +1863,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_binding
         None,
         metadata.is_awaited,
         metadata.value_callee.as_deref(),
+        metadata.call_source_range,
         metadata.value_name.as_deref(),
         metadata.value_member_owner_name.as_deref(),
         metadata.value_member_name.as_deref(),

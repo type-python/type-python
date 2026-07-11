@@ -1214,6 +1214,7 @@ fn resolve_method_call_candidate_instantiates_owner_generic_arguments() {
         })
         .expect("get method should be present");
     let direct_call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("Box.get"),
         arg_count: 0,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
@@ -1279,6 +1280,7 @@ fn instantiated_generic_return_prefers_wider_assignable_type_over_union() {
         })
         .expect("choose function should be present");
     let call = typepython_binding::CallSite {
+        source_range: None,
         callee: String::from("choose"),
         arg_count: 2,
         arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![

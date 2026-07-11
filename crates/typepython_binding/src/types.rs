@@ -186,6 +186,7 @@ pub enum DeclarationMetadata {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct CallSite {
     pub callee: String,
+    pub source_range: Option<typepython_syntax::SourceRange>,
     pub arg_count: usize,
     pub arg_values: Vec<typepython_syntax::DirectExprMetadata>,
     pub starred_arg_values: Vec<typepython_syntax::DirectExprMetadata>,
@@ -196,6 +197,21 @@ pub struct CallSite {
 }
 
 impl CallSite {
+    #[must_use]
+    pub fn matches_source_call(
+        &self,
+        callee: &str,
+        line: usize,
+        source_range: Option<typepython_syntax::SourceRange>,
+    ) -> bool {
+        self.callee == callee
+            && self.line == line
+            && match source_range {
+                Some(source_range) => self.source_range == Some(source_range),
+                None => true,
+            }
+    }
+
     #[must_use]
     pub fn positional_arg_type_texts(&self) -> Vec<String> {
         rendered_direct_expr_type_texts(&self.arg_values)
@@ -235,6 +251,7 @@ pub struct MethodCallSite {
     pub current_owner_type_name: Option<String>,
     pub owner_name: String,
     pub method: String,
+    pub source_range: Option<typepython_syntax::SourceRange>,
     pub through_instance: bool,
     pub arg_count: usize,
     pub arg_values: Vec<typepython_syntax::DirectExprMetadata>,
@@ -246,6 +263,25 @@ pub struct MethodCallSite {
 }
 
 impl MethodCallSite {
+    #[must_use]
+    pub fn matches_source_call(
+        &self,
+        owner_name: &str,
+        method: &str,
+        through_instance: bool,
+        line: usize,
+        source_range: Option<typepython_syntax::SourceRange>,
+    ) -> bool {
+        self.owner_name == owner_name
+            && self.method == method
+            && self.through_instance == through_instance
+            && self.line == line
+            && match source_range {
+                Some(source_range) => self.source_range == Some(source_range),
+                None => true,
+            }
+    }
+
     #[must_use]
     pub fn positional_arg_type_texts(&self) -> Vec<String> {
         rendered_direct_expr_type_texts(&self.arg_values)
@@ -281,6 +317,7 @@ pub struct ReturnSite {
     pub value: Option<typepython_syntax::DirectExprMetadata>,
     pub is_awaited: bool,
     pub value_callee: Option<String>,
+    pub call_source_range: Option<typepython_syntax::SourceRange>,
     pub value_name: Option<String>,
     pub value_member_owner_name: Option<String>,
     pub value_member_name: Option<String>,
@@ -313,6 +350,7 @@ pub struct YieldSite {
     pub owner_type_name: Option<String>,
     pub value: Option<typepython_syntax::DirectExprMetadata>,
     pub value_callee: Option<String>,
+    pub call_source_range: Option<typepython_syntax::SourceRange>,
     pub value_name: Option<String>,
     pub value_member_owner_name: Option<String>,
     pub value_member_name: Option<String>,
@@ -399,6 +437,7 @@ pub struct MatchSite {
     pub subject: Option<typepython_syntax::DirectExprMetadata>,
     pub subject_is_awaited: bool,
     pub subject_callee: Option<String>,
+    pub call_source_range: Option<typepython_syntax::SourceRange>,
     pub subject_name: Option<String>,
     pub subject_member_owner_name: Option<String>,
     pub subject_member_name: Option<String>,
@@ -438,6 +477,7 @@ pub struct ForSite {
     pub iter: Option<typepython_syntax::DirectExprMetadata>,
     pub iter_is_awaited: bool,
     pub iter_callee: Option<String>,
+    pub call_source_range: Option<typepython_syntax::SourceRange>,
     pub iter_name: Option<String>,
     pub iter_member_owner_name: Option<String>,
     pub iter_member_name: Option<String>,
@@ -457,6 +497,7 @@ pub struct WithSite {
     pub context: Option<typepython_syntax::DirectExprMetadata>,
     pub context_is_awaited: bool,
     pub context_callee: Option<String>,
+    pub call_source_range: Option<typepython_syntax::SourceRange>,
     pub context_name: Option<String>,
     pub context_member_owner_name: Option<String>,
     pub context_member_name: Option<String>,
@@ -489,6 +530,7 @@ pub struct AssignmentSite {
     pub value: Option<typepython_syntax::DirectExprMetadata>,
     pub is_awaited: bool,
     pub value_callee: Option<String>,
+    pub call_source_range: Option<typepython_syntax::SourceRange>,
     pub value_name: Option<String>,
     pub value_member_owner_name: Option<String>,
     pub value_member_name: Option<String>,
@@ -526,6 +568,7 @@ impl ReturnSite {
                 value_type_expr: None,
                 is_awaited: self.is_awaited,
                 value_callee: self.value_callee.clone(),
+                call_source_range: self.call_source_range,
                 value_name: self.value_name.clone(),
                 value_member_owner_name: self.value_member_owner_name.clone(),
                 value_member_name: self.value_member_name.clone(),
@@ -563,6 +606,7 @@ impl YieldSite {
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: self.value_callee.clone(),
+                call_source_range: self.call_source_range,
                 value_name: self.value_name.clone(),
                 value_member_owner_name: self.value_member_owner_name.clone(),
                 value_member_name: self.value_member_name.clone(),
@@ -600,6 +644,7 @@ impl MatchSite {
                 value_type_expr: None,
                 is_awaited: self.subject_is_awaited,
                 value_callee: self.subject_callee.clone(),
+                call_source_range: self.call_source_range,
                 value_name: self.subject_name.clone(),
                 value_member_owner_name: self.subject_member_owner_name.clone(),
                 value_member_name: self.subject_member_name.clone(),
@@ -637,6 +682,7 @@ impl ForSite {
                 value_type_expr: None,
                 is_awaited: self.iter_is_awaited,
                 value_callee: self.iter_callee.clone(),
+                call_source_range: self.call_source_range,
                 value_name: self.iter_name.clone(),
                 value_member_owner_name: self.iter_member_owner_name.clone(),
                 value_member_name: self.iter_member_name.clone(),
@@ -674,6 +720,7 @@ impl WithSite {
                 value_type_expr: None,
                 is_awaited: self.context_is_awaited,
                 value_callee: self.context_callee.clone(),
+                call_source_range: self.call_source_range,
                 value_name: self.context_name.clone(),
                 value_member_owner_name: self.context_member_owner_name.clone(),
                 value_member_name: self.context_member_name.clone(),
@@ -716,6 +763,7 @@ impl AssignmentSite {
                 value_type_expr: None,
                 is_awaited: self.is_awaited,
                 value_callee: self.value_callee.clone(),
+                call_source_range: self.call_source_range,
                 value_name: self.value_name.clone(),
                 value_member_owner_name: self.value_member_owner_name.clone(),
                 value_member_name: self.value_member_name.clone(),

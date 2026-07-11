@@ -1,5 +1,13 @@
 use super::*;
 
+pub(super) fn source_range(source: &str, range: ruff_text_size::TextRange) -> SourceRange {
+    let absolute_start = range.start().to_usize();
+    let byte_length = range.end().to_usize().saturating_sub(absolute_start);
+    let line_start = source[..absolute_start].rfind('\n').map_or(0, |index| index + 1);
+    let start = absolute_start - line_start;
+    SourceRange { start, end: start + byte_length }
+}
+
 mod ast_backed;
 mod calls;
 mod control_flow;
